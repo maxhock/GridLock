@@ -1,0 +1,8 @@
+experiment:
+  num_houses: 4
+  broker:
+    name: broker
+  house:
+    csv: /config/sample_house.csv
+  grid:
+    script: GridSimulation.py

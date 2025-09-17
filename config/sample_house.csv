@@ -1,0 +1,27 @@
+#second    topic                type(opt)                    value
+# House load data
+-1.0, house_load, d, 0.3
+0, house_load, 0.3
+3600, house_load, 0.25
+7200, house_load, 0.22
+10800, house_load, 0.21
+14400, house_load, 0.20
+18000, house_load, 0.22
+21600, house_load, 0.28
+25200, house_load, 0.35
+28800, house_load, 0.40
+32400, house_load, 0.38
+36000, house_load, 0.36
+39600, house_load, 0.34
+43200, house_load, 0.33
+46800, house_load, 0.32
+50400, house_load, 0.31
+54000, house_load, 0.32
+57600, house_load, 0.36
+61200, house_load, 0.42
+64800, house_load, 0.50
+68400, house_load, 0.55
+72000, house_load, 0.52
+75600, house_load, 0.45
+79200, house_load, 0.38
+82800, house_load, 0.32
