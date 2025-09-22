@@ -1,140 +1,103 @@
-
 import helics as h
-import logging
-import numpy as np
-import os
+import pandapower as pp
+import pandapower.networks as pn
 
+def create_federate():
+    # 1. Create the pandapower network
+    net = pn.create_kerber_landnetz_freileitung_1()
+    print("Kerber Landnetz Freileitung 1 network created.")
 
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.WARNING)
+    # 2. Create the HELICS federate in code
+    # fedinfo = h.helicsCreateFederateInfo()
+    # h.helicsFederateInfoSetCoreTypeFromString(fedinfo, "zmq")
+    # h.helicsFederateInfoSetCoreInitString(fedinfo, "--federates=1")
+    # h.helicsFederateInfoSetBroker(fedinfo, "broker")
+    # h.helicsFederateInfoSetTimeProperty(fedinfo, h.helics_property_time_delta, 1.0)
+    # h.helicsFederateInfoSetFlagOption(fedinfo, h.helics_flag_uninterruptible, True)
+    # # h.helicsFederateInfoSetFederateName(fedinfo, "pandapower_federate")
+    # fed = h.helicsCreateValueFederate("pandapower_federate", fedinfo)
+    fed = h.helicsCreateValueFederateFromConfig("/config/helics_grid_config.json")
+    print("Created HELICS federate in code.")
 
+    # 3. Register all subscriptions (for p_mw setpoints for each load)
+    load_index_list = list(net.load.index)
+    load_subs = []  # list of (pp_load_idx, helics_input)
+    for pp_idx in load_index_list:
+        sub_key = f"house_{pp_idx}/house_load"
+        sub = h.helicsFederateRegisterSubscription(fed, sub_key, "double")
+        load_subs.append((pp_idx, sub))
+    print(f"Registered {len(load_subs)} HELICS subscriptions for load p_mw setpoints.")
+    print("Subscriptions registered:")
+    for pp_idx, sub in load_subs:
+        key = h.helicsInputGetName(sub)
+        print(f"  Subscription: {key}")
 
-def calculate_net_power_demand(fed, subid, sub_count, grantedtime):
-    """
-    Calculate the net power demand by combining power from all subscribed nodes.
-    
-    :param fed: HELICS federate
-    :param subid: Dictionary of subscription IDs
-    :param sub_count: Number of subscriptions
-    :param grantedtime: Current simulation time
-    :return: Net power demand and individual power demands dictionary
-    """
-    power_demand = {}
-    
-    # Get the total power demand of all nodes
-    for j in range(0, sub_count):
-        logger.debug(f"Node {j + 1} time {grantedtime}")
-        # Count the power of all nodes in the co-simulation
-        power_demand[j] = h.helicsInputGetDouble((subid[j]))
-        logger.debug(f"\tPower demand: {power_demand[j]:.2f} from"
-                    f" input {h.helicsInputGetTarget(subid[j])}")
+    # 4. Register all publications (for ext_grid p_mw)
+    ext_grid_index_list = list(net.ext_grid.index)
+    ext_grid_pubs = []  # list of (pp_ext_idx, helics_pub)
+    for pp_idx in ext_grid_index_list:
+        pub_key = f"Grid/transformer_power"
+        pub = h.helicsFederateRegisterGlobalPublication(fed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW")
+        ext_grid_pubs.append((pp_idx, pub))
+    print(f"Registered {len(ext_grid_pubs)} HELICS publications for ext_grid p_mw.")
+    print("Publications registered:")
+    for pp_idx, pub in ext_grid_pubs:
+        key = h.helicsPublicationGetName(pub)
+        print(f"  Publication: {key}")
 
-    # Combine the power demand from all nodes
-    net_demand = 0
-    for j in range(0, sub_count):
-        net_demand += power_demand[j]
-    
-    return net_demand, power_demand
+    # Return all state needed for simulation
+    return fed, net, load_subs, ext_grid_pubs
 
+def run_federate(fed, net, load_subs, ext_grid_pubs):
+    h.helicsFederateEnterExecutingMode(fed)
+    print("Federate entered execution mode.")
 
-def destroy_federate(fed):
-    """
-    As part of ending a HELICS co-simulation it is good housekeeping to
-    formally destroy a federate. Doing so informs the rest of the
-    federation that it is no longer a part of the co-simulation and they
-    should proceed without it (if applicable). Generally this is done
-    when the co-simulation is complete and all federates end execution
-    at more or less the same wall-clock time.
+    current_time = 0
+    end_time = 82800+3600  # You can adjust this as needed
+    time_step = 3600
 
-    :param fed: Federate to be destroyed
-    :return: (none)
-    """
-    # Adding extra time request to clear out any pending messages to avoid
-    #   annoying errors in the broker log. Any message are tacitly disregarded.
-    grantedtime = h.helicsFederateRequestTime(fed, h.HELICS_TIME_MAXTIME)
-    status = h.helicsFederateDisconnect(fed)
-    h.helicsFederateDestroy(fed)
-    logger.info("Federate finalized")
+    while current_time < end_time:
+        print(f"\n=== HELICS time step: {current_time} ===")
+
+        # a. Update p_mw for each load from HELICS subscriptions
+        for pp_idx, sub in load_subs:
+            if h.helicsInputIsUpdated(sub):
+                value = h.helicsInputGetDouble(sub) / 1000
+                # Only update if a numeric value is provided
+                if value is not None:
+                    net.load.at[pp_idx, "p_mw"] = float(value)
+                    # print(f"Set load {pp_idx} p_mw to {value} from HELICS subscription.")
+
+        # b. Run pandapower power flow
+        pp.runpp(net, numba=False)
+        print("Power flow executed.")
+
+        # c. Publish ext_grid p_mw values to HELICS
+        for pp_idx, pub in ext_grid_pubs:
+            p_mw = net.res_ext_grid.at[pp_idx, "p_mw"]
+            h.helicsPublicationPublishDouble(pub, float(p_mw))
+            print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
+
+        # d. Request next time step
+        current_time = h.helicsFederateRequestTime(fed, current_time + time_step)
+        print(f"Granted time: {current_time}")
+
+    h.helicsFederateFinalize(fed)
+    print("Federate finalized.")
+
+def cleanup_federate(fed):
+    h.helicsFederateDisconnect(fed)
+    # h.helicsCloseLibrary()
+    print("Federate freed and HELICS library closed.")
+
+def main():
+    fed, net, load_subs, ext_grid_pubs = create_federate()
+    try:
+        run_federate(fed, net, load_subs, ext_grid_pubs)
+    except:
+        pass
+    # finally:
+    #     cleanup_federate(fed)
 
 if __name__ == "__main__":
-    np.random.seed(1490)
-
-    ##############  Registering  federate from json  ##########################
-    fed = h.helicsCreateValueFederateFromConfig("/config/GridSimulationConfig.json")
-    federate_name = h.helicsFederateGetName(fed)
-    logger.info(f"Created federate {federate_name}")
-
-    sub_count = h.helicsFederateGetInputCount(fed)
-    logger.debug(f"\tNumber of subscriptions: {sub_count}")
-    pub_count = h.helicsFederateGetPublicationCount(fed)
-    logger.debug(f"\tNumber of publications: {pub_count}")
-
-    # Diagnostics to confirm JSON config correctly added the required
-    #   publications, and subscriptions.
-    subid = {}
-    for i in range(0, sub_count):
-        subid[i] = h.helicsFederateGetInputByIndex(fed, i)
-        sub_name = h.helicsInputGetTarget(subid[i])
-        logger.debug(f"\tRegistered subscription---> {sub_name}")
-
-    pubid = {}
-    for i in range(0, pub_count):
-        pubid[i] = h.helicsFederateGetPublicationByIndex(fed, i)
-        pub_name = h.helicsPublicationGetName(pubid[i])
-        logger.debug(f"\tRegistered publication---> {pub_name}")
-
-    ##############  Entering Execution Mode  ##################################
-    h.helicsFederateEnterExecutingMode(fed)
-    logger.info("Entered HELICS execution mode")
-
-
-
-    hours = 24
-    total_interval = int(60 * 60 * hours)
-    update_interval = int(h.helicsFederateGetTimeProperty(fed, h.HELICS_PROPERTY_TIME_PERIOD))
-    grantedtime = 0
-
-    # Data collection lists
-    time_sim = []
-    power = []
-
-    # Blocking call for a time request at simulation time 0
-    initial_time = 0
-    logger.debug(f"Requesting initial time {initial_time}")
-    grantedtime = h.helicsFederateRequestTime(fed, initial_time)
-    logger.debug(f"Granted time {grantedtime}")
-
-    # Apply initial charging voltage
-    # for j in range(0, pub_count):
-    #     h.helicsPublicationPublishDouble(pubid[j], 0)
-    #     logger.debug(f"\tPublishing {h.helicsPublicationGetName(pubid[j])} of 0.0"
-    #                 f" at time {grantedtime}")
-
-    ########## Main co-simulation loop ########################################
-    # As long as granted time is in the time range to be simulated...
-    while grantedtime < total_interval:
-
-        # Time request for the next physical interval to be simulated
-        requested_time = grantedtime + update_interval
-        logger.debug(f"Requesting time {requested_time}")
-        grantedtime = h.helicsFederateRequestTime(fed, requested_time)
-        logger.debug(f"Granted time {grantedtime}")
-
-        # Calculate net power demand from all nodes
-        net_demand, power_demand = calculate_net_power_demand(fed, subid, sub_count, grantedtime)
-
-        # Publish updated Transformer power
-        for j in range(0, pub_count):
-            logger.debug(f"Node {j + 1} time {grantedtime}")
-            # Publish updated Transformer power
-            h.helicsPublicationPublishDouble(pubid[j], net_demand)
-            logger.debug(f"\tPublishing {h.helicsPublicationGetName(pubid[j])} of {net_demand:.2f}"
-                         f" at time {grantedtime}")
-
-        # Data collection vectors
-        time_sim.append(grantedtime)
-        power.append(net_demand)
-
-    # Cleaning up HELICS stuff once we've finished the co-simulation.
-    destroy_federate(fed)
+    main()

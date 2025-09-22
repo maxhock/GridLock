@@ -56,7 +56,7 @@ docker_grid = {
 services["grid"] = docker_grid
 
 # House services
-for i in range(1, num_houses + 1):
+for i in range(0, num_houses):
     house_name = f"house_{i}"
     docker_house = {
         "build": "${PWD}/house",
@@ -82,10 +82,10 @@ docker_recorder = {
     "networks": ["helics-net"],
     "command": [
         "helics_recorder",
-        "--capture=Grid",
+        "--capture=Grid/transformer_power",
         "--output=/data/output/grid.log",
         "--broker=broker",
-        "--local"
+        # "--local"
     ]
 }
 services["recorder"] = docker_recorder

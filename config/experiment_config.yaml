@@ -1,5 +1,5 @@
 experiment:
-  num_houses: 4
+  num_houses: 13
   broker:
     name: broker
   house:
