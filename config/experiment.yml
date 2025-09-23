@@ -1,0 +1,19 @@
+broker:
+  name: broker
+  federates: ${eval:'${grid.num_nodes}+2'}
+  command: helics_broker --federates=${.federates} --name=${.name} --ipv4
+grid:
+  name: grid
+  grid_file: kerber_freileitung.xlsx
+  command: python GridSimulation.py --name=${.name} --broker=${broker.name} --grid_file=${.grid_file}
+  num_nodes: 5
+house:
+  name: house
+  num_houses: ${grid.num_nodes}
+  input_file: /data/input/sample_house.csv
+  command: helics_player ${.input_file} --broker=${broker.name} --name=${.name} --local
+recorder:
+  name: recorder
+  target: grid
+  output_file: /data/output/${recorder.target}.log
+  command: helics_recorder --name=${.name} --capture=${.target} --output=${.output_file} --broker=${broker.name}
