@@ -1,11 +1,20 @@
 FROM python:3.11-slim
+
+# Set working directory
 WORKDIR /app
-# Install omegaconf and pyyaml for config parsing
-RUN pip install omegaconf pyyaml
-# Create and declare /config as a volume for mounting the host config folder
+
+# Create config mount point
 RUN mkdir /config
 VOLUME ["/config"]
-# Only copy the generator script; config will be mounted at runtime
-COPY generate_compose.py .
+
+# Create data mount point
+RUN mkdir /data
+VOLUME ["/data"]
+
+# Install omegaconf and pyyaml for config parsing
+RUN pip install omegaconf pyyaml
+
+# Copy the main generator script
+COPY main.py .
 # Inform users: /config must be mounted at runtime
-ENTRYPOINT ["python", "generate_compose.py"]
+ENTRYPOINT ["python", "main.py"]
