@@ -63,7 +63,7 @@ def main():
         # Convert OmegaConf to plain dict/list structure for YAML output
         OmegaConf.save(new_conf, f, resolve=False)
 
-    print(f"Generated {compose_path} with {len(new_conf)} services:")
+    print(f"Generated {compose_path} with {len(new_conf['services'])} services:")
     for service_name in new_conf["services"].keys():
         print(f"  - {service_name}")
 
