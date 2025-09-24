@@ -8,4 +8,4 @@ docker build -f composegen/Dockerfile -t composegen composegen
 docker run --rm -v "$(pwd)/config:/config" composegen
 
 # Now launch the experiment with docker compose, pointing at the generated file
-docker compose -f config/tmp/docker-compose.yaml up --build --remove-orphans
+docker compose -f config/tmp/docker-compose.yml up --build --remove-orphans

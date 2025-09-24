@@ -8,7 +8,7 @@
   "publications": [
     {
       "global": true,
-      "key": "Grid/transformer_power",
+      "key": "grid/transformer_power",
       "type": "double",
       "unit": "W"
     }
