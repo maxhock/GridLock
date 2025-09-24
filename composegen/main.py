@@ -28,6 +28,7 @@ def main():
 
 
     OmegaConf.resolve(conf["grid"])
+    OmegaConf.resolve(conf["house"]["build_folder"])
     for i in range(conf["house"]["num_houses"]):
         conf_house_i = conf["house"]
         conf_house_i["name"] = f"house_{i}"
@@ -42,7 +43,7 @@ def main():
             "services":{
                 key:{
                     "container_name": conf[key].name,
-                    "build": "${PWD}/"+f"{conf[key].name.split('_')[0]}",
+                    "build": "${PWD}/"+f"{conf[key].build_folder}",
                     "volumes": [
                         "${PWD}/config:/config",
                         "${PWD}/data:/data"
