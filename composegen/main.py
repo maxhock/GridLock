@@ -28,7 +28,9 @@ def main():
 
 
     OmegaConf.resolve(conf["grid"])
-    OmegaConf.resolve(conf["house"]["build_folder"])
+    # Force evaluation of build_folder to set it prior to creating house instances
+    conf["house"]["build_folder"] = conf["house"]["build_folder"]
+
     for i in range(conf["house"]["num_houses"]):
         conf_house_i = conf["house"]
         conf_house_i["name"] = f"house_{i}"
