@@ -13,7 +13,7 @@ house:
   name: house
   num_houses: ${grid.num_nodes}
   build_folder: ${.name}
-  input_file: /data/input/sample_house.csv
+  input_file: /data/input/h25_profile_2025_power.csv
   command: helics_player ${.input_file} --broker=${broker.name} --name=${.name} --local
 recorder:
   name: recorder
