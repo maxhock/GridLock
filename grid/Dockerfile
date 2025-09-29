@@ -15,6 +15,6 @@ VOLUME ["/data"]
 RUN pip install --no-cache-dir helics[cli] pandapower
 
 # Copy the grid simulation script into the container
-COPY GridSimulation.py .
+COPY main.py .
 # Default command: run the grid simulation Python script
-CMD ["python", "GridSimulation.py"]
+CMD ["python", "main.py"]

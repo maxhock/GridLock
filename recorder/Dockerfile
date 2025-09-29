@@ -13,6 +13,5 @@ VOLUME ["/data"]
 
 # Install HELICS CLI only
 RUN pip install --no-cache-dir helics[cli]
-
 # Default command: run a placeholder (will be overridden by compose)
 CMD ["helics_recorder"]
