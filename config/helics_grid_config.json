@@ -1,11 +1,12 @@
 {
-  "name": "grid",
-  "loglevel": "warning",
-  "coreType": "zmq",
-  "period": 3600,
-  "offset": 0,
-  "broker": "broker",
-  "uninterruptible": false,
-  "terminate_on_error": true,
-  "wait_for_current_time_update": true
+    "name": "grid",
+    "loglevel": "warning",
+    "coreType": "zmq",
+    "period": 3600,
+    "offset": 0,
+    "max_cosim_duration": 82800,
+    "broker": "broker",
+    "uninterruptible": false,
+    "terminate_on_error": true,
+    "wait_for_current_time_update": true
 }
