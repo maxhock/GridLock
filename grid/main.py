@@ -59,7 +59,11 @@ def run_federate(fed, net, load_subs, ext_grid_pubs):
     while current_time < end_time:
         print(f"\n=== HELICS time step: {current_time} ===")
 
-        # a. Update p_mw for each load from HELICS subscriptions
+        # a. Request next time step
+        current_time = h.helicsFederateRequestTime(fed, current_time + time_step)
+        print(f"Granted time: {current_time}")
+
+        # b. Update p_mw for each load from HELICS subscriptions
         for pp_idx, sub in load_subs:
             if h.helicsInputIsUpdated(sub):
                 value = h.helicsInputGetDouble(sub) / 1000
@@ -68,19 +72,16 @@ def run_federate(fed, net, load_subs, ext_grid_pubs):
                     net.load.at[pp_idx, "p_mw"] = float(value)
                     # print(f"Set load {pp_idx} p_mw to {value} from HELICS subscription.")
 
-        # b. Run pandapower power flow
+        # c. Run pandapower power flow
         pp.runpp(net, numba=False)
         print("Power flow executed.")
 
-        # c. Publish ext_grid p_mw values to HELICS
+        # d. Publish ext_grid p_mw values to HELICS
         for pp_idx, pub in ext_grid_pubs:
             p_mw = net.res_ext_grid.at[pp_idx, "p_mw"]
             h.helicsPublicationPublishDouble(pub, float(p_mw))
             print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
 
-        # d. Request next time step
-        current_time = h.helicsFederateRequestTime(fed, current_time + time_step)
-        print(f"Granted time: {current_time}")
 
     h.helicsFederateFinalize(fed)
     print("Federate finalized.")
