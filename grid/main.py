@@ -7,15 +7,7 @@ def create_federate():
     net = pn.create_kerber_landnetz_freileitung_1()
     print("Kerber Landnetz Freileitung 1 network created.")
 
-    # 2. Create the HELICS federate in code
-    # fedinfo = h.helicsCreateFederateInfo()
-    # h.helicsFederateInfoSetCoreTypeFromString(fedinfo, "zmq")
-    # h.helicsFederateInfoSetCoreInitString(fedinfo, "--federates=1")
-    # h.helicsFederateInfoSetBroker(fedinfo, "broker")
-    # h.helicsFederateInfoSetTimeProperty(fedinfo, h.helics_property_time_delta, 1.0)
-    # h.helicsFederateInfoSetFlagOption(fedinfo, h.helics_flag_uninterruptible, True)
-    # # h.helicsFederateInfoSetFederateName(fedinfo, "pandapower_federate")
-    # fed = h.helicsCreateValueFederate("pandapower_federate", fedinfo)
+    # 2. Create the HELICS federate from config file
     fed = h.helicsCreateValueFederateFromConfig("/config/helics_grid_config.json")
     print("Created HELICS federate in code.")
 
@@ -95,10 +87,10 @@ def main():
     fed, net, load_subs, ext_grid_pubs = create_federate()
     try:
         run_federate(fed, net, load_subs, ext_grid_pubs)
-    except:
-        pass
-    # finally:
-    #     cleanup_federate(fed)
+    except Exception as e:
+        print(f"An error occurred during federate execution: {e}")
+    finally:
+        cleanup_federate(fed)
 
 if __name__ == "__main__":
     main()
