@@ -1,0 +1,10 @@
+services:
+  grid-test:
+    build:
+      context: ${PWD}/grid
+      target: test
+
+  composegen-test:
+    build:
+      context: ${PWD}/composegen
+      target: test
