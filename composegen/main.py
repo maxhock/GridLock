@@ -29,7 +29,7 @@ def create_docker_compose(conf, output_path):
 
     if grid_file:
         # Try relative to config, then fallback to CWD
-        excel_path = os.path.join("data/input", grid_file)
+        excel_path = os.path.join("/data", "input", grid_file)
         if os.path.isfile(excel_path):
             try:
                 df = pd.read_excel(excel_path, sheet_name="load", header=0)
