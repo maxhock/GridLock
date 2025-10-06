@@ -13,30 +13,21 @@ import os
 from omegaconf import OmegaConf
 import json
 
-def main():
-    # Configuration paths
-    config_dir = os.environ.get("CONFIG_DIR", "/config")
-    output_dir = os.environ.get("OUTPUT_DIR", os.path.join(config_dir, "tmp"))
-    
-    experiment_path = os.path.join(config_dir, "experiment.yml")
-    compose_path = os.path.join(output_dir, "docker-compose.yml")
-    
-    # Load experiment config with OmegaConf
-    conf = OmegaConf.load(experiment_path)
+
+def create_docker_compose(conf, output_path):
+    """
+    Generate docker-compose YAML from experiment config and save to output_path.
+    """
     fed_conf = OmegaConf.select(conf, "federates")
-    
-    OmegaConf.register_new_resolver("eval", eval)
-
-
+    if not OmegaConf.has_resolver("eval"):
+        OmegaConf.register_new_resolver("eval", eval)
     OmegaConf.resolve(fed_conf["grid"])
-    # Force evaluation of build_folder to set it prior to creating house instances
-    fed_conf["house"]["build_folder"] = fed_conf["house"]["build_folder"]
 
+    fed_conf["house"]["build_folder"] = fed_conf["house"]["build_folder"]
     for i in range(fed_conf["house"]["num_houses"]):
         conf_house_i = fed_conf["house"]
         conf_house_i["name"] = f"house_{i}"
         fed_conf[f"house_{i}"] = conf_house_i
-        
     del fed_conf["house"]
 
     new_conf = OmegaConf.create()
@@ -58,20 +49,18 @@ def main():
                 "helics-net": {
                     "driver": "bridge"
                 }}})
-
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Convert to container and write docker-compose.yml
-    with open(compose_path, 'w') as f:
-        # Convert OmegaConf to plain dict/list structure for YAML output
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
         OmegaConf.save(new_conf, f, resolve=False)
-
-    print(f"Generated {compose_path} with {len(new_conf['services'])} services:")
+    print(f"Generated {output_path} with {len(new_conf['services'])} services:")
     for service_name in new_conf["services"].keys():
         print(f"  - {service_name}")
 
-    # Generate helics_grid_config.yaml with the same structure as the existing file
+def create_grid_config(conf, output_path):
+    """
+    Generate grid config JSON from experiment config and save to output_path.
+    """
+    fed_conf = OmegaConf.select(conf, "federates")
     grid_config = {
         "name": fed_conf["grid"]["name"] if "grid" in fed_conf else "grid",
         "loglevel": "warning",
@@ -84,14 +73,24 @@ def main():
         "terminate_on_error": True,
         "wait_for_current_time_update": True
     }
-
-    grid_config_path = os.path.join(config_dir, "helics_grid_config.json")
-    with open(grid_config_path, "w") as f:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
         json.dump(grid_config, f, indent=4)
-    print(f"Generated {grid_config_path} with grid config:")
+    print(f"Generated {output_path} with grid config:")
     print(json.dumps(grid_config, indent=4))
 
-    
+def main(config_path, output_dir):
+    """
+    Main entry: loads config, generates docker-compose and grid config files.
+    """
+    conf = OmegaConf.load(config_path)
+    compose_path = os.path.join(output_dir, "docker-compose.yml")
+    grid_config_path = os.path.join(os.path.dirname(config_path), "helics_grid_config.json")
+    create_docker_compose(conf, compose_path)
+    create_grid_config(conf, grid_config_path)
 
 if __name__ == "__main__":
-    main()
+    config_dir = os.environ.get("CONFIG_DIR", "/config")
+    output_dir = os.environ.get("OUTPUT_DIR", os.path.join(config_dir, "tmp"))
+    experiment_path = os.path.join(config_dir, "experiment.yml")
+    main(experiment_path, output_dir)
