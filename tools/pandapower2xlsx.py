@@ -1,7 +1,6 @@
+#!/usr/bin/env python3
 import os
 import pandapower as pp
-
-#!/usr/bin/env python3
 # File: tools/pandapower2xlsx.py
 # Purpose: load a pandapower default network and export it to ../data/input
 
