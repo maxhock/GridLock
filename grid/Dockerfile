@@ -12,7 +12,7 @@ RUN mkdir /data
 VOLUME ["/data"]
 
 # Install HELICS CLI and pandapower
-RUN pip install --no-cache-dir helics[cli] pandapower
+RUN pip install --no-cache-dir helics[cli] pandapower openpyxl
 
 # Copy the grid simulation script into the container
 COPY main.py .

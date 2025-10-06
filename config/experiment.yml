@@ -7,9 +7,8 @@ federates:
   grid:
     name: grid
     build_folder: ${.name}
-    grid_file: kerber_freileitung.xlsx
+    grid_file: kerber_landnetz_freileitung_1.xlsx
     command: python main.py --name=${.name} --broker=${..broker.name} --grid_file=${.grid_file}
-    num_nodes: 13
   house:
     name: house
     num_houses: ${..grid.num_nodes}

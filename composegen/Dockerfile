@@ -11,8 +11,8 @@ VOLUME ["/config"]
 RUN mkdir /data
 VOLUME ["/data"]
 
-# Install omegaconf and pyyaml for config parsing
-RUN pip install omegaconf pyyaml
+# Install omegaconf, pyyaml, pandas, and openpyxl for config parsing and Excel reading
+RUN pip install omegaconf pyyaml pandas openpyxl
 
 # Copy the main generator script
 COPY main.py .
@@ -28,7 +28,6 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Copy only production files (main.py)
 # Inform users: /config must be mounted at runtime
 ENTRYPOINT ["python", "main.py"]
 

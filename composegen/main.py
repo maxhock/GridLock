@@ -12,12 +12,37 @@ Reads config/experiment.yml and creates services for:
 import os
 from omegaconf import OmegaConf
 import json
-
+import pandas as pd
 
 def create_docker_compose(conf, output_path):
     """
     Generate docker-compose YAML from experiment config and save to output_path.
     """
+
+    # Compute num_nodes from Excel if grid_file is specified
+    fed_conf = OmegaConf.select(conf, "federates")
+
+    try:
+        grid_file = fed_conf["grid"]["grid_file"]
+    except Exception:
+        grid_file = None
+
+    if grid_file:
+        # Try relative to config, then fallback to CWD
+        excel_path = os.path.join("/data", "input", grid_file)
+        if os.path.isfile(excel_path):
+            try:
+                df = pd.read_excel(excel_path, sheet_name="load", header=0)
+                num_nodes = len(df)
+                print(f"Detected {num_nodes} nodes from {grid_file} (load sheet).")
+                conf["federates"]["grid"]["num_nodes"] = int(num_nodes)
+            except Exception as e:
+                print(f"WARNING: Could not read load sheet from {grid_file}: {e}")
+        else:
+            print(f"No valid grid_file found at {excel_path}; using num_nodes from config.")
+    else:
+        print("No grid_file specified in config; using num_nodes from config.")
+
     fed_conf = OmegaConf.select(conf, "federates")
     if not OmegaConf.has_resolver("eval"):
         OmegaConf.register_new_resolver("eval", eval)
@@ -84,6 +109,7 @@ def main(config_path, output_dir):
     Main entry: loads config, generates docker-compose and grid config files.
     """
     conf = OmegaConf.load(config_path)
+
     compose_path = os.path.join(output_dir, "docker-compose.yml")
     grid_config_path = os.path.join(os.path.dirname(config_path), "helics_grid_config.json")
     create_docker_compose(conf, compose_path)

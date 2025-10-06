@@ -4,6 +4,7 @@ import json
 import pytest
 from omegaconf import OmegaConf
 from main import create_docker_compose, create_grid_config, main
+import pandas as pd
 
 MINIMAL_CONF = {
     "general": {
@@ -62,7 +63,62 @@ def test_create_grid_config(tmp_path):
     assert grid_conf["max_cosim_duration"] == 10
     assert grid_conf["broker"] == "broker"
 
-def test_main_integration(tmp_path):
+def test_excel_node_counting(tmp_path, monkeypatch):
+    # Create a mock Excel file with a 'load' sheet of 5 rows
+    df = pd.DataFrame({'bus': [1,2,3,4,5], 'p_mw': [0,0,0,0,0]})
+    excel_path = tmp_path / "test_grid.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        df.to_excel(writer, sheet_name="load", index=False)
+    # Config with grid_file
+    conf = OmegaConf.create(MINIMAL_CONF)
+    conf["federates"]["grid"]["grid_file"] = os.path.basename(excel_path)
+    # Patch data/input to tmp_path
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("data/input", exist_ok=True)
+    os.rename(excel_path, f"data/input/{os.path.basename(excel_path)}")
+    output_path = tmp_path / "docker-compose.yml"
+    create_docker_compose(conf, str(output_path))
+    # num_nodes should be set to 5
+    assert conf["federates"]["grid"]["num_nodes"] == 5
+
+def test_excel_missing_file_fallback(tmp_path, capsys):
+    conf = OmegaConf.create(MINIMAL_CONF)
+    conf["federates"]["grid"]["grid_file"] = "nonexistent.xlsx"
+    output_path = tmp_path / "docker-compose.yml"
+    create_docker_compose(conf, str(output_path))
+    # Should fallback to config value, print warning
+    captured = capsys.readouterr()
+    assert "No valid grid_file found" in captured.out
+
+def test_excel_missing_load_sheet(tmp_path, capsys):
+    # Excel file with no 'load' sheet
+    df = pd.DataFrame({'foo': [1,2,3]})
+    excel_path = tmp_path / "test_grid.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        df.to_excel(writer, sheet_name="notload", index=False)
+    conf = OmegaConf.create(MINIMAL_CONF)
+    conf["federates"]["grid"]["grid_file"] = os.path.basename(excel_path)
+    os.makedirs("data/input", exist_ok=True)
+    os.rename(excel_path, f"data/input/{os.path.basename(excel_path)}")
+    output_path = tmp_path / "docker-compose.yml"
+    create_docker_compose(conf, str(output_path))
+    captured = capsys.readouterr()
+    assert "Could not read load sheet" in captured.out
+
+def test_excel_empty_load_sheet(tmp_path, capsys):
+    # Excel file with empty 'load' sheet
+    df = pd.DataFrame({})
+    excel_path = tmp_path / "test_grid.xlsx"
+    with pd.ExcelWriter(excel_path) as writer:
+        df.to_excel(writer, sheet_name="load", index=False)
+    conf = OmegaConf.create(MINIMAL_CONF)
+    conf["federates"]["grid"]["grid_file"] = os.path.basename(excel_path)
+    os.makedirs("data/input", exist_ok=True)
+    os.rename(excel_path, f"data/input/{os.path.basename(excel_path)}")
+    output_path = tmp_path / "docker-compose.yml"
+    create_docker_compose(conf, str(output_path))
+    captured = capsys.readouterr()
+    assert "Detected 0 nodes" in captured.out
     # Write config to file
     config_path = tmp_path / "experiment.yml"
     with open(config_path, "w") as f:
