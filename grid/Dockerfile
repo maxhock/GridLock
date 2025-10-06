@@ -29,8 +29,6 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Copy only production files (main.py)
-COPY --from=base /app/main.py .
 # Default command: run the grid simulation Python script
 CMD ["python", "main.py"]
 
