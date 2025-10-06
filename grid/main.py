@@ -103,6 +103,9 @@ def cleanup_federate(fed):
 
 def main():
     args = parse_args()
+    if args.grid_file is None:
+        print("Error: --grid_file argument is required.")
+        exit(1)
     grid_path = os.path.join("/data", "input", args.grid_file)
     fed, net, load_subs, ext_grid_pubs = create_federate(grid_path)
     try:
