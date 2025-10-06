@@ -7,11 +7,11 @@ This project provides a fully containerized, reproducible, and config-driven HEL
 
 ## Quick Start
 
-1. **Edit your experiment parameters** in `config/experiment_config.yaml`.
+1. **Edit your experiment parameters** in `config/experiment.yml`.
 
 2. **Run the experiment:**
         ```bash
-        ./run_with_composegen.sh
+        ./run.sh
         ```
         This will:
         - Build the compose generator image.
@@ -19,7 +19,7 @@ This project provides a fully containerized, reproducible, and config-driven HEL
         - Build and launch all federates (broker, grid, houses, recorder) as containers.
 
 3. **View results:**
-        - Simulation data is recorded by the recorder federate and written to `data/output/transformer_power.log`.
+        - Simulation data is recorded by the recorder federate and written to the output file specified in your config (default location may be `data/` or as configured).
 
 4. **Clean up:**
         ```bash
@@ -39,16 +39,16 @@ This project provides a fully containerized, reproducible, and config-driven HEL
 
 ## Configuration
 
-All runtime parameters are set in `config/experiment_config.yaml`. Example:
+All runtime parameters are set in `config/experiment.yml`. Example:
 ```yaml
 experiment:
-    num_houses: 4
-    broker:
-        name: broker
-    house:
-        csv: /config/sample_house.csv
-    grid:
-        script: GridSimulation.py
+        num_houses: 4
+        broker:
+                name: broker
+        house:
+                csv: /config/sample_house.csv
+        grid:
+                script: GridSimulation.py
 ```
 - Change `num_houses` to set the number of house federates.
 - The broker, grid federate and recorder are always included.
@@ -57,7 +57,7 @@ experiment:
 
 - The compose generator reads your config and generates a Docker Compose file with the correct number of federates and all runtime parameters.
 - Each federate (grid, house, recorder, broker) runs in its own container.
-- The recorder subscribes to `Grid` and writes results to `data/output/grid.log`.
+- The recorder subscribes to `Grid` and writes results to the output file as configured (default may be in `data/`).
 - All configuration and results are mounted from the host for easy access and reproducibility.
 
 ## Requirements
@@ -67,7 +67,7 @@ experiment:
 
 ## Extending
 
-- Edit `config/experiment_config.yaml` to change experiment parameters.
+- Edit `config/experiment.yml` to change experiment parameters.
 - Add new federates by extending the config and compose generator.
 - Add new recorder topics by editing the recorder command in the compose generator.
 - All logic is modular and config-driven for easy experimentation.

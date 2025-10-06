@@ -1,11 +1,32 @@
+
 import helics as h
 import pandapower as pp
 import pandapower.networks as pn
+import argparse
+import os
 
-def create_federate():
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Grid federate for HELICS co-simulation.")
+    parser.add_argument("--grid_file", type=str, default=None, help="Path to pandapower Excel file.")
+    args, unknown = parser.parse_known_args()
+    return args
+
+
+
+def create_federate(grid_file=None):
     # 1. Create the pandapower network
-    net = pn.create_kerber_landnetz_freileitung_1()
-    print("Kerber Landnetz Freileitung 1 network created.")
+    net = None
+    if grid_file:
+        if os.path.isfile(grid_file):
+            print(f"Loading pandapower network from Excel: {grid_file}")
+            net = pp.from_excel(grid_file)
+            print("Custom pandapower network provided.")
+        else:
+            print(f"ERROR: grid_file '{grid_file}' not found. Using built-in Kerber Landnetz Freileitung 1 network.")
+    if net is None:
+        net = pn.create_kerber_landnetz_freileitung_1()
+        print("Kerber Landnetz Freileitung 1 network created.")
 
     # 2. Create the HELICS federate from config file
     fed = h.helicsCreateValueFederateFromConfig("/config/helics_grid_config.json")
@@ -84,7 +105,8 @@ def cleanup_federate(fed):
     print("Federate freed and HELICS library closed.")
 
 def main():
-    fed, net, load_subs, ext_grid_pubs = create_federate()
+    args = parse_args()
+    fed, net, load_subs, ext_grid_pubs = create_federate(args.grid_file)
     try:
         run_federate(fed, net, load_subs, ext_grid_pubs)
     except Exception as e:

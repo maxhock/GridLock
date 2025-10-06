@@ -1,3 +1,5 @@
+import sys
+import os
 import pytest
 
 
@@ -59,3 +61,10 @@ def test_main_runs(mocker):
     mocker.patch.object(grid_main, 'run_federate', return_value=None)
     mocker.patch.object(grid_main, 'cleanup_federate', return_value=None)
     grid_main.main()
+
+
+def test_parse_args(monkeypatch):
+    test_args = ["main.py", "--grid_file", "test.xlsx"]
+    monkeypatch.setattr(sys, "argv", test_args)
+    args = grid_main.parse_args()
+    assert args.grid_file == "test.xlsx"
