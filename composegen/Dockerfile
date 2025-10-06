@@ -29,7 +29,6 @@ RUN pytest --maxfail=1 --disable-warnings -v
 # --- Final image ---
 FROM base AS final
 # Copy only production files (main.py)
-COPY --from=base /app/main.py .
 # Inform users: /config must be mounted at runtime
 ENTRYPOINT ["python", "main.py"]
 
