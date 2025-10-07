@@ -4,6 +4,7 @@ repos:
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --explicit-package-bases]
+        additional_dependencies: [types-PyYAML]
         exclude: '\.ipynb$'
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
