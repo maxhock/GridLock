@@ -10,7 +10,7 @@ repos:
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.12.5
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix, --line-length=88, --unsafe-fixes]
         exclude: '\.ipynb$'
 
