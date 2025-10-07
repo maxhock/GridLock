@@ -1,17 +1,18 @@
-
 import helics as h
 import pandapower as pp
-import pandapower.networks as pn
 import argparse
 import os
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Grid federate for HELICS co-simulation.")
-    parser.add_argument("--grid_file", type=str, default=None, help="Path to pandapower Excel file.")
+    parser = argparse.ArgumentParser(
+        description="Grid federate for HELICS co-simulation."
+    )
+    parser.add_argument(
+        "--grid_file", type=str, default=None, help="Path to pandapower Excel file."
+    )
     args, unknown = parser.parse_known_args()
     return args
-
 
 
 def create_federate(grid_path=None):
@@ -46,8 +47,10 @@ def create_federate(grid_path=None):
     ext_grid_index_list = list(net.ext_grid.index)
     ext_grid_pubs = []  # list of (pp_ext_idx, helics_pub)
     for pp_idx in ext_grid_index_list:
-        pub_key = f"Grid/transformer_power"
-        pub = h.helicsFederateRegisterGlobalPublication(fed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW")
+        pub_key = "Grid/transformer_power"
+        pub = h.helicsFederateRegisterGlobalPublication(
+            fed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
+        )
         ext_grid_pubs.append((pp_idx, pub))
     print(f"Registered {len(ext_grid_pubs)} HELICS publications for ext_grid p_mw.")
     print("Publications registered:")
@@ -58,12 +61,13 @@ def create_federate(grid_path=None):
     # Return all state needed for simulation
     return fed, net, load_subs, ext_grid_pubs
 
+
 def run_federate(fed, net, load_subs, ext_grid_pubs):
     h.helicsFederateEnterExecutingMode(fed)
     print("Federate entered execution mode.")
 
     current_time = 0
-    end_time = 82800+3600  # You can adjust this as needed
+    end_time = 82800 + 3600  # You can adjust this as needed
     time_step = 3600
 
     while current_time < end_time:
@@ -92,14 +96,15 @@ def run_federate(fed, net, load_subs, ext_grid_pubs):
             h.helicsPublicationPublishDouble(pub, float(p_mw))
             print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
 
-
     h.helicsFederateFinalize(fed)
     print("Federate finalized.")
+
 
 def cleanup_federate(fed):
     h.helicsFederateDisconnect(fed)
     # h.helicsCloseLibrary()
     print("Federate freed and HELICS library closed.")
+
 
 def main():
     args = parse_args()
@@ -114,6 +119,7 @@ def main():
         print(f"An error occurred during federate execution: {e}")
     finally:
         cleanup_federate(fed)
+
 
 if __name__ == "__main__":
     main()
