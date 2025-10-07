@@ -1,0 +1,4 @@
+helics
+gymnasium
+pyyaml
+git+https://github.com/phierhager/EnergySim.git
