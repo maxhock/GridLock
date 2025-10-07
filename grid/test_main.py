@@ -1,7 +1,6 @@
 import sys
-import os
 import pytest
-
+import main as grid_main
 
 # Auto-mock helics and pandapower modules for all tests
 @pytest.fixture(autouse=True)
@@ -14,8 +13,6 @@ def patch_helics_and_pandapower(mocker):
     }
     mocker.patch.dict(sys.modules, modules_patch)
     yield
-
-import main as grid_main
 
 def test_create_federate(mocker):
     """Unit: create_federate returns correct structure and uses HELICS API."""
