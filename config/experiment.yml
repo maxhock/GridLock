@@ -2,7 +2,7 @@ federates:
   broker:
     name: broker
     build_folder: ${.name}
-    federates: ${eval:'${..grid.num_nodes}+2'}
+    federates: ${eval:'${..grid.num_nodes} + 3'} # TODO autocalculate int main.py
     command: helics_broker --federates=${.federates} --name=${.name} --ipv4
   grid:
     name: grid
@@ -15,6 +15,10 @@ federates:
     build_folder: ${.name}
     input_file: /data/input/sample_house.csv
     command: helics_player ${.input_file} --broker=${..broker.name} --name=${.name} --local
+  forecasting:
+    name: forecasting  
+    build_folder: ${.name}    
+    command: python main.py --broker=${..broker.name} --name=${.name}
   recorder:
     name: recorder
     build_folder: ${.name}
