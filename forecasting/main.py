@@ -1,15 +1,23 @@
+import time
 import helics as h
+import requests
+import json
 from typing import Tuple, List
 
+from forecasting import ForecastInput, predict_agg_load
 
-def create_federate() -> Tuple[h.HelicsFederate, List[Tuple[int, h.HelicsInput]]]:
+
+def create_federate() -> (
+    Tuple[h.HelicsFederate, List[Tuple[int, h.HelicsInput]], h.HelicsPublication]
+):
     fed_info = h.helicsCreateFederateInfo()
     h.helicsFederateInfoSetCoreName(fed_info, "Forecaster")
     h.helicsFederateInfoSetCoreTypeFromString(fed_info, "zmq")
     h.helicsFederateInfoSetBroker(fed_info, "broker")  # Add broker connection
-    fed = h.helicsCreateValueFederate(
-        "Forecaster", fed_info
-    )  # TODO should match corename?
+
+    h.helicsFederateInfoSetFlagOption(fed_info, h.HELICS_FLAG_ENABLE_INIT_ENTRY, True)
+
+    fed = h.helicsCreateValueFederate("Forecasting", fed_info)
 
     # TODO for now only subscribe
     load_subs = []  # list of (pp_load_idx, helics_input)
@@ -18,21 +26,29 @@ def create_federate() -> Tuple[h.HelicsFederate, List[Tuple[int, h.HelicsInput]]
         sub = h.helicsFederateRegisterSubscription(fed, sub_key, "double")
         load_subs.append((pp_idx, sub))
 
-    return fed, load_subs
+    # Create publication for total load forecast
+    forecast_pub = h.helicsFederateRegisterPublication(
+        fed, "Forecaster/total_load_forecast", h.HELICS_DATA_TYPE_DOUBLE, ""
+    )
+
+    print("Registered forecasting publication: Forecaster/total_load_forecast")
+
+    return fed, load_subs, forecast_pub
 
 
 def run_federate(
-    fed: h.HelicsFederate, load_subs: List[Tuple[int, h.HelicsInput]]
+    fed: h.HelicsFederate,
+    load_subs: List[Tuple[int, h.HelicsInput]],
+    forecast_pub: h.HelicsPublication,
 ) -> None:
-    print("🚀 Forecasting federate entering execution mode...")
+    print("Forecasting federate entering execution mode...")
     h.helicsFederateEnterExecutingMode(fed)
-    print("✅ Successfully entered execution mode!")
-    print(f"📡 Monitoring {len(load_subs)} house load subscriptions...")
+    print("Successfully entered execution mode!")
 
     # Print all subscription keys we're listening to
     for pp_idx, sub in load_subs:
         key = h.helicsInputGetName(sub)
-        print(f"  📻 Listening to: {key}")
+        print(f"Listening to: {key}")
 
     # TODO should be centralised?
     current_time = 0
@@ -46,16 +62,33 @@ def run_federate(
         current_time = h.helicsFederateRequestTime(fed, current_time + time_step)
         print(f"Granted time: {current_time}")
 
+        current_loads = []
         # b. Update p_mw for each load from HELICS subscriptions
+        # TODO error handling
         for pp_idx, sub in load_subs:
             if h.helicsInputIsUpdated(sub):
                 value = h.helicsInputGetDouble(sub) / 1000
                 # Only update if a numeric value is provided
                 if value is not None:
-                    # net.load.at[pp_idx, "p_mw"] = float(value)
+
+                    current_loads.append(value)
                     print(
                         f"Set load {pp_idx} p_mw to {value} from HELICS subscription."
                     )
+
+                # FORECAST: Generate prediction
+        forecast_input = ForecastInput(
+            current_loads=current_loads, current_time=current_time, time_step=time_step
+        )
+
+        forecast_output = predict_agg_load(forecast_input=forecast_input)
+        h.helicsPublicationPublishDouble(
+            forecast_pub, forecast_output.total_load_forecast
+        )
+
+        print(
+            f"📤 Published total load forecast: {forecast_output.total_load_forecast:.6f} MW "
+        )
 
     h.helicsFederateFinalize(fed)
     print("Federate finalized.")
@@ -68,10 +101,10 @@ def cleanup_federate(fed: h.HelicsFederate) -> None:
 
 
 def main() -> None:
-
-    fed, load_subs = create_federate()
+    fed, load_subs, forecast_pub = create_federate()
     try:
-        run_federate(fed, load_subs)
+
+        run_federate(fed, load_subs, forecast_pub)
     except Exception as e:
         print(f"An error occurred during federate execution: {e}")
     finally:
@@ -79,6 +112,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # NOTES
-    # What is runtime for inner loop? Should be same for all?
     main()
