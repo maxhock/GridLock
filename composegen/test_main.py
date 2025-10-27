@@ -1,40 +1,24 @@
 import os
 import yaml
 import json
-import pytest
 from omegaconf import OmegaConf
 from main import create_docker_compose, create_grid_config, main
 import pandas as pd
 
 MINIMAL_CONF = {
-    "general": {
-        "time_step": 1,
-        "start_time": 0,
-        "end_time": 10
-    },
+    "general": {"time_step": 1, "start_time": 0, "end_time": 10},
     "federates": {
-        "broker": {
-            "name": "broker",
-            "build_folder": "broker",
-            "command": "run-broker"
-        },
-        "grid": {
-            "name": "grid",
-            "build_folder": "grid",
-            "command": "run-grid"
-        },
-        "house": {
-            "build_folder": "house",
-            "command": "run-house",
-            "num_houses": 1
-        },
+        "broker": {"name": "broker", "build_folder": "broker", "command": "run-broker"},
+        "grid": {"name": "grid", "build_folder": "grid", "command": "run-grid"},
+        "house": {"build_folder": "house", "command": "run-house", "num_houses": 1},
         "recorder": {
             "name": "recorder",
             "build_folder": "recorder",
-            "command": "run-recorder"
-        }
-    }
+            "command": "run-recorder",
+        },
+    },
 }
+
 
 def test_create_docker_compose(tmp_path):
     conf = OmegaConf.create(MINIMAL_CONF)
@@ -50,6 +34,7 @@ def test_create_docker_compose(tmp_path):
     assert services["grid"]["container_name"] == "grid"
     assert "helics-net" in compose["networks"]
 
+
 def test_create_grid_config(tmp_path):
     conf = OmegaConf.create(MINIMAL_CONF)
     output_path = tmp_path / "helics_grid_config.json"
@@ -63,9 +48,10 @@ def test_create_grid_config(tmp_path):
     assert grid_conf["max_cosim_duration"] == 10
     assert grid_conf["broker"] == "broker"
 
+
 def test_excel_node_counting(tmp_path, monkeypatch):
     # Create a mock Excel file with a 'load' sheet of 5 rows
-    df = pd.DataFrame({'bus': [1,2,3,4,5], 'p_mw': [0,0,0,0,0]})
+    df = pd.DataFrame({"bus": [1, 2, 3, 4, 5], "p_mw": [0, 0, 0, 0, 0]})
     excel_path = tmp_path / "test_grid.xlsx"
     with pd.ExcelWriter(excel_path) as writer:
         df.to_excel(writer, sheet_name="load", index=False)
@@ -81,6 +67,7 @@ def test_excel_node_counting(tmp_path, monkeypatch):
     # num_nodes should be set to 5
     assert conf["federates"]["grid"]["num_nodes"] == 5
 
+
 def test_excel_missing_file_fallback(tmp_path, capsys):
     conf = OmegaConf.create(MINIMAL_CONF)
     conf["federates"]["grid"]["grid_file"] = "nonexistent.xlsx"
@@ -90,9 +77,10 @@ def test_excel_missing_file_fallback(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "No valid grid_file found" in captured.out
 
+
 def test_excel_missing_load_sheet(tmp_path, capsys):
     # Excel file with no 'load' sheet
-    df = pd.DataFrame({'foo': [1,2,3]})
+    df = pd.DataFrame({"foo": [1, 2, 3]})
     excel_path = tmp_path / "test_grid.xlsx"
     with pd.ExcelWriter(excel_path) as writer:
         df.to_excel(writer, sheet_name="notload", index=False)
@@ -104,6 +92,7 @@ def test_excel_missing_load_sheet(tmp_path, capsys):
     create_docker_compose(conf, str(output_path))
     captured = capsys.readouterr()
     assert "Could not read load sheet" in captured.out
+
 
 def test_excel_empty_load_sheet(tmp_path, capsys):
     # Excel file with empty 'load' sheet

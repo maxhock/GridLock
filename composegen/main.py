@@ -14,6 +14,7 @@ from omegaconf import OmegaConf
 import json
 import pandas as pd
 
+
 def create_docker_compose(conf, output_path):
     """
     Generate docker-compose YAML from experiment config and save to output_path.
@@ -39,7 +40,9 @@ def create_docker_compose(conf, output_path):
             except Exception as e:
                 print(f"WARNING: Could not read load sheet from {grid_file}: {e}")
         else:
-            print(f"No valid grid_file found at {excel_path}; using num_nodes from config.")
+            print(
+                f"No valid grid_file found at {excel_path}; using num_nodes from config."
+            )
     else:
         print("No grid_file specified in config; using num_nodes from config.")
 
@@ -58,28 +61,28 @@ def create_docker_compose(conf, output_path):
     new_conf = OmegaConf.create()
     OmegaConf.resolve(fed_conf)
     for key in fed_conf:
-        new_conf = OmegaConf.merge(new_conf,{
-            "services":{
-                key:{
-                    "container_name": fed_conf[key].name,
-                    "build": "${PWD}/"+f"{fed_conf[key].build_folder}",
-                    "volumes": [
-                        "${PWD}/config:/config",
-                        "${PWD}/data:/data"
-                    ],
-                    "networks": ["helics-net"],
-                    "command": fed_conf[key].command
-                }},
-            "networks": {
-                "helics-net": {
-                    "driver": "bridge"
-                }}})
+        new_conf = OmegaConf.merge(
+            new_conf,
+            {
+                "services": {
+                    key: {
+                        "container_name": fed_conf[key].name,
+                        "build": "${PWD}/" + f"{fed_conf[key].build_folder}",
+                        "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                        "networks": ["helics-net"],
+                        "command": fed_conf[key].command,
+                    }
+                },
+                "networks": {"helics-net": {"driver": "bridge"}},
+            },
+        )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         OmegaConf.save(new_conf, f, resolve=False)
     print(f"Generated {output_path} with {len(new_conf['services'])} services:")
     for service_name in new_conf["services"].keys():
         print(f"  - {service_name}")
+
 
 def create_grid_config(conf, output_path):
     """
@@ -92,17 +95,19 @@ def create_grid_config(conf, output_path):
         "coreType": "zmq",
         "period": conf["general"]["time_step"],
         "offset": conf["general"]["start_time"],
-        "max_cosim_duration": conf["general"]["end_time"] - conf["general"]["start_time"],
+        "max_cosim_duration": conf["general"]["end_time"]
+        - conf["general"]["start_time"],
         "broker": fed_conf["broker"]["name"] if "broker" in fed_conf else "broker",
         "uninterruptible": False,
         "terminate_on_error": True,
-        "wait_for_current_time_update": True
+        "wait_for_current_time_update": True,
     }
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(grid_config, f, indent=4)
     print(f"Generated {output_path} with grid config:")
     print(json.dumps(grid_config, indent=4))
+
 
 def main(config_path, output_dir):
     """
@@ -111,9 +116,12 @@ def main(config_path, output_dir):
     conf = OmegaConf.load(config_path)
 
     compose_path = os.path.join(output_dir, "docker-compose.yml")
-    grid_config_path = os.path.join(os.path.dirname(config_path), "helics_grid_config.json")
+    grid_config_path = os.path.join(
+        os.path.dirname(config_path), "helics_grid_config.json"
+    )
     create_docker_compose(conf, compose_path)
     create_grid_config(conf, grid_config_path)
+
 
 if __name__ == "__main__":
     config_dir = os.environ.get("CONFIG_DIR", "/config")
