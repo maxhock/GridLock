@@ -1,0 +1,186 @@
+services:
+  broker:
+    container_name: broker
+    build: ${PWD}/broker
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_broker --federates=16 --name=broker --ipv4 
+    ports:
+    - 8080:8080
+  grid:
+    container_name: grid
+    build: ${PWD}/grid
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: python main.py --name=grid --broker=broker --grid_file=kerber_landnetz_freileitung_1.xlsx    
+  fastapi-server:
+    container_name: fastapi-server
+    build: ${PWD}/fastapi_server
+    ports:
+    - 8000:8000
+    networks:
+    - helics-net
+
+  forecasting:
+    container_name: forecasting
+    build: ${PWD}/forecasting
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: python main.py --broker=broker --name=forecasting    
+    env_file:
+    - ${PWD}/.env 
+    environment:      
+    - FASTAPI_HOST=${FASTAPI_HOST:-fastapi-server}
+    - FASTAPI_PORT=${FASTAPI_PORT:-8000}
+  recorder:
+    container_name: recorder
+    build: ${PWD}/recorder
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_recorder --name=recorder --capture=grid --output=/data/output/grid.log
+      --broker=broker
+  house_0:
+    container_name: house_0
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_0
+      --local
+  house_1:
+    container_name: house_1
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_1
+      --local
+  house_2:
+    container_name: house_2
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_2
+      --local
+  house_3:
+    container_name: house_3
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_3
+      --local
+  house_4:
+    container_name: house_4
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_4
+      --local
+  house_5:
+    container_name: house_5
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_5
+      --local
+  house_6:
+    container_name: house_6
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_6
+      --local
+  house_7:
+    container_name: house_7
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_7
+      --local
+  house_8:
+    container_name: house_8
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_8
+      --local
+  house_9:
+    container_name: house_9
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_9
+      --local
+  house_10:
+    container_name: house_10
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_10
+      --local
+  house_11:
+    container_name: house_11
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_11
+      --local
+  house_12:
+    container_name: house_12
+    build: ${PWD}/house
+    volumes:
+    - ${PWD}/config:/config
+    - ${PWD}/data:/data
+    networks:
+    - helics-net
+    command: helics_player /data/input/sample_house.csv --broker=broker --name=house_12
+      --local
+networks:
+  helics-net:
+    driver: bridge

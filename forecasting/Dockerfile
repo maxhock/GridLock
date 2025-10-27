@@ -11,12 +11,14 @@ VOLUME ["/config"]
 RUN mkdir /data
 VOLUME ["/data"]
 
-# TODO check what to install
-# Install HELICS CLI and pandapower
-RUN pip install --no-cache-dir helics[cli] pandapower openpyxl lxml
+# Install HELICS CLI, and requests for webserver testing
+RUN pip install --no-cache-dir helics[cli] openpyxl lxml requests 
 
-# Copy the grid simulation script into the container
+
+# Copy the forecasting script into the container
 COPY main.py .
+COPY forecasting.py .
+
 
 
 # TODO not needed for now
