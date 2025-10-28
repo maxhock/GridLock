@@ -4,31 +4,37 @@
 import helics as h
 import random
 import json
-import time
 import logging
-from typing import Dict, Any, Optional
-from dataclasses import asdict, dataclass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def setup_federate_and_publication(time_delta: int, action_topic: str) -> tuple:
 
     logging.info("Creating HELICS federate.")
     fed_info = h.helicsCreateFederateInfo()
     h.helicsFederateInfoSetCoreTypeFromString(fed_info, "zmq")
-    h.helicsFederateInfoSetIntegerProperty(fed_info, h.helics_property_int_log_level, h.helics_log_level_debug)
+    h.helicsFederateInfoSetIntegerProperty(
+        fed_info, h.helics_property_int_log_level, h.helics_log_level_debug
+    )
     h.helicsFederateInfoSetFlagOption(fed_info, h.helics_flag_uninterruptible, True)
-    h.helicsFederateInfoSetTimeProperty(fed_info, h.helics_property_time_delta, time_delta)
+    h.helicsFederateInfoSetTimeProperty(
+        fed_info, h.helics_property_time_delta, time_delta
+    )
     fed = h.helicsCreateValueFederate("fake_controller", fed_info)
-    pub = h.helicsFederateRegisterGlobalPublication(fed, action_topic, h.HELICS_DATA_TYPE_STRING, "")
+    pub = h.helicsFederateRegisterGlobalPublication(
+        fed, action_topic, h.HELICS_DATA_TYPE_STRING, ""
+    )
 
     return fed, pub
+
 
 def publish_action(pub: h.HelicsPublication, action: dict):
     """Publish the action as a JSON string."""
     action_str = json.dumps(action)
     h.helicsPublicationPublishString(pub, action_str)
+
 
 def run_federate(fed, pub, stop_time):
     logging.info("Entering HELICS execution mode.")
@@ -43,9 +49,11 @@ def run_federate(fed, pub, stop_time):
 
     while current_time < stop_time:
         # At t=900s, get the action the agent published at t=0s. It will be waiting.
-        publish_action(pub, {"battery": {"normalized_power": random.uniform(-1.0, 1.0)}})
+        publish_action(
+            pub, {"battery": {"normalized_power": random.uniform(-1.0, 1.0)}}
+        )
         logging.info(f"Time: {current_time}s | Published timestep result.")
-            
+
         # Request the next time step
         current_time = h.helicsFederateRequestNextStep(fed)
 
@@ -61,10 +69,6 @@ if __name__ == "__main__":
 
     try:
         fed, pub = setup_federate_and_publication(TIME_DELTA, ACTION_TOPIC)
-        run_federate(
-            fed=fed,
-            pub=pub,
-            stop_time=STOP_TIME
-        )
+        run_federate(fed=fed, pub=pub, stop_time=STOP_TIME)
     except Exception as e:
         logging.error(f"An error occurred: {e}", exc_info=True)
