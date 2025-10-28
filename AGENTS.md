@@ -51,7 +51,7 @@ The data folder contains input and output folders where the input folder contain
 ├── data/
 │   ├── input/            # Input datasets (Excel grid files, CSV timeseries)
 │   └── output/           # Recorded outputs (logs, results)
-├── tools/                # Folder for single use scripts that might be useful but do are not core functionality
+├── tools/                # Folder for single use scripts that might be useful but are not core functionality
 ├── docker-compose.test.yml  # Test container orchestration
 ├── run.sh                # Entrypoint: run experiment end-to-end (Linux/Mac)
 ├── run.ps1               # Entrypoint: run experiment end-to-end (Windows)
