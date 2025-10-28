@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This is general information for coding agents applying to this repository and poject GridLock.
+This is general information for coding agents applying to this repository and project GridLock.
 Do not modify this file unless explicitly asked to do so by the user.
 
 ## Concept
