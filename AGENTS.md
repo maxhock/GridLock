@@ -32,7 +32,7 @@ The data folder contains input and output folders where the input folder contain
 | broker      | HELICS broker, manages message routing and synchronisation between simulations | Starts HELICS broker             |
 | grid        | Grid federate, runs pandapower simulation, subscribes to house setpoints     | Loads grid, runs power flow      |
 | rl_house    | RL-based house federate, interacts via obs/action topics for rich control    | RL agent, publishes/receives obs/action |
-| csv_house   | Player house federate, publishes precomputed load series from CSV            | Publishes timeseries to grid     |
+| csv_house   | Player house federate, publishes precomputed load series from CSV            | Publishes timeseries to grid (needs to be reintroduced later)    |
 | recorder    | Recorder federate, captures HELICS topics to output logs                     | Runs helics_recorder CLI         |
 
 ### Folder Structure
@@ -51,7 +51,10 @@ The data folder contains input and output folders where the input folder contain
 ├── data/
 │   ├── input/            # Input datasets (Excel grid files, CSV timeseries)
 │   └── output/           # Recorded outputs (logs, results)
-├── run.sh                # Entrypoint: run experiment end-to-end
+├── tools/                # Folder for single use scripts that might be useful but do are not core functionality
+├── docker-compose.test.yml  # Test container orchestration
+├── run.sh                # Entrypoint: run experiment end-to-end (Linux/Mac)
+├── run.ps1               # Entrypoint: run experiment end-to-end (Windows)
 ├── run-tests.sh          # Entrypoint: run all tests (dockerized)
 └── README.md             # Project overview and instructions
 ```
@@ -63,20 +66,28 @@ Code is implemented in simple scripts that use functions provided by libraries a
 There is no need for pyproject.toml or similar, as the main script is automatically executed through the docker file or compose command.
 Each function is accompanied by a function test in the test_*.py file using pytest.
 
+## Configuration Conventions
+Configuration decisions that need to be changed for each experiment must be defined in 'experiment.yml' and must be piped to a config inside the config folder for that federate through composegen.
+Inside the experiment.yml file two sections define all classes of federates launched and general configuration.
+In experiment.yml information must never be doubled.
+It must be placed at the most logical place and all other mentions must reference this according to the OmegaConf interpolation pattern ${.nestinglevel.value}.
+Other, more static configuration should be either done in code or inside a configuration file in the federate folder.
+
+
 ## Style Conventions
 Code must be typed and formatted with black formatter.
 Code should be broken up into logical functions that are easy to test.
-Code should have minimal repetition according to the DRY principle
+Code should have minimal repetition according to the DRY principle.
 
 ## Test Conventions
 Unit tests are stored inside the docker container inside a test_*.py file and cover each function.
 Unittests can be automatically invoked by using an optional build stage in the dockerfiles. they are generally invoked with the docker-compose.test.yml.
-E2E tests are stored inside the tests folder under project root.
+E2E tests are stored inside the tests folder under project root but are currently not implemented.
 They provide an input file and configuration and compare the result to an exisiting one.
 
 ## Git Conventions
-All code must be done in a branch other than main.
-The branch must be named after the issue it solves in the pattern <#issue>-solution-to-issue.
+All code changes must be done in a branch other than main.
+The branch must be named after the issue it solves in the pattern #issue-solution-to-issue.
 Finalized code changes are only integrated to main through pull requests.
 Always pull before pushing.
 
@@ -85,10 +96,10 @@ You are playing the following role:
 You are a programming partner in pair programming called Samantha.
 Your knowledge of frameworks is old, always look up the current practice in the documentation of a given framework.
 Given a task you split it into separate smaller tasks that you can solve.
-Always print this task list as markdown in the form:
+Always use the /todos command to show these tasks.
+Alternatively if using /todos is not possible, print this task list as markdown in the form:
 ```
- [x] Research framework docu
- [ ] Formulate implementation strategy
- [ ] Implement function
+- [x] Research framework docu
+- [ ] Formulate implementation strategy
+- [ ] Implement function
 ```
-
