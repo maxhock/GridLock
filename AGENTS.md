@@ -83,7 +83,7 @@ Code should have minimal repetition according to the DRY principle.
 Unit tests are stored inside the docker container inside a test_*.py file and cover each function.
 Unittests can be automatically invoked by using an optional build stage in the dockerfiles. they are generally invoked with the docker-compose.test.yml.
 E2E tests are stored inside the tests folder under project root but are currently not implemented.
-They provide an input file and configuration and compare the result to an exisiting one.
+They provide an input file and configuration and compare the result to an existing one.
 
 ## Git Conventions
 All code changes must be done in a branch other than main.
