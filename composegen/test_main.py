@@ -2,19 +2,32 @@ import os
 import yaml
 import json
 from omegaconf import OmegaConf
-from main import create_docker_compose, create_grid_config, main
+from main import create_docker_compose, create_grid_config, create_helics_runner_config, main
 import pandas as pd
 
 MINIMAL_CONF = {
     "general": {"time_step": 1, "start_time": 0, "end_time": 10},
     "federates": {
         "broker": {"name": "broker", "build_folder": "broker", "command": "run-broker"},
-        "grid": {"name": "grid", "build_folder": "grid", "command": "run-grid"},
-        "house": {"build_folder": "house", "command": "run-house", "num_houses": 1},
+        "grid": {
+            "name": "grid",
+            "build_folder": "grid",
+            "command": "run-grid",
+            "grid_file": "test.xlsx",
+        },
+        "house": {
+            "name": "house",
+            "build_folder": "house",
+            "command": "run-house",
+            "num_houses": 1,
+            "input_file": "/data/input/sample.csv",
+        },
         "recorder": {
             "name": "recorder",
             "build_folder": "recorder",
             "command": "run-recorder",
+            "target": "grid",
+            "output_file": "/data/output/grid.log",
         },
     },
 }
@@ -108,19 +121,69 @@ def test_excel_empty_load_sheet(tmp_path, capsys):
     create_docker_compose(conf, str(output_path))
     captured = capsys.readouterr()
     assert "Detected 0 nodes" in captured.out
+
+
+def test_create_helics_runner_config(tmp_path):
+    """Test generation of helics_runner.json configuration."""
+    conf = OmegaConf.create(MINIMAL_CONF)
+    
+    output_path = tmp_path / "helics_runner.json"
+    create_helics_runner_config(conf, str(output_path))
+    
+    assert output_path.exists()
+    with open(output_path) as f:
+        runner_conf = json.load(f)
+    
+    # Check structure
+    assert "name" in runner_conf
+    assert runner_conf["broker"] is True
+    assert "federates" in runner_conf
+    assert "broker_args" in runner_conf
+    
+    # Check federates
+    federates = runner_conf["federates"]
+    assert len(federates) == 3  # grid, house, recorder
+    
+    # Find grid federate
+    grid_fed = next(f for f in federates if f["name"] == "grid")
+    assert "python main.py" in grid_fed["exec"]
+    assert grid_fed["host"] == "localhost"
+    
+    # Find house federate
+    house_fed = next(f for f in federates if f["name"] == "house")
+    assert "helics_player" in house_fed["exec"]
+    assert house_fed["count"] == 1
+    
+    # Find recorder federate
+    recorder_fed = next(f for f in federates if f["name"] == "recorder")
+    assert "helics_recorder" in recorder_fed["exec"]
+
+
+def test_main_integration(tmp_path):
+    """Test that main() generates both helics_runner.json and grid config."""
     # Write config to file
     config_path = tmp_path / "experiment.yml"
     with open(config_path, "w") as f:
         yaml.safe_dump(MINIMAL_CONF, f)
     output_dir = tmp_path / "out"
     os.makedirs(output_dir, exist_ok=True)
+    
     main(str(config_path), str(output_dir))
-    # Check docker-compose.yml
+    
+    # Check helics_runner.json
+    runner_path = output_dir / "helics_runner.json"
+    assert runner_path.exists()
+    with open(runner_path) as f:
+        runner_conf = json.load(f)
+    assert runner_conf["broker"] is True
+    
+    # Check docker-compose.yml (backward compatibility)
     compose_path = output_dir / "docker-compose.yml"
     assert compose_path.exists()
     with open(compose_path) as f:
         compose = yaml.safe_load(f)
     assert set(compose["services"].keys()) == {"broker", "grid", "house_0", "recorder"}
+    
     # Check grid config
     grid_config_path = tmp_path / "helics_grid_config.json"
     assert grid_config_path.exists()

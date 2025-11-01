@@ -1,13 +1,31 @@
 #!/bin/bash
 set -e
 
-# Build the compose generator image
-docker build -f composegen/Dockerfile -t composegen composegen
+echo "=== GridLock Co-Simulation Runner (HELICS Runner Method) ==="
 
-# Run the generator
-docker run --rm -v "$(pwd)/config:/config" -v "$(pwd)/data:/data" composegen
+# Step 1: Build the configuration generator
+echo "Building configuration generator..."
+docker build -f composegen/Dockerfile -t gridlock-composegen composegen
 
-# Now launch the experiment with docker compose, pointing at the generated file
-docker compose -f config/tmp/docker-compose.yml up --build --remove-orphans
+# Step 2: Run the generator to create helics_runner.json
+echo "Generating helics_runner.json configuration..."
+docker run --rm \
+  -v "$(pwd)/config:/config" \
+  -v "$(pwd)/data:/data" \
+  gridlock-composegen
 
-# docker compose -f config/tmp/docker-compose.yml down --remove-orphans
+# Step 3: Build the runner container (contains all federates + helics_runner)
+echo "Building simulation runner container..."
+docker build -f runner/Dockerfile -t gridlock-runner runner
+
+# Step 4: Run the simulation using helics_runner
+echo "Starting co-simulation with helics_runner..."
+docker run --rm \
+  -v "$(pwd)/config:/config" \
+  -v "$(pwd)/data:/data" \
+  gridlock-runner
+
+echo "=== Simulation complete ==="
+
+# Note: For backward compatibility, docker-compose.yml is still generated
+# To use the old method, run: docker compose -f config/tmp/docker-compose.yml up --build
