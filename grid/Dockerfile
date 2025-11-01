@@ -3,13 +3,9 @@ FROM python:3.11-slim AS base
 # Set working directory
 WORKDIR /app
 
-# Create config mount point
-RUN mkdir /config
-VOLUME ["/config"]
-
-# Create data mount point
-RUN mkdir /data
-VOLUME ["/data"]
+# Create config and data mount points
+RUN mkdir -p /config /data
+VOLUME ["/config", "/data"]
 
 # Install HELICS CLI and pandapower
 RUN pip install --no-cache-dir helics[cli] pandapower openpyxl
@@ -29,11 +25,12 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Default command: run the grid simulation Python script
-CMD ["python", "main.py"]
+# Default command: run helics_runner with the grid config
+# The config file will be provided by docker-compose
+CMD ["helics_runner", "/config/tmp/helics_runner_grid.json"]
 
 # --- Usage ---
 # To run tests during build:
-# docker build --target test --build-arg RUN_TESTS=true -t grid-test .
+# docker build --target test -t grid-test .
 # To build production image:
 # docker build --target final -t grid-prod .

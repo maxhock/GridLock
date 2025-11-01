@@ -8,9 +8,21 @@ GridLock is a fully containerized, reproducible, and config-driven HELICS co-sim
 ## Architecture
 
 GridLock uses modern HELICS best practices:
-- **helics_runner.json** - Configuration-driven federate orchestration
-- **Single container per federate class** - Efficient resource usage with helics_runner spawning multiple instances
-- **cosim-toolbox integration** - Common utilities for HELICS co-simulation development
+- **helics_runner per federate class** - Each container type (broker, grid, house, recorder) runs helics_runner
+- **Single container per federate class** - One container spawns multiple instances of that federate type
+- **Efficient resource usage** - helics_runner spawns instances within containers rather than requiring separate containers per instance
+
+### How It Works
+
+1. **composegen** generates:
+   - Separate `helics_runner_*.json` files for each federate class
+   - `docker-compose.yml` that launches one container per class
+
+2. **Each container** runs `helics_runner` with its class-specific config:
+   - `broker` container: Runs helics_runner with broker config
+   - `grid` container: Runs helics_runner to spawn 1 grid federate instance
+   - `house` container: Runs helics_runner to spawn N house federate instances (via `count` parameter)
+   - `recorder` container: Runs helics_runner to spawn 1 recorder instance
 
 ## Quick Start
 
@@ -22,33 +34,30 @@ GridLock uses modern HELICS best practices:
         ```
         This will:
         - Build the configuration generator image
-        - Generate `helics_runner.json` in `config/tmp/` based on your config
-        - Build the simulation runner container (contains all federates)
-        - Launch the co-simulation using helics_runner
+        - Generate separate `helics_runner_*.json` files for each federate class
+        - Generate `docker-compose.yml` that launches one container per class
+        - Build and launch all containers using docker-compose
+        - Each container internally uses helics_runner to spawn federate instances
 
 3. **View results:**
         - Simulation data is recorded by the recorder federate and written to the output file specified in your config (default: `data/output/`)
 
-## Legacy Docker Compose Support
-
-For backward compatibility, the system also generates a `docker-compose.yml` file. To use the legacy approach:
-```bash
-docker compose -f config/tmp/docker-compose.yml up --build
-docker compose -f config/tmp/docker-compose.yml down
-```
+4. **Stop the simulation:**
+        ```bash
+        docker compose -f config/tmp/docker-compose.yml down
+        ```
 
 ## Project Structure
 
-- `runner/`      — Main simulation container (contains all federates + helics_runner)
-- `grid/`        — Grid federate (pandapower power flow simulation)
-- `house/`       — House federate (uses HELICS player for load profiles)
-- `broker/`      — Legacy broker container (deprecated, now handled by helics_runner)
-- `recorder/`    — Legacy recorder container (now part of runner container)
-- `composegen/`  — Configuration generator (creates helics_runner.json)
-- `config/`      — All configuration files (experiment.yml, generated configs)
-- `data/`        — Input data (grid files, timeseries) and output results
-- `run.sh`       — Main entrypoint script (Linux/Mac)
-- `run.ps1`      — Main entrypoint script (Windows)
+- `broker/`     — Broker container (runs helics_runner with broker config)
+- `grid/`       — Grid federate container (runs helics_runner with grid config)
+- `house/`      — House federate container (runs helics_runner with house config)
+- `recorder/`   — Recorder federate container (runs helics_runner with recorder config)
+- `composegen/` — Configuration generator (creates helics_runner_*.json and docker-compose.yml)
+- `config/`     — All configuration files (experiment.yml, generated configs)
+- `data/`       — Input data (grid files, timeseries) and output results
+- `run.sh`      — Main entrypoint script (Linux/Mac)
+- `run.ps1`     — Main entrypoint script (Windows)
 
 ## Configuration
 
@@ -79,56 +88,49 @@ Key points:
 - The broker is automatically managed by helics_runner
 - Multiple house instances are spawned using helics_runner's `count` parameter
 
-## How It Works
+## Generated Configuration Files
 
-1. **Configuration Generation**: The composegen container reads `experiment.yml` and generates:
-   - `helics_runner.json` - Federate orchestration configuration
-   - `helics_grid_config.json` - Grid-specific HELICS configuration
-   - `docker-compose.yml` - Legacy support
+After running composegen, the following files are created in `config/tmp/`:
 
-2. **Federate Orchestration**: The runner container uses helics_runner to:
-   - Start an embedded HELICS broker
-   - Spawn the grid federate (single instance)
-   - Spawn multiple house federates (count determined by grid topology)
-   - Start the recorder federate
-   
-3. **Simulation Execution**: 
-   - Grid federate runs pandapower power flow calculations
-   - House federates publish load profiles via helics_player
-   - Recorder captures all data to output files
-   
-4. **Resource Efficiency**: Unlike the legacy approach (one container per federate instance), helics_runner spawns multiple instances within a single container, reducing overhead.
+- `helics_runner_broker.json` - Broker configuration for helics_runner
+- `helics_runner_grid.json` - Grid federate configuration with 1 instance
+- `helics_runner_house.json` - House federate configuration with N instances (via `count`)
+- `helics_runner_recorder.json` - Recorder federate configuration with 1 instance
+- `docker-compose.yml` - Docker compose file that launches one container per federate class
+
+Additionally, `config/helics_grid_config.json` is generated with grid-specific HELICS settings.
 
 ## Requirements
 
 - Docker (version 20.10 or later)
+- Docker Compose v2+
 - Linux, macOS, or Windows with WSL2
 - No Python or other dependencies needed on the host
 
 ## Extending the Platform
 
-### Adding a New Federate
+### Adding a New Federate Class
 
-1. Create federate script in appropriate directory
-2. Add federate definition to `config/experiment.yml`
-3. Update `composegen/main.py` to include the new federate in `helics_runner.json`
-4. If needed, add dependencies to `runner/Dockerfile`
+1. Create a new directory (e.g., `my_federate/`)
+2. Add `Dockerfile` that installs helics[cli] and dependencies
+3. Add federate script (e.g., `main.py`)
+4. Add federate definition to `config/experiment.yml`
+5. Update `composegen/main.py`:
+   - Add generation logic for `helics_runner_my_federate.json`
+   - Add service to docker-compose generation
+6. Set Dockerfile CMD to: `helics_runner /config/tmp/helics_runner_my_federate.json`
 
 ### Using cosim-toolbox
 
-The runner container includes [cosim-toolbox](https://cst.readthedocs.io/), which provides utilities for HELICS federate development:
+The federate containers can use [cosim-toolbox](https://cst.readthedocs.io/) for common utilities:
 - `Federate` base class with common patterns
 - Configuration management helpers
 - Database integration for timeseries storage
 - Logging and debugging tools
 
-Example usage in a custom federate:
-```python
-from cosim_toolbox.sims import Federate
-
-class MyCustomFederate(Federate):
-    def update_model(self, current_time):
-        # Your simulation logic here
+To use, add `cosim-toolbox` to the federate's Dockerfile:
+```dockerfile
+RUN pip install --no-cache-dir helics[cli] cosim-toolbox
         pass
 ```
 

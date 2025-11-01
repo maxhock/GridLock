@@ -3,15 +3,13 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Create config mount point
-RUN mkdir /config
-VOLUME ["/config"]
+# Create config and data mount points
+RUN mkdir -p /config /data
+VOLUME ["/config", "/data"]
 
-# Create data mount point
-RUN mkdir /data
-VOLUME ["/data"]
-
-# Install HELICS CLI only
+# Install HELICS CLI (includes helics_recorder and helics_runner)
 RUN pip install --no-cache-dir helics[cli]
-# Default command: run a placeholder (will be overridden by compose)
-CMD ["helics_recorder"]
+
+# Default command: run helics_runner with the recorder config
+# The config file will be provided by docker-compose
+CMD ["helics_runner", "/config/tmp/helics_runner_recorder.json"]

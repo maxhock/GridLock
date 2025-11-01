@@ -7,25 +7,19 @@ Write-Host "=== GridLock Co-Simulation Runner (HELICS Runner Method) ===" -Foreg
 Write-Host "Building configuration generator..." -ForegroundColor Cyan
 docker build -f composegen/Dockerfile -t gridlock-composegen composegen
 
-# Step 2: Run the generator to create helics_runner.json
-Write-Host "Generating helics_runner.json configuration..." -ForegroundColor Cyan
+# Step 2: Run the generator to create helics_runner configs per federate class
+Write-Host "Generating helics_runner configurations and docker-compose..." -ForegroundColor Cyan
 docker run --rm `
   -v "${PSScriptRoot}/config:/config" `
   -v "${PSScriptRoot}/data:/data" `
   gridlock-composegen
 
-# Step 3: Build the runner container (contains all federates + helics_runner)
-Write-Host "Building simulation runner container..." -ForegroundColor Cyan
-docker build -f runner/Dockerfile -t gridlock-runner runner
-
-# Step 4: Run the simulation using helics_runner
-Write-Host "Starting co-simulation with helics_runner..." -ForegroundColor Cyan
-docker run --rm `
-  -v "${PSScriptRoot}/config:/config" `
-  -v "${PSScriptRoot}/data:/data" `
-  gridlock-runner
+# Step 3: Launch the co-simulation using docker-compose
+# Each container runs helics_runner with its class-specific config
+Write-Host "Starting co-simulation with helics_runner (one container per federate class)..." -ForegroundColor Cyan
+docker compose -f config/tmp/docker-compose.yml up --build --remove-orphans
 
 Write-Host "=== Simulation complete ===" -ForegroundColor Green
 
-# Note: For backward compatibility, docker-compose.yml is still generated
-# To use the old method, run: docker compose -f config/tmp/docker-compose.yml up --build
+# To stop and clean up:
+# docker compose -f config/tmp/docker-compose.yml down --remove-orphans

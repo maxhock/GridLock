@@ -7,9 +7,9 @@ WORKDIR /app
 RUN mkdir -p /config /data
 VOLUME ["/config", "/data"]
 
-# Install HELICS CLI (includes helics_broker and helics_runner)
+# Install HELICS CLI (includes helics_player and helics_runner)
 RUN pip install --no-cache-dir helics[cli]
 
-# Default command: run helics_runner with the broker config
+# Default command: run helics_runner with the house config
 # The config file will be provided by docker-compose
-CMD ["helics_runner", "/config/tmp/helics_runner_broker.json"]
+CMD ["helics_runner", "/config/tmp/helics_runner_house.json"]

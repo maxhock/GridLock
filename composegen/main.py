@@ -74,7 +74,8 @@ def safe_eval(expression: str) -> int:
 
 def create_docker_compose(conf, output_path):
     """
-    Generate docker-compose YAML from experiment config and save to output_path.
+    Generate docker-compose YAML with one container per federate class.
+    Each container uses helics_runner to spawn multiple instances.
     """
 
     # Compute num_nodes from Excel if grid_file is specified
@@ -106,49 +107,76 @@ def create_docker_compose(conf, output_path):
     fed_conf = OmegaConf.select(conf, "federates")
     if not OmegaConf.has_resolver("eval"):
         OmegaConf.register_new_resolver("eval", safe_eval)
-    OmegaConf.resolve(fed_conf["grid"])
-
-    fed_conf["house"]["build_folder"] = fed_conf["house"]["build_folder"]
-    for i in range(fed_conf["house"]["num_houses"]):
-        conf_house_i = fed_conf["house"]
-        conf_house_i["name"] = f"house_{i}"
-        fed_conf[f"house_{i}"] = conf_house_i
-    del fed_conf["house"]
-
-    new_conf = OmegaConf.create()
     OmegaConf.resolve(fed_conf)
-    for key in fed_conf:
-        new_conf = OmegaConf.merge(
-            new_conf,
-            {
-                "services": {
-                    key: {
-                        "container_name": fed_conf[key].name,
-                        "build": "${PWD}/" + f"{fed_conf[key].build_folder}",
-                        "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
-                        "networks": ["helics-net"],
-                        "command": fed_conf[key].command,
-                    }
-                },
-                "networks": {"helics-net": {"driver": "bridge"}},
-            },
-        )
+
+    # Build docker-compose with one service per federate CLASS
+    services = {}
+    
+    # Broker service
+    if "broker" in fed_conf:
+        services["broker"] = {
+            "container_name": fed_conf["broker"]["name"],
+            "build": "${PWD}/" + fed_conf["broker"]["build_folder"],
+            "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+            "networks": ["helics-net"],
+            "command": f"helics_runner /config/tmp/helics_runner_broker.json"
+        }
+    
+    # Grid service
+    if "grid" in fed_conf:
+        services["grid"] = {
+            "container_name": fed_conf["grid"]["name"],
+            "build": "${PWD}/" + fed_conf["grid"]["build_folder"],
+            "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+            "networks": ["helics-net"],
+            "command": f"helics_runner /config/tmp/helics_runner_grid.json",
+            "depends_on": ["broker"]
+        }
+    
+    # House service (one container for all house instances)
+    if "house" in fed_conf:
+        services["house"] = {
+            "container_name": fed_conf["house"]["name"],
+            "build": "${PWD}/" + fed_conf["house"]["build_folder"],
+            "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+            "networks": ["helics-net"],
+            "command": f"helics_runner /config/tmp/helics_runner_house.json",
+            "depends_on": ["broker"]
+        }
+    
+    # Recorder service
+    if "recorder" in fed_conf:
+        services["recorder"] = {
+            "container_name": fed_conf["recorder"]["name"],
+            "build": "${PWD}/" + fed_conf["recorder"]["build_folder"],
+            "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+            "networks": ["helics-net"],
+            "command": f"helics_runner /config/tmp/helics_runner_recorder.json",
+            "depends_on": ["broker"]
+        }
+    
+    new_conf = {
+        "services": services,
+        "networks": {"helics-net": {"driver": "bridge"}}
+    }
+    
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
-        OmegaConf.save(new_conf, f, resolve=False)
-    print(f"Generated {output_path} with {len(new_conf['services'])} services:")
-    for service_name in new_conf["services"].keys():
+        OmegaConf.save(OmegaConf.create(new_conf), f, resolve=False)
+    
+    print(f"\nGenerated {output_path} with {len(services)} services (one per federate class):")
+    for service_name in services.keys():
         print(f"  - {service_name}")
 
 
-def create_helics_runner_config(conf, output_path):
+def create_helics_runner_configs(conf, output_dir):
     """
-    Generate helics_runner.json from experiment config and save to output_path.
-    This is the new HELICS-preferred method for launching co-simulations.
+    Generate separate helics_runner.json files for each federate class.
+    Each container will use its own helics_runner.json to spawn instances.
     """
     fed_conf = OmegaConf.select(conf, "federates")
     
-    # Compute num_nodes from Excel if grid_file is specified (same as before)
+    # Compute num_nodes from Excel if grid_file is specified
     try:
         grid_file = fed_conf["grid"]["grid_file"]
         # Try /data/input first (container context), then relative path
@@ -180,65 +208,84 @@ def create_helics_runner_config(conf, output_path):
     else:
         print("WARNING: num_nodes not set, skipping resolution")
     
-    # Build helics_runner configuration
-    runner_config = {
-        "name": "GridLock_CoSimulation",
+    os.makedirs(output_dir, exist_ok=True)
+    configs_created = []
+    
+    # Calculate total federates for broker
+    total_federates = 1  # grid
+    if "house" in fed_conf:
+        total_federates += fed_conf["house"]["num_houses"]
+    total_federates += 1  # recorder
+    
+    # Create broker helics_runner.json
+    broker_config = {
+        "name": "GridLock_Broker",
         "broker": True,
-        "federates": []
+        "broker_args": f"--federates={total_federates} --name={fed_conf['broker']['name']}"
     }
+    broker_path = os.path.join(output_dir, "helics_runner_broker.json")
+    with open(broker_path, "w") as f:
+        json.dump(broker_config, f, indent=2)
+    configs_created.append(("broker", broker_path, 1))
     
-    # Add broker arguments
-    total_federates = 0
-    
-    # Grid federate (single instance)
+    # Create grid helics_runner.json (single instance)
     if "grid" in fed_conf:
-        grid_fed = {
-            "directory": "/workspace/grid",
-            "exec": f"python main.py --grid_file={fed_conf['grid']['grid_file']}",
-            "host": "localhost",
-            "name": fed_conf["grid"]["name"]
+        grid_config = {
+            "name": "GridLock_Grid",
+            "broker": False,
+            "federates": [{
+                "directory": "/app",
+                "exec": f"python main.py --grid_file={fed_conf['grid']['grid_file']}",
+                "host": "localhost",
+                "name": fed_conf["grid"]["name"]
+            }]
         }
-        runner_config["federates"].append(grid_fed)
-        total_federates += 1
+        grid_path = os.path.join(output_dir, "helics_runner_grid.json")
+        with open(grid_path, "w") as f:
+            json.dump(grid_config, f, indent=2)
+        configs_created.append(("grid", grid_path, 1))
     
-    # House federates (multiple instances via count)
+    # Create house helics_runner.json (multiple instances via count)
     if "house" in fed_conf:
         num_houses = fed_conf["house"]["num_houses"]
-        house_fed = {
-            "directory": ".",
-            "exec": f"helics_player {fed_conf['house']['input_file']}",
-            "host": "localhost", 
-            "name": fed_conf["house"]["name"],
-            "count": num_houses
+        house_config = {
+            "name": "GridLock_House",
+            "broker": False,
+            "federates": [{
+                "directory": "/app",
+                "exec": f"helics_player {fed_conf['house']['input_file']}",
+                "host": "localhost",
+                "name": fed_conf["house"]["name"],
+                "count": num_houses
+            }]
         }
-        runner_config["federates"].append(house_fed)
-        total_federates += num_houses
+        house_path = os.path.join(output_dir, "helics_runner_house.json")
+        with open(house_path, "w") as f:
+            json.dump(house_config, f, indent=2)
+        configs_created.append(("house", house_path, num_houses))
     
-    # Recorder federate (single instance)
+    # Create recorder helics_runner.json (single instance)
     if "recorder" in fed_conf:
-        recorder_fed = {
-            "directory": ".",
-            "exec": f"helics_recorder --capture={fed_conf['recorder']['target']} --output={fed_conf['recorder']['output_file']}",
-            "host": "localhost",
-            "name": fed_conf["recorder"]["name"]
+        recorder_config = {
+            "name": "GridLock_Recorder",
+            "broker": False,
+            "federates": [{
+                "directory": "/app",
+                "exec": f"helics_recorder --capture={fed_conf['recorder']['target']} --output={fed_conf['recorder']['output_file']}",
+                "host": "localhost",
+                "name": fed_conf["recorder"]["name"]
+            }]
         }
-        runner_config["federates"].append(recorder_fed)
-        total_federates += 1
+        recorder_path = os.path.join(output_dir, "helics_runner_recorder.json")
+        with open(recorder_path, "w") as f:
+            json.dump(recorder_config, f, indent=2)
+        configs_created.append(("recorder", recorder_path, 1))
     
-    # Set broker arguments
-    runner_config["broker_args"] = f"--federates={total_federates}"
+    print(f"\nGenerated {len(configs_created)} helics_runner config files:")
+    for name, path, count in configs_created:
+        print(f"  - {name}: {path} ({count} instance(s))")
     
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(runner_config, f, indent=2)
-    
-    print(f"Generated {output_path} with {len(runner_config['federates'])} federate types:")
-    print(f"  Total federate instances: {total_federates}")
-    for fed in runner_config["federates"]:
-        count = fed.get("count", 1)
-        print(f"  - {fed['name']}: {count} instance(s)")
-    
-    return runner_config
+    return configs_created
 
 
 def create_grid_config(conf, output_path):
@@ -268,13 +315,12 @@ def create_grid_config(conf, output_path):
 
 def main(config_path, output_dir):
     """
-    Main entry: loads config, generates helics_runner.json and grid config files.
+    Main entry: loads config, generates helics_runner configs per federate class and docker-compose.
     """
     conf = OmegaConf.load(config_path)
 
-    # Generate helics_runner.json (new approach)
-    runner_path = os.path.join(output_dir, "helics_runner.json")
-    create_helics_runner_config(conf, runner_path)
+    # Generate separate helics_runner.json files for each federate class
+    create_helics_runner_configs(conf, output_dir)
     
     # Generate grid-specific HELICS config
     grid_config_path = os.path.join(
@@ -282,7 +328,7 @@ def main(config_path, output_dir):
     )
     create_grid_config(conf, grid_config_path)
     
-    # Keep docker-compose generation for backward compatibility (can be removed later)
+    # Generate docker-compose.yml with one service per federate class
     compose_path = os.path.join(output_dir, "docker-compose.yml")
     create_docker_compose(conf, compose_path)
 
