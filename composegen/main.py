@@ -94,7 +94,12 @@ def create_helics_runner_config(conf, output_path):
     # Compute num_nodes from Excel if grid_file is specified (same as before)
     try:
         grid_file = fed_conf["grid"]["grid_file"]
+        # Try /data/input first (container context), then relative path
         excel_path = os.path.join("/data", "input", grid_file)
+        if not os.path.isfile(excel_path):
+            # Try relative to current directory (for local testing)
+            excel_path = os.path.join(os.path.dirname(__file__), "..", "data", "input", grid_file)
+        
         if os.path.isfile(excel_path):
             try:
                 df = pd.read_excel(excel_path, sheet_name="load", header=0)
@@ -103,13 +108,20 @@ def create_helics_runner_config(conf, output_path):
                 conf["federates"]["grid"]["num_nodes"] = int(num_nodes)
             except Exception as e:
                 print(f"WARNING: Could not read load sheet from {grid_file}: {e}")
-    except Exception:
-        pass
+        else:
+            print(f"WARNING: Could not find grid_file at {excel_path}")
+    except Exception as e:
+        print(f"WARNING: Error processing grid_file: {e}")
     
     # Resolve any references in the config
     if not OmegaConf.has_resolver("eval"):
         OmegaConf.register_new_resolver("eval", eval)
-    OmegaConf.resolve(fed_conf)
+    
+    # Only resolve if num_nodes was successfully set
+    if "num_nodes" in conf.get("federates", {}).get("grid", {}):
+        OmegaConf.resolve(fed_conf)
+    else:
+        print("WARNING: num_nodes not set, skipping resolution")
     
     # Build helics_runner configuration
     runner_config = {
