@@ -1,8 +1,15 @@
 import os
 import yaml
 import json
+import pytest
 from omegaconf import OmegaConf
-from main import create_docker_compose, create_grid_config, create_helics_runner_config, main
+from main import (
+    create_docker_compose,
+    create_grid_config,
+    create_helics_runner_config,
+    main,
+    safe_eval,
+)
 import pandas as pd
 
 MINIMAL_CONF = {
@@ -190,3 +197,25 @@ def test_main_integration(tmp_path):
     with open(grid_config_path) as f:
         grid_conf = json.load(f)
     assert grid_conf["name"] == "grid"
+
+
+def test_safe_eval_valid():
+    """Test safe_eval with valid expressions."""
+    assert safe_eval("5 + 3") == 8
+    assert safe_eval("10 - 2") == 8
+    assert safe_eval("4 * 2") == 8
+    assert safe_eval("16 / 2") == 8
+    assert safe_eval("(5 + 3) * 2") == 16
+    assert safe_eval("13+2") == 15  # Used in experiment.yml
+
+
+def test_safe_eval_invalid():
+    """Test safe_eval rejects dangerous expressions."""
+    with pytest.raises(ValueError):
+        safe_eval("__import__('os').system('ls')")
+    with pytest.raises(ValueError):
+        safe_eval("open('/etc/passwd')")
+    with pytest.raises(ValueError):
+        safe_eval("exec('print(1)')")
+    with pytest.raises(ValueError):
+        safe_eval("eval('1+1')")

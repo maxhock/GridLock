@@ -10,9 +10,39 @@ Reads config/experiment.yml and creates federate definitions for:
 """
 
 import os
+import re
 from omegaconf import OmegaConf
 import json
 import pandas as pd
+
+
+def safe_eval(expression: str) -> int:
+    """
+    Safely evaluate simple arithmetic expressions.
+    Only allows integers and basic operators (+, -, *, /).
+    
+    Args:
+        expression: String containing a simple arithmetic expression
+        
+    Returns:
+        Result of the evaluation as an integer
+        
+    Raises:
+        ValueError: If the expression contains invalid characters
+    """
+    # Remove whitespace
+    expression = expression.strip()
+    
+    # Only allow digits, operators, and parentheses
+    if not re.match(r'^[0-9+\-*/().\s]+$', expression):
+        raise ValueError(f"Invalid characters in expression: {expression}")
+    
+    # Evaluate safely using limited scope
+    try:
+        result = eval(expression, {"__builtins__": {}}, {})
+        return int(result)
+    except Exception as e:
+        raise ValueError(f"Failed to evaluate expression '{expression}': {e}")
 
 
 def create_docker_compose(conf, output_path):
@@ -48,7 +78,7 @@ def create_docker_compose(conf, output_path):
 
     fed_conf = OmegaConf.select(conf, "federates")
     if not OmegaConf.has_resolver("eval"):
-        OmegaConf.register_new_resolver("eval", eval)
+        OmegaConf.register_new_resolver("eval", safe_eval)
     OmegaConf.resolve(fed_conf["grid"])
 
     fed_conf["house"]["build_folder"] = fed_conf["house"]["build_folder"]
@@ -115,7 +145,7 @@ def create_helics_runner_config(conf, output_path):
     
     # Resolve any references in the config
     if not OmegaConf.has_resolver("eval"):
-        OmegaConf.register_new_resolver("eval", eval)
+        OmegaConf.register_new_resolver("eval", safe_eval)
     
     # Only resolve if num_nodes was successfully set
     if "num_nodes" in conf.get("federates", {}).get("grid", {}):
