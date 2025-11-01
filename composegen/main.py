@@ -10,7 +10,8 @@ Reads config/experiment.yml and creates federate definitions for:
 """
 
 import os
-import re
+import ast
+import operator
 from omegaconf import OmegaConf
 import json
 import pandas as pd
@@ -18,7 +19,7 @@ import pandas as pd
 
 def safe_eval(expression: str) -> int:
     """
-    Safely evaluate simple arithmetic expressions.
+    Safely evaluate simple arithmetic expressions using AST parsing.
     Only allows integers and basic operators (+, -, *, /).
     
     Args:
@@ -28,19 +29,45 @@ def safe_eval(expression: str) -> int:
         Result of the evaluation as an integer
         
     Raises:
-        ValueError: If the expression contains invalid characters
+        ValueError: If the expression contains invalid operations
     """
-    # Remove whitespace
-    expression = expression.strip()
+    # Define allowed operations
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.UAdd: operator.pos,
+        ast.USub: operator.neg,
+    }
     
-    # Only allow digits, operators, and parentheses
-    if not re.match(r'^[0-9+\-*/().\s]+$', expression):
-        raise ValueError(f"Invalid characters in expression: {expression}")
+    def eval_node(node):
+        if isinstance(node, ast.Constant):  # Python 3.8+
+            return node.value
+        elif isinstance(node, ast.Num):  # Python 3.7 and earlier
+            return node.n
+        elif isinstance(node, ast.BinOp):
+            left = eval_node(node.left)
+            right = eval_node(node.right)
+            op = operators.get(type(node.op))
+            if op is None:
+                raise ValueError(f"Unsupported operator: {type(node.op).__name__}")
+            return op(left, right)
+        elif isinstance(node, ast.UnaryOp):
+            operand = eval_node(node.operand)
+            op = operators.get(type(node.op))
+            if op is None:
+                raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+            return op(operand)
+        else:
+            raise ValueError(f"Unsupported expression: {type(node).__name__}")
     
-    # Evaluate safely using limited scope
     try:
-        result = eval(expression, {"__builtins__": {}}, {})
+        tree = ast.parse(expression, mode='eval')
+        result = eval_node(tree.body)
         return int(result)
+    except SyntaxError as e:
+        raise ValueError(f"Invalid syntax in expression '{expression}': {e}")
     except Exception as e:
         raise ValueError(f"Failed to evaluate expression '{expression}': {e}")
 
