@@ -159,26 +159,28 @@ def test_excel_node_counting(tmp_path, monkeypatch):
     # Create a mock Excel file with a 'load' sheet of 5 rows
     df = pd.DataFrame({"bus": [1, 2, 3, 4, 5], "p_mw": [0, 0, 0, 0, 0]})
     excel_filename = "test_grid.xlsx"
-    
+
     # Create /data/input directory structure that composegen expects
     data_input_dir = tmp_path / "data" / "input"
     os.makedirs(data_input_dir, exist_ok=True)
     excel_path = data_input_dir / excel_filename
     with pd.ExcelWriter(excel_path) as writer:
         df.to_excel(writer, sheet_name="load", index=False)
-    
+
     # Config with grid_file
     conf = OmegaConf.create(MINIMAL_CONF)
     conf["federates"]["grid"]["grid_file"] = excel_filename
-    
+
     # Monkeypatch os.path.join to redirect /data/input to our tmp_path
     original_join = os.path.join
+
     def custom_join(*args):
         if len(args) >= 3 and args[0] == "/data" and args[1] == "input":
             return str(data_input_dir / args[2])
         return original_join(*args)
+
     monkeypatch.setattr(os.path, "join", custom_join)
-    
+
     output_path = tmp_path / "docker-compose.yml"
     create_docker_compose(conf, str(output_path))
     # num_nodes should be set to 5
@@ -194,7 +196,9 @@ def test_excel_missing_file_fallback(tmp_path, capsys):
     # Should fallback to config value (3), print warning
     captured = capsys.readouterr()
     assert "No valid grid_file found" in captured.out
-    assert conf["federates"]["grid"]["num_nodes"] == 3  # Uses existing value from MINIMAL_CONF
+    assert (
+        conf["federates"]["grid"]["num_nodes"] == 3
+    )  # Uses existing value from MINIMAL_CONF
 
 
 def test_excel_missing_load_sheet(tmp_path, capsys, monkeypatch):
@@ -202,24 +206,26 @@ def test_excel_missing_load_sheet(tmp_path, capsys, monkeypatch):
     # Excel file with no 'load' sheet
     df = pd.DataFrame({"foo": [1, 2, 3]})
     excel_filename = "test_grid.xlsx"
-    
+
     data_input_dir = tmp_path / "data" / "input"
     os.makedirs(data_input_dir, exist_ok=True)
     excel_path = data_input_dir / excel_filename
     with pd.ExcelWriter(excel_path) as writer:
         df.to_excel(writer, sheet_name="notload", index=False)
-    
+
     conf = OmegaConf.create(MINIMAL_CONF)
     conf["federates"]["grid"]["grid_file"] = excel_filename
-    
+
     # Monkeypatch os.path.join
     original_join = os.path.join
+
     def custom_join(*args):
         if len(args) >= 3 and args[0] == "/data" and args[1] == "input":
             return str(data_input_dir / args[2])
         return original_join(*args)
+
     monkeypatch.setattr(os.path, "join", custom_join)
-    
+
     output_path = tmp_path / "docker-compose.yml"
     create_docker_compose(conf, str(output_path))
     captured = capsys.readouterr()
@@ -231,24 +237,26 @@ def test_excel_empty_load_sheet(tmp_path, capsys, monkeypatch):
     # Excel file with empty 'load' sheet
     df = pd.DataFrame({})
     excel_filename = "test_grid.xlsx"
-    
+
     data_input_dir = tmp_path / "data" / "input"
     os.makedirs(data_input_dir, exist_ok=True)
     excel_path = data_input_dir / excel_filename
     with pd.ExcelWriter(excel_path) as writer:
         df.to_excel(writer, sheet_name="load", index=False)
-    
+
     conf = OmegaConf.create(MINIMAL_CONF)
     conf["federates"]["grid"]["grid_file"] = excel_filename
-    
+
     # Monkeypatch os.path.join
     original_join = os.path.join
+
     def custom_join(*args):
         if len(args) >= 3 and args[0] == "/data" and args[1] == "input":
             return str(data_input_dir / args[2])
         return original_join(*args)
+
     monkeypatch.setattr(os.path, "join", custom_join)
-    
+
     output_path = tmp_path / "docker-compose.yml"
     create_docker_compose(conf, str(output_path))
     captured = capsys.readouterr()
