@@ -103,3 +103,56 @@ Alternatively if using /todos is not possible, print this task list as markdown 
 - [ ] Formulate implementation strategy
 - [ ] Implement function
 ```
+
+## Issue #23 Todo List - HELICS Runner.json Refactoring
+
+### Phase 1: Grid Federate Proof-of-Concept
+- [x] Research HELICS `helics run` command and runner.json format/schema
+- [x] Create static runner.json for grid federate
+- [x] Update grid Dockerfile/entrypoint to use `helics run` with runner.json
+- [x] Test grid federate with runner.json (single instance)
+- [x] Document learnings and patterns
+
+### Phase 2: House Federate Implementation
+- [x] Create static runner.json for house federate
+- [x] Update house Dockerfile/entrypoint to use `helics run` with runner.json
+- [x] Test house federate with runner.json (single instance)
+- [x] Test house federate with multiple instances (13 houses in one container)
+
+### Phase 3: Remaining Federates
+- [x] Create static runner.json for broker
+- [x] Update broker Dockerfile/entrypoint to use `helics run` with runner.json
+- [x] Create static runner.json for recorder
+- [x] Update recorder Dockerfile/entrypoint to use `helics run` with runner.json
+
+### Phase 4: Composegen Integration
+- [x] Move all runner.json files from federate folders to config/tmp folder
+- [x] Update all Dockerfiles to remove COPY runner.json and use /config mount path in CMD instead
+- [x] Test that all federates still work with runner.json loaded from /config mount at runtime
+- [x] Refactor composegen to generate runner.json files per federate class
+- [x] Refactor composegen to generate simplified docker-compose.yml (one container per class)
+- [x] End-to-end test with composegen-generated configs (4 containers: broker, grid, house with 13 instances, recorder)
+- [x] Update composegen unit tests (10 tests passing: docker-compose generation, 4 runner.json generation functions, grid config, Excel node detection)
+- [ ] Update experiment.yml structure if needed (currently compatible with new architecture)
+
+### Phase 5: Testing & Documentation
+- [x] Update docker-compose.test.yml (documented 4-service architecture, composegen-test and grid-test)
+- [x] Update README.md with new architecture (comprehensive documentation: architecture overview, runner.json format, workflow, testing, development guide, troubleshooting)
+
+### Phase 6: HELICS Config.json Integration
+- [ ] Research HELICS config.json format and relationship with runner.json
+- [ ] Create static config.json for grid federate (broker connection, timing, logging settings)
+- [ ] Update grid runner.json to reference config.json via --config flag
+- [ ] Test grid federate with config.json
+- [ ] Create static config.json for house_player federate (broker connection, player settings)
+- [ ] Update house_player runner.json to reference config.json via --config flag
+- [ ] Test house_player with config.json (verify 13 instances work)
+- [ ] Create static config.json for broker (network settings, logging)
+- [ ] Update broker runner.json to reference config.json via --config flag
+- [ ] Create static config.json for recorder (capture settings, output format)
+- [ ] Update recorder runner.json to reference config.json via --config flag
+- [ ] Test all federates with config.json integration
+- [ ] Document config.json vs runner.json separation of concerns
+
+### Phase 7: Cosim-toolbox Integration (Future)
+- [ ] (Deferred for later issue)

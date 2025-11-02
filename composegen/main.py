@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """
-Generate docker-compose.yml from experiment.yml using OmegaConf config merging.
+Generate docker-compose.yml and runner.json files from experiment.yml using OmegaConf.
 
-Uses OmegaConf.merge() to create compose-shaped config objects for each service
-and combines them into a complete docker-compose structure.
-
-Reads config/experiment.yml and creates services for:
-- broker, grid, house_1..house_N, recorder
+Generates:
+- docker-compose.yml with 4 services (broker, grid, house, recorder)
+- runner.json files for each federate class in config/tmp
 """
 
 import os
@@ -17,19 +15,18 @@ import pandas as pd
 
 def create_docker_compose(conf, output_path):
     """
-    Generate docker-compose YAML from experiment config and save to output_path.
+    Generate simplified docker-compose YAML with 4 services (broker, grid, house, recorder).
+    No command overrides - federates use runner.json from /config mount.
     """
-
-    # Compute num_nodes from Excel if grid_file is specified
     fed_conf = OmegaConf.select(conf, "federates")
-
+    
+    # Compute num_nodes from Excel if grid_file is specified
     try:
         grid_file = fed_conf["grid"]["grid_file"]
     except Exception:
         grid_file = None
 
     if grid_file:
-        # Try relative to config, then fallback to CWD
         excel_path = os.path.join("/data", "input", grid_file)
         if os.path.isfile(excel_path):
             try:
@@ -46,42 +43,143 @@ def create_docker_compose(conf, output_path):
     else:
         print("No grid_file specified in config; using num_nodes from config.")
 
-    fed_conf = OmegaConf.select(conf, "federates")
-    if not OmegaConf.has_resolver("eval"):
-        OmegaConf.register_new_resolver("eval", eval)
-    OmegaConf.resolve(fed_conf["grid"])
-
-    fed_conf["house"]["build_folder"] = fed_conf["house"]["build_folder"]
-    for i in range(fed_conf["house"]["num_houses"]):
-        conf_house_i = fed_conf["house"]
-        conf_house_i["name"] = f"house_{i}"
-        fed_conf[f"house_{i}"] = conf_house_i
-    del fed_conf["house"]
-
-    new_conf = OmegaConf.create()
-    OmegaConf.resolve(fed_conf)
-    for key in fed_conf:
-        new_conf = OmegaConf.merge(
-            new_conf,
-            {
-                "services": {
-                    key: {
-                        "container_name": fed_conf[key].name,
-                        "build": "${PWD}/" + f"{fed_conf[key].build_folder}",
-                        "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
-                        "networks": ["helics-net"],
-                        "command": fed_conf[key].command,
-                    }
-                },
-                "networks": {"helics-net": {"driver": "bridge"}},
+    # Create simplified docker-compose with 4 services (no command overrides)
+    compose_config = {
+        "services": {
+            "broker": {
+                "container_name": "broker",
+                "build": "${PWD}/broker",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"]
             },
-        )
+            "grid": {
+                "container_name": "grid",
+                "build": "${PWD}/grid",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"]
+            },
+            "house": {
+                "container_name": "house",
+                "build": "${PWD}/house_player",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"]
+            },
+            "recorder": {
+                "container_name": "recorder",
+                "build": "${PWD}/recorder",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"]
+            }
+        },
+        "networks": {
+            "helics-net": {
+                "driver": "bridge"
+            }
+        }
+    }
+    
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w") as f:
-        OmegaConf.save(new_conf, f, resolve=False)
-    print(f"Generated {output_path} with {len(new_conf['services'])} services:")
-    for service_name in new_conf["services"].keys():
+        OmegaConf.save(OmegaConf.create(compose_config), f, resolve=False)
+    
+    print(f"Generated {output_path} with {len(compose_config['services'])} services:")
+    for service_name in compose_config["services"].keys():
         print(f"  - {service_name}")
+
+
+def create_broker_runner(conf, output_path):
+    """Generate broker runner.json file."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_federates = fed_conf["grid"]["num_nodes"] + 2  # grid + recorder + houses
+    
+    runner = {
+        "name": "broker_federation",
+        "federates": [
+            {
+                "directory": ".",
+                "exec": f"helics_broker --federates={num_federates} --name=broker --ipv4 --loglevel=debug --logfile=/data/output/broker.log",
+                "host": "localhost",
+                "name": "broker"
+            }
+        ]
+    }
+    
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path}")
+
+
+def create_grid_runner(conf, output_path):
+    """Generate grid runner.json file."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    grid_file = fed_conf["grid"]["grid_file"]
+    
+    runner = {
+        "name": "grid_federation",
+        "federates": [
+            {
+                "directory": "/app",
+                "exec": f"python main.py --broker=broker --grid_file={grid_file}",
+                "host": "localhost",
+                "name": "grid"
+            }
+        ]
+    }
+    
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path}")
+
+
+def create_house_runner(conf, output_path):
+    """Generate house runner.json file with multiple house instances."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_houses = fed_conf["grid"]["num_nodes"]
+    input_file = fed_conf["house"]["input_file"]
+    
+    federates = []
+    for i in range(num_houses):
+        federates.append({
+            "directory": ".",
+            "exec": f"helics_player {input_file} --broker=broker --local --name=house_{i}",
+            "host": "localhost",
+            "name": f"house_{i}"
+        })
+    
+    runner = {
+        "name": "house_federation",
+        "federates": federates
+    }
+    
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path} with {num_houses} house instances")
+
+
+def create_recorder_runner(conf, output_path):
+    """Generate recorder runner.json file."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    target = fed_conf["recorder"]["target"]
+    output_file = fed_conf["recorder"]["output_file"]
+    
+    runner = {
+        "name": "recorder_federation",
+        "federates": [
+            {
+                "directory": ".",
+                "exec": f"helics_recorder --name=recorder --capture={target} --output={output_file} --broker=broker",
+                "host": "localhost",
+                "name": "recorder"
+            }
+        ]
+    }
+    
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path}")
 
 
 def create_grid_config(conf, output_path):
@@ -111,15 +209,29 @@ def create_grid_config(conf, output_path):
 
 def main(config_path, output_dir):
     """
-    Main entry: loads config, generates docker-compose and grid config files.
+    Main entry: loads config, generates docker-compose, runner.json files, and grid config.
     """
     conf = OmegaConf.load(config_path)
 
+    # Generate docker-compose.yml
     compose_path = os.path.join(output_dir, "docker-compose.yml")
+    create_docker_compose(conf, compose_path)
+    
+    # Generate runner.json files for each federate class
+    broker_runner_path = os.path.join(output_dir, "broker_runner.json")
+    grid_runner_path = os.path.join(output_dir, "grid_runner.json")
+    house_runner_path = os.path.join(output_dir, "house_runner.json")
+    recorder_runner_path = os.path.join(output_dir, "recorder_runner.json")
+    
+    create_broker_runner(conf, broker_runner_path)
+    create_grid_runner(conf, grid_runner_path)
+    create_house_runner(conf, house_runner_path)
+    create_recorder_runner(conf, recorder_runner_path)
+    
+    # Generate grid HELICS config
     grid_config_path = os.path.join(
         os.path.dirname(config_path), "helics_grid_config.json"
     )
-    create_docker_compose(conf, compose_path)
     create_grid_config(conf, grid_config_path)
 
 

@@ -29,8 +29,8 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Default command: run the grid simulation Python script
-CMD ["python", "main.py"]
+# Default command: run via HELICS runner with config from mount
+CMD ["helics", "run", "--path=/config/tmp/grid_runner.json", "--no-log-files"]
 
 # --- Usage ---
 # To run tests during build:

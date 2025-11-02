@@ -1,0 +1,11 @@
+{
+  "name": "broker_federation",
+  "federates": [
+    {
+      "directory": ".",
+      "exec": "helics_broker --federates=15 --name=broker --ipv4 --loglevel=debug --logfile=/data/output/broker.log",
+      "host": "localhost",
+      "name": "broker"
+    }
+  ]
+}
