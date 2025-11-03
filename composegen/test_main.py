@@ -5,6 +5,9 @@ from omegaconf import OmegaConf
 from main import (
     create_docker_compose,
     create_grid_config,
+    create_broker_config,
+    create_house_player_config,
+    create_recorder_config,
     create_broker_runner,
     create_grid_runner,
     create_house_runner,
@@ -66,7 +69,7 @@ def test_create_docker_compose(tmp_path):
 
 
 def test_create_broker_runner(tmp_path):
-    """Test broker_runner.json generation"""
+    """Test broker_runner.json generation with config reference"""
     conf = OmegaConf.create(MINIMAL_CONF)
     output_path = tmp_path / "broker_runner.json"
     create_broker_runner(conf, str(output_path))
@@ -79,7 +82,8 @@ def test_create_broker_runner(tmp_path):
     assert fed["name"] == "broker"
     # Should calculate 5 federates: 3 houses + 1 grid + 1 recorder
     assert "--federates=5" in fed["exec"]
-    assert "--name=broker" in fed["exec"]
+    # Should reference config file
+    assert "--config=/config/tmp/broker_config.json" in fed["exec"]
 
 
 def test_create_grid_runner(tmp_path):
@@ -101,7 +105,7 @@ def test_create_grid_runner(tmp_path):
 
 
 def test_create_house_runner(tmp_path):
-    """Test house_runner.json generation with multiple instances"""
+    """Test house_runner.json generation with multiple instances and config reference"""
     conf = OmegaConf.create(MINIMAL_CONF)
     output_path = tmp_path / "house_runner.json"
     create_house_runner(conf, str(output_path))
@@ -116,13 +120,13 @@ def test_create_house_runner(tmp_path):
         assert fed["directory"] == "."
         assert "helics_player" in fed["exec"]
         assert "sample_house.csv" in fed["exec"]
-        assert "--broker=broker" in fed["exec"]
+        assert "--config=/config/tmp/house_player_config.json" in fed["exec"]
         assert "--local" in fed["exec"]
         assert f"--name=house_{i}" in fed["exec"]
 
 
 def test_create_recorder_runner(tmp_path):
-    """Test recorder_runner.json generation"""
+    """Test recorder_runner.json generation with config reference"""
     conf = OmegaConf.create(MINIMAL_CONF)
     output_path = tmp_path / "recorder_runner.json"
     create_recorder_runner(conf, str(output_path))
@@ -137,7 +141,8 @@ def test_create_recorder_runner(tmp_path):
     assert "helics_recorder" in fed["exec"]
     assert "--capture=grid" in fed["exec"]
     assert "--output=/data/output/grid.log" in fed["exec"]
-    assert "--broker=broker" in fed["exec"]
+    # Should reference config file
+    assert "--config=/config/tmp/recorder_config.json" in fed["exec"]
 
 
 def test_create_grid_config(tmp_path):
@@ -280,3 +285,46 @@ def test_excel_empty_load_sheet(tmp_path, capsys, monkeypatch):
     with open(grid_config_path) as f:
         grid_conf = json.load(f)
     assert grid_conf["name"] == "grid"
+
+
+def test_create_broker_config(tmp_path):
+    """Test broker config.json generation"""
+    conf = OmegaConf.create(MINIMAL_CONF)
+    output_path = tmp_path / "broker_config.json"
+    create_broker_config(conf, str(output_path))
+    assert output_path.exists()
+    with open(output_path) as f:
+        broker_conf = json.load(f)
+    assert broker_conf["name"] == "broker"
+    assert broker_conf["loglevel"] == "debug"
+    assert broker_conf["logfile"] == "/data/output/broker.log"
+    assert broker_conf["ipv4"] is True
+
+
+def test_create_house_player_config(tmp_path):
+    """Test house_player config.json generation"""
+    conf = OmegaConf.create(MINIMAL_CONF)
+    output_path = tmp_path / "house_player_config.json"
+    create_house_player_config(conf, str(output_path))
+    assert output_path.exists()
+    with open(output_path) as f:
+        house_conf = json.load(f)
+    assert house_conf["loglevel"] == "warning"
+    assert house_conf["coreType"] == "zmq"
+    assert house_conf["broker"] == "broker"
+    assert house_conf["uninterruptible"] is False
+    assert house_conf["terminate_on_error"] is True
+
+
+def test_create_recorder_config(tmp_path):
+    """Test recorder config.json generation"""
+    conf = OmegaConf.create(MINIMAL_CONF)
+    output_path = tmp_path / "recorder_config.json"
+    create_recorder_config(conf, str(output_path))
+    assert output_path.exists()
+    with open(output_path) as f:
+        recorder_conf = json.load(f)
+    assert recorder_conf["name"] == "recorder"
+    assert recorder_conf["loglevel"] == "warning"
+    assert recorder_conf["coreType"] == "zmq"
+    assert recorder_conf["broker"] == "broker"

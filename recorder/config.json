@@ -1,0 +1,8 @@
+{
+    "name": "recorder",
+    "loglevel": "warning",
+    "coreType": "zmq",
+    "broker": "broker",
+    "capture": "grid",
+    "output": "/data/output/grid.log"
+}

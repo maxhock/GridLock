@@ -27,8 +27,12 @@ def create_federate(grid_path=None):
         raise RuntimeError(f"Failed to load pandapower network from '{grid_path}': {e}")
 
     # 2. Create the HELICS federate from config file
-    fed = h.helicsCreateValueFederateFromConfig("/config/helics_grid_config.json")
-    print("Created HELICS federate in code.")
+    config_path = "/config/tmp/grid_config.json"
+    # Fallback to legacy config if tmp config doesn't exist
+    if not os.path.exists(config_path):
+        config_path = "/config/helics_grid_config.json"
+    fed = h.helicsCreateValueFederateFromConfig(config_path)
+    print(f"Created HELICS federate from config: {config_path}")
 
     # 3. Register all subscriptions (for p_mw setpoints for each load)
     load_index_list = list(net.load.index)

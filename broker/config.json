@@ -1,0 +1,7 @@
+{
+    "name": "broker",
+    "loglevel": "debug",
+    "logfile": "/data/output/broker.log",
+    "ipv4": true,
+    "federates": 15
+}

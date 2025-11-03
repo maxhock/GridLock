@@ -3,7 +3,7 @@
   "federates": [
     {
       "directory": ".",
-      "exec": "helics_recorder --name=recorder --capture=grid --output=/data/output/grid.log --broker=broker",
+      "exec": "helics_recorder --config=/config/tmp/recorder_config.json --capture=grid --output=/data/output/grid.log",
       "host": "localhost",
       "name": "recorder"
     }

@@ -3,79 +3,79 @@
   "federates": [
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_0",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_0 --local",
       "host": "localhost",
       "name": "house_0"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_1",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_1 --local",
       "host": "localhost",
       "name": "house_1"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_2",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_2 --local",
       "host": "localhost",
       "name": "house_2"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_3",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_3 --local",
       "host": "localhost",
       "name": "house_3"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_4",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_4 --local",
       "host": "localhost",
       "name": "house_4"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_5",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_5 --local",
       "host": "localhost",
       "name": "house_5"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_6",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_6 --local",
       "host": "localhost",
       "name": "house_6"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_7",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_7 --local",
       "host": "localhost",
       "name": "house_7"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_8",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_8 --local",
       "host": "localhost",
       "name": "house_8"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_9",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_9 --local",
       "host": "localhost",
       "name": "house_9"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_10",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_10 --local",
       "host": "localhost",
       "name": "house_10"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_11",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_11 --local",
       "host": "localhost",
       "name": "house_11"
     },
     {
       "directory": ".",
-      "exec": "helics_player /data/input/sample_house.csv --broker=broker --local --name=house_12",
+      "exec": "helics_player /data/input/sample_house.csv --config=/config/tmp/house_player_config.json --name=house_12 --local",
       "host": "localhost",
       "name": "house_12"
     }

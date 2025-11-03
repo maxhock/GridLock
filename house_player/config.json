@@ -1,0 +1,8 @@
+{
+    "name": "house_player",
+    "loglevel": "warning",
+    "coreType": "zmq",
+    "broker": "broker",
+    "uninterruptible": false,
+    "terminate_on_error": true
+}

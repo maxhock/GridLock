@@ -96,7 +96,7 @@ def create_broker_runner(conf, output_path):
         "federates": [
             {
                 "directory": ".",
-                "exec": f"helics_broker --federates={num_federates} --name=broker --ipv4 --loglevel=debug --logfile=/data/output/broker.log",
+                "exec": f"helics_broker --config=/config/tmp/broker_config.json --federates={num_federates}",
                 "host": "localhost",
                 "name": "broker",
             }
@@ -141,7 +141,7 @@ def create_house_runner(conf, output_path):
         federates.append(
             {
                 "directory": ".",
-                "exec": f"helics_player {input_file} --broker=broker --local --name=house_{i}",
+                "exec": f"helics_player {input_file} --config=/config/tmp/house_player_config.json --name=house_{i} --local",
                 "host": "localhost",
                 "name": f"house_{i}",
             }
@@ -165,7 +165,7 @@ def create_recorder_runner(conf, output_path):
         "federates": [
             {
                 "directory": ".",
-                "exec": f"helics_recorder --name=recorder --capture={target} --output={output_file} --broker=broker",
+                "exec": f"helics_recorder --config=/config/tmp/recorder_config.json --capture={target} --output={output_file}",
                 "host": "localhost",
                 "name": "recorder",
             }
@@ -202,9 +202,61 @@ def create_grid_config(conf, output_path):
     print(json.dumps(grid_config, indent=4))
 
 
+def create_broker_config(conf, output_path):
+    """
+    Generate broker config JSON from experiment config and save to output_path.
+    """
+    fed_conf = OmegaConf.select(conf, "federates")
+    broker_config = {
+        "name": fed_conf["broker"]["name"] if "broker" in fed_conf else "broker",
+        "loglevel": "debug",
+        "logfile": "/data/output/broker.log",
+        "ipv4": True,
+    }
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(broker_config, f, indent=4)
+    print(f"Generated {output_path}")
+
+
+def create_house_player_config(conf, output_path):
+    """
+    Generate house_player config JSON from experiment config and save to output_path.
+    """
+    fed_conf = OmegaConf.select(conf, "federates")
+    house_config = {
+        "loglevel": "warning",
+        "coreType": "zmq",
+        "broker": fed_conf["broker"]["name"] if "broker" in fed_conf else "broker",
+        "uninterruptible": False,
+        "terminate_on_error": True,
+    }
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(house_config, f, indent=4)
+    print(f"Generated {output_path}")
+
+
+def create_recorder_config(conf, output_path):
+    """
+    Generate recorder config JSON from experiment config and save to output_path.
+    """
+    fed_conf = OmegaConf.select(conf, "federates")
+    recorder_config = {
+        "name": fed_conf["recorder"]["name"] if "recorder" in fed_conf else "recorder",
+        "loglevel": "warning",
+        "coreType": "zmq",
+        "broker": fed_conf["broker"]["name"] if "broker" in fed_conf else "broker",
+    }
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(recorder_config, f, indent=4)
+    print(f"Generated {output_path}")
+
+
 def main(config_path, output_dir):
     """
-    Main entry: loads config, generates docker-compose, runner.json files, and grid config.
+    Main entry: loads config, generates docker-compose, runner.json files, and HELICS config files.
     """
     conf = OmegaConf.load(config_path)
 
@@ -223,11 +275,22 @@ def main(config_path, output_dir):
     create_house_runner(conf, house_runner_path)
     create_recorder_runner(conf, recorder_runner_path)
 
-    # Generate grid HELICS config
-    grid_config_path = os.path.join(
+    # Generate HELICS config.json files for each federate class
+    broker_config_path = os.path.join(output_dir, "broker_config.json")
+    grid_config_path = os.path.join(output_dir, "grid_config.json")
+    house_player_config_path = os.path.join(output_dir, "house_player_config.json")
+    recorder_config_path = os.path.join(output_dir, "recorder_config.json")
+
+    create_broker_config(conf, broker_config_path)
+    create_grid_config(conf, grid_config_path)
+    create_house_player_config(conf, house_player_config_path)
+    create_recorder_config(conf, recorder_config_path)
+
+    # Also generate grid config at legacy location for backward compatibility
+    legacy_grid_config_path = os.path.join(
         os.path.dirname(config_path), "helics_grid_config.json"
     )
-    create_grid_config(conf, grid_config_path)
+    create_grid_config(conf, legacy_grid_config_path)
 
 
 if __name__ == "__main__":
