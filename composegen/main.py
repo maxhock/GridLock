@@ -26,6 +26,10 @@ def create_docker_compose(conf, output_path):
     except Exception:
         grid_file = None
 
+    # Initialize num_nodes if not present
+    if "num_nodes" not in fed_conf.get("grid", {}):
+        conf["federates"]["grid"]["num_nodes"] = 13  # Default value
+
     if grid_file:
         excel_path = os.path.join("/data", "input", grid_file)
         if os.path.isfile(excel_path):
@@ -38,10 +42,10 @@ def create_docker_compose(conf, output_path):
                 print(f"WARNING: Could not read load sheet from {grid_file}: {e}")
         else:
             print(
-                f"No valid grid_file found at {excel_path}; using num_nodes from config."
+                f"No valid grid_file found at {excel_path}; using num_nodes from config (default: {conf['federates']['grid']['num_nodes']})."
             )
     else:
-        print("No grid_file specified in config; using num_nodes from config.")
+        print("No grid_file specified in config; using num_nodes from config (default: {conf['federates']['grid']['num_nodes']}).")
 
     # Create simplified docker-compose with 4 services (no command overrides)
     compose_config = {
