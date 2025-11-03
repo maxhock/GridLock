@@ -48,7 +48,9 @@ def create_docker_compose(conf, output_path):
                 f"No valid grid_file found at {excel_path}; using num_nodes from config (default: {conf['federates']['grid']['num_nodes']})."
             )
     else:
-        print(f"No grid_file specified in config; using num_nodes from config (default: {conf['federates']['grid']['num_nodes']}).")
+        print(
+            f"No grid_file specified in config; using num_nodes from config (default: {conf['federates']['grid']['num_nodes']})."
+        )
 
     # Create simplified docker-compose with 4 services (no command overrides)
     compose_config = {
