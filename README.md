@@ -60,6 +60,68 @@ experiment:
 - The recorder subscribes to `Grid` and writes results to the output file as configured (default may be in `data/`).
 - All configuration and results are mounted from the host for easy access and reproducibility.
 
+### Configuration Architecture
+
+The system uses a two-layer configuration approach for maximum flexibility:
+
+#### 1. experiment.yml (Source of Truth)
+- **Location**: `config/experiment.yml`
+- **Purpose**: High-level experiment configuration
+- **Contents**: 
+  - Number of houses (derived from grid file)
+  - Grid file specification
+  - Timing parameters (start_time, end_time, time_step)
+  - Broker, grid, house, and recorder settings
+- **Usage**: Edit this file to configure your experiment
+
+#### 2. Generated Configuration Files (config/tmp/)
+
+The composegen container reads `experiment.yml` and generates:
+
+**docker-compose.yml**
+- Defines 4 services: broker, grid, house, recorder
+- Each service runs multiple federate instances via runner.json
+
+**runner.json files** (one per federate class)
+- `broker_runner.json` - Defines broker execution
+- `grid_runner.json` - Defines grid federate execution
+- `house_runner.json` - Defines all house player instances
+- `recorder_runner.json` - Defines recorder execution
+- **Purpose**: Specify which executables to run and their command-line arguments
+- **Format**: HELICS runner format with federates array
+
+**config.json files** (one per federate class)
+- `broker_config.json` - Broker settings (log level, network interface)
+- `grid_config.json` - Grid federate settings (timing, broker connection)
+- `house_player_config.json` - House player settings (broker connection)
+- `recorder_config.json` - Recorder settings (broker connection)
+- **Purpose**: Define federate-specific HELICS configuration
+- **Format**: HELICS configuration format (JSON)
+
+#### Separation of Concerns
+
+| File Type | Purpose | Examples |
+|-----------|---------|----------|
+| **runner.json** | Federation structure, execution commands | Which program to run, command-line arguments, working directory |
+| **config.json** | HELICS federate configuration | Timing parameters, broker connection, log levels, core type |
+| **experiment.yml** | High-level experiment parameters | Grid file, number of houses, simulation duration |
+
+**Example Flow:**
+1. User edits `config/experiment.yml` (e.g., change grid file)
+2. `run.sh` invokes composegen
+3. Composegen generates:
+   - `config/tmp/docker-compose.yml`
+   - `config/tmp/*_runner.json` (4 files)
+   - `config/tmp/*_config.json` (4 files)
+4. Docker Compose launches containers
+5. Each container runs `helics run --path=/config/tmp/{federate}_runner.json`
+6. HELICS tools load their config via `--config=/config/tmp/{federate}_config.json`
+
+This architecture allows:
+- **Reproducibility**: All generated files are in `config/tmp/`
+- **Flexibility**: Change experiment parameters without modifying Docker images
+- **Clarity**: Clear separation between structure (runner.json) and configuration (config.json)
+
 ## Requirements
 
 - Docker (Linux or WSL recommended)
