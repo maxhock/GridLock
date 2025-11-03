@@ -3,6 +3,10 @@ import pandapower as pp
 import argparse
 import os
 
+# Configuration file paths
+GRID_CONFIG_PATH = "/config/tmp/grid_config.json"
+LEGACY_GRID_CONFIG_PATH = "/config/helics_grid_config.json"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -27,10 +31,10 @@ def create_federate(grid_path=None):
         raise RuntimeError(f"Failed to load pandapower network from '{grid_path}': {e}")
 
     # 2. Create the HELICS federate from config file
-    config_path = "/config/tmp/grid_config.json"
+    config_path = GRID_CONFIG_PATH
     # Fallback to legacy config if tmp config doesn't exist
     if not os.path.exists(config_path):
-        config_path = "/config/helics_grid_config.json"
+        config_path = LEGACY_GRID_CONFIG_PATH
     fed = h.helicsCreateValueFederateFromConfig(config_path)
     print(f"Created HELICS federate from config: {config_path}")
 

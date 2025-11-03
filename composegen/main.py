@@ -12,6 +12,9 @@ from omegaconf import OmegaConf
 import json
 import pandas as pd
 
+# Default number of nodes when Excel file is not available
+DEFAULT_NUM_NODES = 13
+
 
 def create_docker_compose(conf, output_path):
     """
@@ -28,7 +31,7 @@ def create_docker_compose(conf, output_path):
 
     # Initialize num_nodes if not present
     if "num_nodes" not in fed_conf.get("grid", {}):
-        conf["federates"]["grid"]["num_nodes"] = 13  # Default value
+        conf["federates"]["grid"]["num_nodes"] = DEFAULT_NUM_NODES
 
     if grid_file:
         excel_path = os.path.join("/data", "input", grid_file)
