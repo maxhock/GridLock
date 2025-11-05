@@ -137,22 +137,57 @@ Alternatively if using /todos is not possible, print this task list as markdown 
 
 ### Phase 5: Testing & Documentation
 - [x] Update docker-compose.test.yml (documented 4-service architecture, composegen-test and grid-test)
-- [x] Update README.md with new architecture (comprehensive documentation: architecture overview, runner.json format, workflow, testing, development guide, troubleshooting)
+- [ ] Update README.md with new architecture (deferred to later issue)
 
-### Phase 6: HELICS Config.json Integration
-- [ ] Research HELICS config.json format and relationship with runner.json
-- [ ] Create static config.json for grid federate (broker connection, timing, logging settings)
-- [ ] Update grid runner.json to reference config.json via --config flag
-- [ ] Test grid federate with config.json
-- [ ] Create static config.json for house_player federate (broker connection, player settings)
-- [ ] Update house_player runner.json to reference config.json via --config flag
-- [ ] Test house_player with config.json (verify 13 instances work)
-- [ ] Create static config.json for broker (network settings, logging)
-- [ ] Update broker runner.json to reference config.json via --config flag
-- [ ] Create static config.json for recorder (capture settings, output format)
-- [ ] Update recorder runner.json to reference config.json via --config flag
-- [ ] Test all federates with config.json integration
-- [ ] Document config.json vs runner.json separation of concerns
+### Phase 6: HELICS Config.json Integration (COMPLETED)
+- [x] Research HELICS config.json format and relationship with runner.json
+- [x] Renamed helics_grid_config.json to grid_config.json (cleaner naming)
+- [x] Updated template/config.json with example publication and subscription
+- [x] Document config.json vs runner.json separation of concerns
 
-### Phase 7: Cosim-toolbox Integration (Future)
-- [ ] (Deferred for later issue)
+**Phase 6 Decision Summary:**
+Current architecture is optimal and requires no further config.json expansion:
+
+1. **Grid federate**: Uses config/grid_config.json for static properties (timing, logging, broker connection) ✅
+   - Dynamic subscriptions/publications registered programmatically based on pandapower Excel file
+   - HELICS docs: "API configuration is most useful for dynamic configuration"
+
+2. **Broker/Recorder/House_player**: Use CLI tools (helics_broker, helics_recorder, helics_player) ✅
+   - All configuration via CLI flags in runner.json exec commands
+   - Config.json would duplicate CLI flags with no functional benefit
+   - Simpler and more maintainable than separate config files
+
+3. **Config.json vs Runner.json separation:**
+   - **Config.json**: Static federate properties (name, loglevel, coreType, period, offset, max_cosim_duration, broker, flags)
+   - **Runner.json**: Execution parameters (directory, exec command, host, name) for `helics run`
+   - **Programmatic API**: Dynamic interface registration (subscriptions/publications determined at runtime)
+
+This hybrid approach provides optimal balance between:
+- Configuration clarity (static properties in JSON)
+- Runtime flexibility (dynamic interfaces via API)
+- Maintainability (no redundant config files for CLI tools)
+
+### Phase 7: Cosim-toolbox Integration (IN PROGRESS)
+
+**Goal**: Use CST Federate base class to reduce boilerplate and standardize federate structure.
+
+**Installation**: `pip install cosim-toolbox`
+
+#### Phase 7.1: Research (COMPLETED)
+- [x] Read CST documentation and analyze current grid/main.py
+- [x] **Key findings**: ~45% code reduction (126→60-70 lines), CST handles time loop/lifecycle/data exchange, GridLock keeps pandapower logic + dynamic interface registration
+- [x] **Strategy**: Override `create_federate()` for dynamic subscriptions/publications, override `update_internal_model()` for pandapower logic
+
+#### Phase 7.2: Template (COMPLETED)
+- [x] Create template/main.py with minimal CST Federate subclass example
+- [x] Add template/requirements.txt with `cosim-toolbox` dependency
+- [x] Document CST lifecycle methods and customization points
+
+#### Phase 7.3: Grid Implementation
+- [x] Add `cosim-toolbox` to grid/requirements.txt
+- [x] Create GridFederate class extending cosim_toolbox.Federate
+- [x] Override `create_federate()`: load config from JSON, load pandapower, register dynamic interfaces
+- [x] Override `update_internal_model()`: get data from federation, run power flow, send results
+- [x] Update grid/main.py to use GridFederate class
+- [x] Test grid federate with CST (verify power flow + E2E test)
+- [ ] Update grid unit tests for CST pattern

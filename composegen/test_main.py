@@ -142,7 +142,8 @@ def test_create_recorder_runner(tmp_path):
 
 def test_create_grid_config(tmp_path):
     conf = OmegaConf.create(MINIMAL_CONF)
-    output_path = tmp_path / "helics_grid_config.json"
+    # Test grid config creation
+    output_path = tmp_path / "grid_config.json"
     create_grid_config(conf, str(output_path))
     assert output_path.exists()
     with open(output_path) as f:
@@ -275,7 +276,7 @@ def test_excel_empty_load_sheet(tmp_path, capsys, monkeypatch):
         compose = yaml.safe_load(f)
     assert set(compose["services"].keys()) == {"broker", "grid", "house", "recorder"}
     # Check grid config
-    grid_config_path = tmp_path / "helics_grid_config.json"
+    grid_config_path = tmp_path / "grid_config.json"
     assert grid_config_path.exists()
     with open(grid_config_path) as f:
         grid_conf = json.load(f)

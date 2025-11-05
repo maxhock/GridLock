@@ -225,7 +225,7 @@ def main(config_path, output_dir):
 
     # Generate grid HELICS config
     grid_config_path = os.path.join(
-        os.path.dirname(config_path), "helics_grid_config.json"
+        os.path.dirname(config_path), "grid_config.json"
     )
     create_grid_config(conf, grid_config_path)
 

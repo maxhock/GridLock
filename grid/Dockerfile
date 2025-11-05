@@ -11,8 +11,9 @@ VOLUME ["/config"]
 RUN mkdir /data
 VOLUME ["/data"]
 
-# Install HELICS CLI and pandapower
-RUN pip install --no-cache-dir helics[cli] pandapower openpyxl
+# Install dependencies from requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the grid simulation script into the container
 COPY main.py .
