@@ -224,9 +224,7 @@ def main(config_path, output_dir):
     create_recorder_runner(conf, recorder_runner_path)
 
     # Generate grid HELICS config
-    grid_config_path = os.path.join(
-        os.path.dirname(config_path), "grid_config.json"
-    )
+    grid_config_path = os.path.join(os.path.dirname(config_path), "grid_config.json")
     create_grid_config(conf, grid_config_path)
 
 

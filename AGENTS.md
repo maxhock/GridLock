@@ -6,17 +6,21 @@ Do not modify this file unless explicitly asked to do so by the user.
 ## Concept
 GridLock is a Co-Simulation platform for power grids and houses or loads based on Helics.
 Each Helics federate class is organized as a separate docker container and communication between them is restricted to using the Helics publication and subscription api.
-Class specific features are defined inside each container, whereas experiment specific configurations of each instance are handled by using config files.
-These configuration files are derived from a central experiment.yml with a configuration generation container. 
+Class specific features are defined inside each container, whereas experiment specific configurations of each instance are handled by using Helics runner.json files.
+These runner.json files are derived from a central experiment.yml with a configuration generation container. 
+The runner.json files are also responsible for starting the right number of instances of a class inside each container.
 This configuration generation container also generates a docker compose file that is used to launch the correct containers.
 Each container by default mounts a central data and config folder.
 The data folder contains input and output folders where the input folder contains grid definitions and timeseries data and the output folder contains the resulting timeseries after an experiment.
+The log folder is meant to store logs.
+
 
 ### Tech Stack
 | Component        | Technology         | Version/Notes                | Documentation Link                                      |
 |------------------|-------------------|------------------------------|---------------------------------------------------------|
 | Simulation       | HELICS            | Latest stable                | [HELICS Docs](https://docs.helics.org/en/latest/)       |
 | Grid Modeling    | pandapower        | Python 3.11 compatible       | [pandapower Docs](https://pandapower.readthedocs.io/)   |
+| Federate Framework | CoSim Toolbox (CST) | latest stable            | [CST Docs](https://cst.readthedocs.io/en/stable/) |
 | Containerization | Docker Compose    | v2+                          | [Docker Compose Docs](https://docs.docker.com/compose/) |
 | Configuration    | OmegaConf         | YAML-based, Python 3.11      | [OmegaConf Docs](https://omegaconf.readthedocs.io/)     |
 | Scripting        | Python            | 3.11                         | [Python Docs](https://docs.python.org/3.11/)            |
@@ -28,9 +32,9 @@ The data folder contains input and output folders where the input folder contain
 
 | Container   | Description                                                                 | Entrypoint / Role                |
 |-------------|-----------------------------------------------------------------------------|----------------------------------|
-| composegen  | Docker compose file and configuration generator, automatically derives necessary values if possible | Turns experiment.yml into configs |
+| composegen  | Docker compose file and configuration generator, automatically derives necessary values if possible | Turns experiment.yml into configs and runner.json files |
 | broker      | HELICS broker, manages message routing and synchronisation between simulations | Starts HELICS broker             |
-| grid        | Grid federate, runs pandapower simulation, subscribes to house setpoints     | Loads grid, runs power flow      |
+| grid        | Grid federate based on CoSim Toolbox, runs pandapower simulation             | Loads grid, runs power flow      |
 | rl_house    | RL-based house federate, interacts via obs/action topics for rich control    | RL agent, publishes/receives obs/action |
 | csv_house   | Player house federate, publishes precomputed load series from CSV            | Publishes timeseries to grid (needs to be reintroduced later)    |
 | recorder    | Recorder federate, captures HELICS topics to output logs                     | Runs helics_recorder CLI         |
@@ -45,6 +49,7 @@ The data folder contains input and output folders where the input folder contain
 │   └── test_main.py      # Unit tests for grid logic
 ├── house/                # RL house federate and CSV player
 ├── recorder/             # Minimal image for helics_recorder
+├── template/             # Template for new CST-based federates
 ├── config/
 │   ├── experiment.yml    # Main experiment configuration (source of truth)
 │   └── tmp/              # Generated docker-compose and config files
@@ -63,7 +68,7 @@ The data folder contains input and output folders where the input folder contain
 ## Code Conventions
 Each folder representing a container must be independent of the other folders in the sense that they use their own environment through their dockerfile.
 Code is implemented in simple scripts that use functions provided by libraries as far as possible. 
-There is no need for pyproject.toml or similar, as the main script is automatically executed through the docker file or compose command.
+There is no need for pyproject.toml or similar, as the main script is automatically executed through the runner.json file which is in turn called by docker file or compose command.
 Each function is accompanied by a function test in the test_*.py file using pytest.
 
 ## Configuration Conventions
@@ -73,11 +78,10 @@ In experiment.yml information must never be doubled.
 It must be placed at the most logical place and all other mentions must reference this according to the OmegaConf interpolation pattern ${.nestinglevel.value}.
 Other, more static configuration should be either done in code or inside a configuration file in the federate folder.
 
-
 ## Style Conventions
 Code must be typed and formatted with black formatter.
 Code should be broken up into logical functions that are easy to test.
-Code should have minimal repetition according to the DRY principle.
+Code must have minimal repetition according to the DRY principle.
 
 ## Test Conventions
 Unit tests are stored inside the docker container inside a test_*.py file and cover each function.
@@ -90,11 +94,12 @@ All code changes must be done in a branch other than main.
 The branch must be named after the issue it solves in the pattern #issue-solution-to-issue.
 Finalized code changes are only integrated to main through pull requests.
 Always pull before pushing.
+Always format with black and ruff before commiting.
 
 ## Agent Role
 You are playing the following role:
 You are a programming partner in pair programming called Samantha.
-Your knowledge of frameworks is old, always look up the current practice in the documentation of a given framework.
+Your knowledge of frameworks is outdated, always look up the current practice in the documentation of a given framework.
 Given a task you split it into separate smaller tasks that you can solve.
 Always use the /todos command to show these tasks.
 Alternatively if using /todos is not possible, print this task list as markdown in the form:
@@ -103,91 +108,3 @@ Alternatively if using /todos is not possible, print this task list as markdown 
 - [ ] Formulate implementation strategy
 - [ ] Implement function
 ```
-
-## Issue #23 Todo List - HELICS Runner.json Refactoring
-
-### Phase 1: Grid Federate Proof-of-Concept
-- [x] Research HELICS `helics run` command and runner.json format/schema
-- [x] Create static runner.json for grid federate
-- [x] Update grid Dockerfile/entrypoint to use `helics run` with runner.json
-- [x] Test grid federate with runner.json (single instance)
-- [x] Document learnings and patterns
-
-### Phase 2: House Federate Implementation
-- [x] Create static runner.json for house federate
-- [x] Update house Dockerfile/entrypoint to use `helics run` with runner.json
-- [x] Test house federate with runner.json (single instance)
-- [x] Test house federate with multiple instances (13 houses in one container)
-
-### Phase 3: Remaining Federates
-- [x] Create static runner.json for broker
-- [x] Update broker Dockerfile/entrypoint to use `helics run` with runner.json
-- [x] Create static runner.json for recorder
-- [x] Update recorder Dockerfile/entrypoint to use `helics run` with runner.json
-
-### Phase 4: Composegen Integration
-- [x] Move all runner.json files from federate folders to config/tmp folder
-- [x] Update all Dockerfiles to remove COPY runner.json and use /config mount path in CMD instead
-- [x] Test that all federates still work with runner.json loaded from /config mount at runtime
-- [x] Refactor composegen to generate runner.json files per federate class
-- [x] Refactor composegen to generate simplified docker-compose.yml (one container per class)
-- [x] End-to-end test with composegen-generated configs (4 containers: broker, grid, house with 13 instances, recorder)
-- [x] Update composegen unit tests (10 tests passing: docker-compose generation, 4 runner.json generation functions, grid config, Excel node detection)
-- [ ] Update experiment.yml structure if needed (currently compatible with new architecture)
-
-### Phase 5: Testing & Documentation
-- [x] Update docker-compose.test.yml (documented 4-service architecture, composegen-test and grid-test)
-- [ ] Update README.md with new architecture (deferred to later issue)
-
-### Phase 6: HELICS Config.json Integration (COMPLETED)
-- [x] Research HELICS config.json format and relationship with runner.json
-- [x] Renamed helics_grid_config.json to grid_config.json (cleaner naming)
-- [x] Updated template/config.json with example publication and subscription
-- [x] Document config.json vs runner.json separation of concerns
-
-**Phase 6 Decision Summary:**
-Current architecture is optimal and requires no further config.json expansion:
-
-1. **Grid federate**: Uses config/grid_config.json for static properties (timing, logging, broker connection) ✅
-   - Dynamic subscriptions/publications registered programmatically based on pandapower Excel file
-   - HELICS docs: "API configuration is most useful for dynamic configuration"
-
-2. **Broker/Recorder/House_player**: Use CLI tools (helics_broker, helics_recorder, helics_player) ✅
-   - All configuration via CLI flags in runner.json exec commands
-   - Config.json would duplicate CLI flags with no functional benefit
-   - Simpler and more maintainable than separate config files
-
-3. **Config.json vs Runner.json separation:**
-   - **Config.json**: Static federate properties (name, loglevel, coreType, period, offset, max_cosim_duration, broker, flags)
-   - **Runner.json**: Execution parameters (directory, exec command, host, name) for `helics run`
-   - **Programmatic API**: Dynamic interface registration (subscriptions/publications determined at runtime)
-
-This hybrid approach provides optimal balance between:
-- Configuration clarity (static properties in JSON)
-- Runtime flexibility (dynamic interfaces via API)
-- Maintainability (no redundant config files for CLI tools)
-
-### Phase 7: Cosim-toolbox Integration (IN PROGRESS)
-
-**Goal**: Use CST Federate base class to reduce boilerplate and standardize federate structure.
-
-**Installation**: `pip install cosim-toolbox`
-
-#### Phase 7.1: Research (COMPLETED)
-- [x] Read CST documentation and analyze current grid/main.py
-- [x] **Key findings**: ~45% code reduction (126→60-70 lines), CST handles time loop/lifecycle/data exchange, GridLock keeps pandapower logic + dynamic interface registration
-- [x] **Strategy**: Override `create_federate()` for dynamic subscriptions/publications, override `update_internal_model()` for pandapower logic
-
-#### Phase 7.2: Template (COMPLETED)
-- [x] Create template/main.py with minimal CST Federate subclass example
-- [x] Add template/requirements.txt with `cosim-toolbox` dependency
-- [x] Document CST lifecycle methods and customization points
-
-#### Phase 7.3: Grid Implementation
-- [x] Add `cosim-toolbox` to grid/requirements.txt
-- [x] Create GridFederate class extending cosim_toolbox.Federate
-- [x] Override `create_federate()`: load config from JSON, load pandapower, register dynamic interfaces
-- [x] Override `update_internal_model()`: get data from federation, run power flow, send results
-- [x] Update grid/main.py to use GridFederate class
-- [x] Test grid federate with CST (verify power flow + E2E test)
-- [ ] Update grid unit tests for CST pattern

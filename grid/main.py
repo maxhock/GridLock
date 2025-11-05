@@ -36,6 +36,11 @@ class GridFederate(Federate):
         self.stop_time = self.config.get("max_cosim_duration", 82800.0)
         self.granted_time = 0.0
 
+        self.scenario = {}
+        self.scenario["start_time"] = "2025-01-01T00:00:00"
+        self.scenario["stop_time"] = "2025-01-02T00:00:00"
+        self.set_metadata()
+
         # Initialize CST's data exchange dictionaries
         self.pubs = {}
         self.inputs = {}
