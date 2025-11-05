@@ -6,17 +6,21 @@ Do not modify this file unless explicitly asked to do so by the user.
 ## Concept
 GridLock is a Co-Simulation platform for power grids and houses or loads based on Helics.
 Each Helics federate class is organized as a separate docker container and communication between them is restricted to using the Helics publication and subscription api.
-Class specific features are defined inside each container, whereas experiment specific configurations of each instance are handled by using config files.
-These configuration files are derived from a central experiment.yml with a configuration generation container. 
+Class specific features are defined inside each container, whereas experiment specific configurations of each instance are handled by using Helics runner.json files.
+These runner.json files are derived from a central experiment.yml with a configuration generation container. 
+The runner.json files are also responsible for starting the right number of instances of a class inside each container.
 This configuration generation container also generates a docker compose file that is used to launch the correct containers.
 Each container by default mounts a central data and config folder.
 The data folder contains input and output folders where the input folder contains grid definitions and timeseries data and the output folder contains the resulting timeseries after an experiment.
+The log folder is meant to store logs.
+
 
 ### Tech Stack
 | Component        | Technology         | Version/Notes                | Documentation Link                                      |
 |------------------|-------------------|------------------------------|---------------------------------------------------------|
 | Simulation       | HELICS            | Latest stable                | [HELICS Docs](https://docs.helics.org/en/latest/)       |
 | Grid Modeling    | pandapower        | Python 3.11 compatible       | [pandapower Docs](https://pandapower.readthedocs.io/)   |
+| Federate Framework | CoSim Toolbox (CST) | latest stable            | [CST Docs](https://cst.readthedocs.io/en/stable/) |
 | Containerization | Docker Compose    | v2+                          | [Docker Compose Docs](https://docs.docker.com/compose/) |
 | Configuration    | OmegaConf         | YAML-based, Python 3.11      | [OmegaConf Docs](https://omegaconf.readthedocs.io/)     |
 | Scripting        | Python            | 3.11                         | [Python Docs](https://docs.python.org/3.11/)            |
@@ -28,9 +32,9 @@ The data folder contains input and output folders where the input folder contain
 
 | Container   | Description                                                                 | Entrypoint / Role                |
 |-------------|-----------------------------------------------------------------------------|----------------------------------|
-| composegen  | Docker compose file and configuration generator, automatically derives necessary values if possible | Turns experiment.yml into configs |
+| composegen  | Docker compose file and configuration generator, automatically derives necessary values if possible | Turns experiment.yml into configs and runner.json files |
 | broker      | HELICS broker, manages message routing and synchronisation between simulations | Starts HELICS broker             |
-| grid        | Grid federate, runs pandapower simulation, subscribes to house setpoints     | Loads grid, runs power flow      |
+| grid        | Grid federate based on CoSim Toolbox, runs pandapower simulation             | Loads grid, runs power flow      |
 | rl_house    | RL-based house federate, interacts via obs/action topics for rich control    | RL agent, publishes/receives obs/action |
 | csv_house   | Player house federate, publishes precomputed load series from CSV            | Publishes timeseries to grid (needs to be reintroduced later)    |
 | recorder    | Recorder federate, captures HELICS topics to output logs                     | Runs helics_recorder CLI         |
@@ -45,6 +49,7 @@ The data folder contains input and output folders where the input folder contain
 │   └── test_main.py      # Unit tests for grid logic
 ├── house/                # RL house federate and CSV player
 ├── recorder/             # Minimal image for helics_recorder
+├── template/             # Template for new CST-based federates
 ├── config/
 │   ├── experiment.yml    # Main experiment configuration (source of truth)
 │   └── tmp/              # Generated docker-compose and config files
@@ -63,7 +68,7 @@ The data folder contains input and output folders where the input folder contain
 ## Code Conventions
 Each folder representing a container must be independent of the other folders in the sense that they use their own environment through their dockerfile.
 Code is implemented in simple scripts that use functions provided by libraries as far as possible. 
-There is no need for pyproject.toml or similar, as the main script is automatically executed through the docker file or compose command.
+There is no need for pyproject.toml or similar, as the main script is automatically executed through the runner.json file which is in turn called by docker file or compose command.
 Each function is accompanied by a function test in the test_*.py file using pytest.
 
 ## Configuration Conventions
@@ -73,11 +78,10 @@ In experiment.yml information must never be doubled.
 It must be placed at the most logical place and all other mentions must reference this according to the OmegaConf interpolation pattern ${.nestinglevel.value}.
 Other, more static configuration should be either done in code or inside a configuration file in the federate folder.
 
-
 ## Style Conventions
 Code must be typed and formatted with black formatter.
 Code should be broken up into logical functions that are easy to test.
-Code should have minimal repetition according to the DRY principle.
+Code must have minimal repetition according to the DRY principle.
 
 ## Test Conventions
 Unit tests are stored inside the docker container inside a test_*.py file and cover each function.
@@ -90,11 +94,12 @@ All code changes must be done in a branch other than main.
 The branch must be named after the issue it solves in the pattern #issue-solution-to-issue.
 Finalized code changes are only integrated to main through pull requests.
 Always pull before pushing.
+Always format with black and ruff before commiting.
 
 ## Agent Role
 You are playing the following role:
 You are a programming partner in pair programming called Samantha.
-Your knowledge of frameworks is old, always look up the current practice in the documentation of a given framework.
+Your knowledge of frameworks is outdated, always look up the current practice in the documentation of a given framework.
 Given a task you split it into separate smaller tasks that you can solve.
 Always use the /todos command to show these tasks.
 Alternatively if using /todos is not possible, print this task list as markdown in the form:

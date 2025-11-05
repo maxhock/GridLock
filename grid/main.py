@@ -1,124 +1,132 @@
+"""
+Grid federate using CoSim Toolbox (CST).
+Loads pandapower network, runs power flow, exchanges data via HELICS.
+"""
+
+from cosim_toolbox.sims import Federate
 import helics as h
 import pandapower as pp
 import argparse
 import os
+import json
+
+
+class GridFederate(Federate):
+    """Grid federate with pandapower power flow simulation."""
+
+    def __init__(self, federate_name, grid_path):
+        super().__init__(federate_name)
+        self.net = None
+        self.load_indices = []  # List of pandapower load indices
+        self.ext_grid_indices = []  # List of pandapower ext_grid indices
+        self.grid_path = grid_path
+
+    def create_federate(self):
+        """Initialize HELICS federate and load pandapower network."""
+
+        # Load config from JSON file (bypassing CST's database requirement)
+        config_path = f"/config/{self.federate_name}_config.json"
+        with open(config_path, "r") as f:
+            self.config = json.load(f)
+
+        # Initialize CST's required attributes
+        self.scenario_name = "grid"
+        self.federate_type = "value"
+        self.period = self.config.get("period", 3600.0)
+        self.stop_time = self.config.get("max_cosim_duration", 82800.0)
+        self.granted_time = 0.0
+
+        self.scenario = {}
+        self.scenario["start_time"] = "2025-01-01T00:00:00"
+        self.scenario["stop_time"] = "2025-01-02T00:00:00"
+        self.set_metadata()
+
+        # Initialize CST's data exchange dictionaries
+        self.pubs = {}
+        self.inputs = {}
+        self.data_from_federation = {"inputs": {}, "endpoints": {}}
+        self.data_to_federation = {"publications": {}, "endpoints": {}}
+
+        # Use CST's create_helics_fed() method - it reads from self.config
+        self.create_helics_fed()
+
+        # Load pandapower network
+        self.net = pp.from_excel(self.grid_path)
+
+        # Register dynamic subscriptions for loads
+        self.load_indices = list(self.net.load.index)
+        for pp_idx in self.load_indices:
+            sub_key = f"house_{pp_idx}/house_load"
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "double")
+            # Track in CST's data structures so get_data_from_federation() works
+            self.inputs[sub_key] = {"type": "double", "key": sub_key}
+            self.data_from_federation["inputs"][sub_key] = None
+
+        # Register dynamic publications for ext_grids
+        self.ext_grid_indices = list(self.net.ext_grid.index)
+        for pp_idx in self.ext_grid_indices:
+            pub_key = f"Grid/transformer_{pp_idx}_power"
+            h.helicsFederateRegisterGlobalPublication(
+                self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
+            )
+            # Track in CST's data structures so send_data_to_federation() works
+            self.pubs[pub_key] = {"type": "double", "key": pub_key}
+            self.data_to_federation["publications"][pub_key] = None
+
+        print(
+            f"Grid federate initialized: {len(self.load_indices)} loads, {len(self.ext_grid_indices)} ext_grids"
+        )
+
+    def update_internal_model(self):
+        """Run power flow simulation for current timestep."""
+        print(f"\n=== Time: {self.granted_time} ===")
+
+        # Read subscriptions from CST's data structure
+        for pp_idx in self.load_indices:
+            sub_key = f"house_{pp_idx}/house_load"
+            if sub_key in self.data_from_federation["inputs"]:
+                value_w = self.data_from_federation["inputs"][sub_key]
+                if value_w is not None:
+                    self.net.load.at[pp_idx, "p_mw"] = value_w / 1000.0
+
+        try:
+            pp.runpp(self.net, numba=False)
+            print("Power flow executed.")
+        except Exception as e:
+            print(f"Power flow failed: {e}")
+            return
+
+        # Write publications to CST's data structure
+        for pp_idx in self.ext_grid_indices:
+            p_mw = self.net.res_ext_grid.at[pp_idx, "p_mw"]
+            self.data_to_federation["publications"][
+                f"Grid/transformer_{pp_idx}_power"
+            ] = float(p_mw)
+            print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Grid federate for HELICS co-simulation."
-    )
+    parser = argparse.ArgumentParser(description="Grid federate using CST")
     parser.add_argument(
-        "--grid_file", type=str, default=None, help="Path to pandapower Excel file."
+        "--grid_file",
+        type=str,
+        required=True,
+        help="Path to Excel file (relative to /data/input)",
     )
-    args, unknown = parser.parse_known_args()
+    args, _ = parser.parse_known_args()
     return args
-
-
-def create_federate(grid_path=None):
-    # 1. Create the pandapower network
-    try:
-        print(f"Attempting to load pandapower network from Excel: {grid_path}")
-        net = pp.from_excel(grid_path)
-        print("Loaded pandapower network from Excel.")
-    except FileNotFoundError:
-        raise FileNotFoundError(f"grid_file '{grid_path}' not found.")
-    except Exception as e:
-        raise RuntimeError(f"Failed to load pandapower network from '{grid_path}': {e}")
-
-    # 2. Create the HELICS federate from config file
-    fed = h.helicsCreateValueFederateFromConfig("/config/helics_grid_config.json")
-    print("Created HELICS federate in code.")
-
-    # 3. Register all subscriptions (for p_mw setpoints for each load)
-    load_index_list = list(net.load.index)
-    load_subs = []  # list of (pp_load_idx, helics_input)
-    for pp_idx in load_index_list:
-        sub_key = f"house_{pp_idx}/house_load"
-        sub = h.helicsFederateRegisterSubscription(fed, sub_key, "double")
-        load_subs.append((pp_idx, sub))
-    print(f"Registered {len(load_subs)} HELICS subscriptions for load p_mw setpoints.")
-    print("Subscriptions registered:")
-    for pp_idx, sub in load_subs:
-        key = h.helicsInputGetName(sub)
-        print(f"  Subscription: {key}")
-
-    # 4. Register all publications (for ext_grid p_mw)
-    ext_grid_index_list = list(net.ext_grid.index)
-    ext_grid_pubs = []  # list of (pp_ext_idx, helics_pub)
-    for pp_idx in ext_grid_index_list:
-        pub_key = "Grid/transformer_power"
-        pub = h.helicsFederateRegisterGlobalPublication(
-            fed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
-        )
-        ext_grid_pubs.append((pp_idx, pub))
-    print(f"Registered {len(ext_grid_pubs)} HELICS publications for ext_grid p_mw.")
-    print("Publications registered:")
-    for pp_idx, pub in ext_grid_pubs:
-        key = h.helicsPublicationGetName(pub)
-        print(f"  Publication: {key}")
-
-    # Return all state needed for simulation
-    return fed, net, load_subs, ext_grid_pubs
-
-
-def run_federate(fed, net, load_subs, ext_grid_pubs):
-    h.helicsFederateEnterExecutingMode(fed)
-    print("Federate entered execution mode.")
-
-    current_time = 0
-    end_time = 82800 + 3600  # You can adjust this as needed
-    time_step = 3600
-
-    while current_time < end_time:
-        print(f"\n=== HELICS time step: {current_time} ===")
-
-        # a. Request next time step
-        current_time = h.helicsFederateRequestTime(fed, current_time + time_step)
-        print(f"Granted time: {current_time}")
-
-        # b. Update p_mw for each load from HELICS subscriptions
-        for pp_idx, sub in load_subs:
-            if h.helicsInputIsUpdated(sub):
-                value = h.helicsInputGetDouble(sub) / 1000
-                # Only update if a numeric value is provided
-                if value is not None:
-                    net.load.at[pp_idx, "p_mw"] = float(value)
-                    # print(f"Set load {pp_idx} p_mw to {value} from HELICS subscription.")
-
-        # c. Run pandapower power flow
-        pp.runpp(net, numba=False)
-        print("Power flow executed.")
-
-        # d. Publish ext_grid p_mw values to HELICS
-        for pp_idx, pub in ext_grid_pubs:
-            p_mw = net.res_ext_grid.at[pp_idx, "p_mw"]
-            h.helicsPublicationPublishDouble(pub, float(p_mw))
-            print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
-
-    h.helicsFederateFinalize(fed)
-    print("Federate finalized.")
-
-
-def cleanup_federate(fed):
-    h.helicsFederateDisconnect(fed)
-    # h.helicsCloseLibrary()
-    print("Federate freed and HELICS library closed.")
 
 
 def main():
     args = parse_args()
-    if args.grid_file is None:
-        print("Error: --grid_file argument is required.")
-        exit(1)
     grid_path = os.path.join("/data", "input", args.grid_file)
-    fed, net, load_subs, ext_grid_pubs = create_federate(grid_path)
+    federate = GridFederate("grid", grid_path)
+
     try:
-        run_federate(fed, net, load_subs, ext_grid_pubs)
-    except Exception as e:
-        print(f"An error occurred during federate execution: {e}")
+        federate.create_federate()
+        federate.run_cosim_loop()
     finally:
-        cleanup_federate(fed)
+        federate.destroy_federate()
 
 
 if __name__ == "__main__":
