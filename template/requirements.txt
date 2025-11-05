@@ -1,2 +1,4 @@
 pandas
 numpy
+cosim_toolbox
+helics
