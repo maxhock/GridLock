@@ -65,7 +65,7 @@ class GridFederate(Federate):
         # Register dynamic publications for ext_grids
         self.ext_grid_indices = list(self.net.ext_grid.index)
         for pp_idx in self.ext_grid_indices:
-            pub_key = "Grid/transformer_power"
+            pub_key = f"Grid/transformer_{pp_idx}_power"
             h.helicsFederateRegisterGlobalPublication(
                 self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
             )
@@ -99,9 +99,9 @@ class GridFederate(Federate):
         # Write publications to CST's data structure
         for pp_idx in self.ext_grid_indices:
             p_mw = self.net.res_ext_grid.at[pp_idx, "p_mw"]
-            self.data_to_federation["publications"]["Grid/transformer_power"] = float(
-                p_mw
-            )
+            self.data_to_federation["publications"][
+                f"Grid/transformer_{pp_idx}_power"
+            ] = float(p_mw)
             print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
 
 

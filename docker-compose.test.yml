@@ -4,7 +4,7 @@
 # Architecture:
 # - Composegen: Generates runner.json files and docker-compose.yml from experiment.yml
 # - Grid: Pandapower power flow simulation federate
-# - Broker, House_Player, Recorder: Currently have no unit tests (use helics_player/helics_recorder/helics_broker CLI tools)
+# - broker, house_player, recorder: Currently have no unit tests (use helics_player/helics_recorder/helics_broker CLI tools)
 #
 # Usage:
 #   docker compose -f docker-compose.test.yml up --build --abort-on-container-exit

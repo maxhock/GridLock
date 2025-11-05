@@ -11,11 +11,10 @@ VOLUME ["/config"]
 RUN mkdir /data
 VOLUME ["/data"]
 
-# Install HELICS CLI and pandapower
+# Install HELICS CLI
 RUN pip install --no-cache-dir helics[cli] 
-# Copy the grid simulation script and runner.json into the container
+# Copy the template script and runner.json into the container
 COPY main.py .
-COPY runner.json .
 
 
 # --- Test stage ---

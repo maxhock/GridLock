@@ -89,7 +89,9 @@ def create_docker_compose(conf, output_path):
 def create_broker_runner(conf, output_path):
     """Generate broker runner.json file."""
     fed_conf = OmegaConf.select(conf, "federates")
-    num_federates = fed_conf["grid"]["num_nodes"] + 2  # grid + recorder + houses
+    num_federates = (
+        fed_conf["grid"]["num_nodes"] + 2
+    )  # number of nodes in grid + recorder + houses
 
     runner = {
         "name": "broker_federation",
