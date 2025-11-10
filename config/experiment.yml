@@ -26,6 +26,9 @@ federates:
     build_folder: ${.name}
     target: grid
     output_file: /data/output/${.target}.log
+    command: helics_recorder --name=${.name} --capture=${.target} --output=${.output_file} --broker=${..broker.name}
+  battery:
+    config_file: "/config/battery_config.yaml"
 general:
     start_time: 0
     end_time: 82800  # You can adjust this as needed

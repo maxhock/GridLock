@@ -1,0 +1,17 @@
+# This file should be placed in ./config/battery_config.yaml
+# It's a BatteryComponentConfig, not a full BuildingSimulationConfig
+
+type: "battery" # This is the component type
+sensor:
+  observe_electrical_soc: true
+  observe_electrical_flow: true
+
+model:
+  type: "simple" # SimpleBatteryModelConfig
+  capacity: 13500.0 # in Joules (e.g., 13.5 kWh * 3600 J/Wh is much larger)
+  # Let's use a 13.5 kWh battery
+  # 13.5 kWh * 1000 W/kW * 3600 s/h = 48,600,000 Joules
+  capacity: 48600000.0 
+  max_power: 5000.0 # 5 kW
+  efficiency: 0.95
+  init_soc: 0.5

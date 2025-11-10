@@ -2,7 +2,7 @@ import helics as h
 import time
 
 # Create broker (ZMQ, waiting for 2 federates)
-broker = h.helicsCreateBroker("zmq", "mainbroker", "--federates=2")
+broker = h.helicsCreateBroker("zmq", "mainbroker", "--federates=3")
 
 print("Broker created. Waiting for federates to connect...")
 

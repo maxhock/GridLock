@@ -33,12 +33,82 @@ def get_num_nodes(grid_file_path: Path) -> int:
         Number of load nodes in the grid
     """
     try:
-        df = pd.read_excel(grid_file_path, sheet_name="load")
-        return len(df)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Grid file not found at {grid_file_path}")
-    except Exception as e:
-        raise RuntimeError(f"Error reading grid file: {e}")
+        grid_file = fed_conf["grid"]["grid_file"]
+    except Exception:
+        grid_file = None
+
+    if grid_file:
+        excel_path = os.path.join("/data", "input", grid_file)
+        if os.path.isfile(excel_path):
+            try:
+                df = pd.read_excel(excel_path, sheet_name="load", header=0)
+                num_nodes = len(df)
+                print(f"Detected {num_nodes} nodes from {grid_file} (load sheet).")
+                conf["federates"]["grid"]["num_nodes"] = int(num_nodes)
+            except Exception as e:
+                print(f"WARNING: Could not read load sheet from {grid_file}: {e}")
+        else:
+            print(
+                f"No valid grid_file found at {excel_path}; using num_nodes from config."
+            )
+    else:
+        print("No grid_file specified in config; using num_nodes from config.")
+
+    # Create simplified docker-compose with 4 services (no command overrides)
+    compose_config = {
+        "services": {
+            "broker": {
+                "container_name": "broker",
+                "build": "${PWD}/broker",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+            },
+            "grid": {
+                "container_name": "grid",
+                "build": "${PWD}/grid",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"],
+            },
+            "house": {
+                "container_name": "house",
+                "build": "${PWD}/house",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"],
+            },
+            "battery": {
+                "container_name": "battery",
+                "build": "${PWD}/battery",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"],
+            },
+            "controller": { 
+                "container_name": "controller",
+                "build": "${PWD}/controller",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"],
+            },
+            "recorder": {
+                "container_name": "recorder",
+                "build": "${PWD}/recorder",
+                "volumes": ["${PWD}/config:/config", "${PWD}/data:/data"],
+                "networks": ["helics-net"],
+                "depends_on": ["broker"],
+            },
+        },
+        "networks": {"helics-net": {"driver": "bridge"}},
+    }
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w") as f:
+        OmegaConf.save(OmegaConf.create(compose_config), f, resolve=False)
+
+    print(f"Generated {output_path} with {len(compose_config['services'])} services:")
+    for service_name in compose_config["services"].keys():
+        print(f"  - {service_name}")
 
 
 def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictConfig:
@@ -106,26 +176,23 @@ def _calculate_node_assignments(conf: DictConfig, num_nodes: int) -> None:
                 )
             fill_remaining_fed = fed_name
 
-        if placements := fed_config.get("placement"):
-            for node_idx in placements:
-                if 0 <= node_idx < num_nodes:
-                    if global_node_map[node_idx]:
-                        print(
-                            f"Warning: Node {node_idx} reassigned from "
-                            f"{global_node_map[node_idx]} to {fed_name}"
-                        )
-                    global_node_map[node_idx] = fed_name
-                else:
-                    print(f"Warning: Node {node_idx} out of bounds (0-{num_nodes-1})")
+def create_house_runner(conf, output_path):
+    """Generate house runner.json file with multiple house instances."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_houses = fed_conf["grid"]["num_nodes"]
+    stop_time = conf["general"]["end_time"] - conf["general"]["start_time"]
+    dt_seconds = conf["general"]["time_step"]
+    config_file = fed_conf["house"]["config_file"] # Assumes config entry
 
-    # Second pass: fill remaining
-    if fill_remaining_fed:
-        global_node_map = [fed or fill_remaining_fed for fed in global_node_map]
-
-    # Validate all nodes assigned
-    if unassigned := [i for i, v in enumerate(global_node_map) if v is None]:
-        raise ValueError(
-            f"Nodes {unassigned} unassigned. Use 'fill_remaining: true' to cover all nodes."
+    federates = []
+    for i in range(num_houses):
+        federates.append(
+            {
+                "directory": "/app",
+                "exec": f"python main.py --name=house_{i} --config={config_file} --stop_time={stop_time} --dt={dt_seconds}",
+                "host": "localhost",
+                "name": f"house_{i}",
+            }
         )
 
     # Build placement maps
@@ -176,6 +243,55 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
 
     print(f"Generated docker-compose.yml at {output_path}")
 
+def create_battery_runner(conf, output_path):
+    """Generate battery runner.json file with multiple battery instances."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_batteries = fed_conf["grid"]["num_nodes"]
+    stop_time = conf["general"]["end_time"] - conf["general"]["start_time"]
+    dt_seconds = conf["general"]["time_step"]
+    config_file = fed_conf["battery"]["config_file"] # Assumes a new config entry
+
+    federates = []
+    for i in range(num_batteries):
+        federates.append(
+            {
+                "directory": "/app", # Assuming code is in /app
+                "exec": f"python main.py --name=battery_{i} --config={config_file} --stop_time={stop_time} --dt={dt_seconds}",
+                "host": "localhost",
+                "name": f"battery_{i}",
+            }
+        )
+
+    runner = {"name": "battery_federation", "federates": federates}
+
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path} with {num_batteries} battery instances")
+
+
+def create_controller_runner(conf, output_path):
+    """Generate controller runner.json file with multiple controller instances."""
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_controllers = fed_conf["grid"]["num_nodes"]
+    stop_time = conf["general"]["end_time"] - conf["general"]["start_time"]
+    dt_seconds = conf["general"]["time_step"]
+
+    federates = []
+    for i in range(num_controllers):
+        federates.append(
+            {
+                "directory": "/app", 
+                "exec": f"python main.py --name=controller_{i} --stop_time={stop_time} --dt={dt_seconds}",
+                "host": "localhost",
+                "name": f"controller_{i}",
+            }
+        )
+
+    runner = {"name": "controller_federation", "federates": federates}
+
+    with open(output_path, "w") as f:
+        json.dump(runner, f, indent=2)
+    print(f"Generated {output_path} with {num_controllers} controller instances")
 
 def create_runner_files(conf: DictConfig, output_dir: Path) -> None:
     """
@@ -364,19 +480,24 @@ def main():
     # Generate docker-compose.yml
     create_docker_compose(conf, output_dir / "docker-compose.yml")
 
-    # Generate runner files for all federates
-    create_runner_files(conf, output_dir)
+    # Generate runner.json files for each federate class
+    broker_runner_path = os.path.join(output_dir, "broker_runner.json")
+    grid_runner_path = os.path.join(output_dir, "grid_runner.json")
+    house_runner_path = os.path.join(output_dir, "house_runner.json")
+    battery_runner_path = os.path.join(output_dir, "battery_runner.json")
+    controller_runner_path = os.path.join(output_dir, "controller_runner.json") # NEW
+    recorder_runner_path = os.path.join(output_dir, "recorder_runner.json")
 
-    # Generate grid config file
-    create_grid_config(conf, output_dir)
-
-    # Generate forecasting config file
-    create_forecasting_config(conf, output_dir)
-
-    # Generate player config files for any player federates
-    for fed_name, fed_config in conf.federates.items():
-        if "player" in fed_name and fed_name not in SKIP_NODE_ASSIGNMENT:
-            create_player_config(fed_name, fed_config, output_dir)
+    create_broker_runner(conf, broker_runner_path)
+    create_grid_runner(conf, grid_runner_path)
+    create_house_runner(conf, house_runner_path)
+    create_battery_runner(conf, battery_runner_path)
+    create_controller_runner(conf, controller_runner_path)
+    create_recorder_runner(conf, recorder_runner_path)
+    
+    # Generate grid HELICS config
+    grid_config_path = os.path.join(os.path.dirname(config_path), "grid_config.json")
+    create_grid_config(conf, grid_config_path)
 
 
 if __name__ == "__main__":
