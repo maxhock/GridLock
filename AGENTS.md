@@ -108,3 +108,12 @@ Alternatively if using /todos is not possible, print this task list as markdown 
 - [ ] Formulate implementation strategy
 - [ ] Implement function
 ```
+
+## Project Plan: Dynamic Federate Placement
+
+- [x] **Move grid config to `config/tmp`:** Create a `grid_config.json` in `config/tmp` and update `composegen` and `grid/main.py` to use it.
+- [x] **Update `composegen` for `node_x` naming:** Modify `composegen/main.py` to generate `runner.json` for houses, naming them `node_0`, `node_1`, etc., based on bus indices from `experiment.yml`.
+- [x] **Update `grid` for dynamic subscriptions:** Modify `grid/main.py` to dynamically subscribe to `node_x/P` topics based on the grid's load buses.
+- [x] **Test `node` pub/sub:** Run a minimal experiment to ensure the grid correctly subscribes to `node_x` topics.
+- [ ] **Update `experiment.yml` configuration:** Change `experiment.yml` to use a `placements` list for houses under the `house` key.
+- [ ] **Test new placement strategy:** Run a full co-simulation experiment to verify that nodes are placed correctly and the grid receives their data.

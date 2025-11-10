@@ -133,7 +133,7 @@ def create_grid_runner(conf, output_path):
 
 
 def create_house_runner(conf, output_path):
-    """Generate house runner.json file with multiple house instances."""
+    """Generate house runner.json file with multiple node instances."""
     fed_conf = OmegaConf.select(conf, "federates")
     num_houses = fed_conf["grid"]["num_nodes"]
     input_file = fed_conf["house"]["input_file"]
@@ -143,9 +143,9 @@ def create_house_runner(conf, output_path):
         federates.append(
             {
                 "directory": ".",
-                "exec": f"helics_player {input_file} --broker=broker --local --name=house_{i}",
+                "exec": f"helics_player {input_file} --broker=broker --local --name=node_{i}",
                 "host": "localhost",
-                "name": f"house_{i}",
+                "name": f"node_{i}",
             }
         )
 
@@ -153,7 +153,7 @@ def create_house_runner(conf, output_path):
 
     with open(output_path, "w") as f:
         json.dump(runner, f, indent=2)
-    print(f"Generated {output_path} with {num_houses} house instances")
+    print(f"Generated {output_path} with {num_houses} node instances")
 
 
 def create_recorder_runner(conf, output_path):
@@ -226,7 +226,7 @@ def main(config_path, output_dir):
     create_recorder_runner(conf, recorder_runner_path)
 
     # Generate grid HELICS config
-    grid_config_path = os.path.join(os.path.dirname(config_path), "grid_config.json")
+    grid_config_path = os.path.join(output_dir, "grid_config.json")
     create_grid_config(conf, grid_config_path)
 
 

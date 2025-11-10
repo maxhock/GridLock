@@ -25,7 +25,7 @@ class GridFederate(Federate):
         """Initialize HELICS federate and load pandapower network."""
 
         # Load config from JSON file (bypassing CST's database requirement)
-        config_path = f"/config/{self.federate_name}_config.json"
+        config_path = f"/config/tmp/{self.federate_name}_config.json"
         with open(config_path, "r") as f:
             self.config = json.load(f)
 
@@ -56,7 +56,7 @@ class GridFederate(Federate):
         # Register dynamic subscriptions for loads
         self.load_indices = list(self.net.load.index)
         for pp_idx in self.load_indices:
-            sub_key = f"house_{pp_idx}/house_load"
+            sub_key = f"node_{pp_idx}/P"
             h.helicsFederateRegisterSubscription(self.hfed, sub_key, "double")
             # Track in CST's data structures so get_data_from_federation() works
             self.inputs[sub_key] = {"type": "double", "key": sub_key}
@@ -83,7 +83,7 @@ class GridFederate(Federate):
 
         # Read subscriptions from CST's data structure
         for pp_idx in self.load_indices:
-            sub_key = f"house_{pp_idx}/house_load"
+            sub_key = f"node_{pp_idx}/P"
             if sub_key in self.data_from_federation["inputs"]:
                 value_w = self.data_from_federation["inputs"][sub_key]
                 if value_w is not None:
