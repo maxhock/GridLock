@@ -15,6 +15,10 @@ federates:
     build_folder: ${.name}
     input_file: /data/input/sample_house.csv
     command: helics_player ${.input_file} --broker=${..broker.name} --name=${.name} --local
+    # Optional: Explicit placement on specific grid nodes (comment out to use all nodes)
+    placement: [0, 2, 5, 8]
+    # Optional: Fill remaining unassigned nodes with this federate type
+    fill_remaining: true
   recorder:
     name: recorder
     build_folder: ${.name}

@@ -133,27 +133,75 @@ def create_grid_runner(conf, output_path):
 
 
 def create_house_runner(conf, output_path):
-    """Generate house runner.json file with multiple node instances."""
-    fed_conf = OmegaConf.select(conf, "federates")
-    num_houses = fed_conf["grid"]["num_nodes"]
-    input_file = fed_conf["house"]["input_file"]
+    """
+    Generate house runner.json file with node instances based on placement configuration.
 
+    Supports:
+    - Optional 'placement' list: explicit bus indices to place houses on
+    - Optional 'fill_remaining' bool: if true, fill unassigned nodes with houses
+    """
+    fed_conf = OmegaConf.select(conf, "federates")
+    num_nodes = fed_conf["grid"]["num_nodes"]
+    house_conf = fed_conf["house"]
+    input_file = house_conf["input_file"]
+
+    # Get optional placement configuration
+    placement = house_conf.get("placement", None)
+    fill_remaining = house_conf.get("fill_remaining", False)
+
+    # Initialize node assignment map (None = unassigned)
+    node_map = [None] * num_nodes
+
+    # Apply explicit placements
+    if placement is not None:
+        for node_idx in placement:
+            if 0 <= node_idx < num_nodes:
+                node_map[node_idx] = "house"
+            else:
+                print(
+                    f"WARNING: placement index {node_idx} is out of range [0, {num_nodes-1}]"
+                )
+
+    # Fill remaining nodes if requested
+    if fill_remaining:
+        for i in range(num_nodes):
+            if node_map[i] is None:
+                node_map[i] = "house"
+
+    # If no placement specified and fill_remaining is False, default to all nodes (backward compatibility)
+    if placement is None and not fill_remaining:
+        node_map = ["house"] * num_nodes
+
+    # Validate that all nodes are assigned
+    unassigned_nodes = [i for i, v in enumerate(node_map) if v is None]
+    if unassigned_nodes:
+        error_msg = f"ERROR: {len(unassigned_nodes)} node(s) are unassigned: {unassigned_nodes}\n"
+        error_msg += "       Either add them to the 'placement' list or set 'fill_remaining: true'"
+        raise ValueError(error_msg)
+
+    # Generate federates for assigned nodes
     federates = []
-    for i in range(num_houses):
-        federates.append(
-            {
-                "directory": ".",
-                "exec": f"helics_player {input_file} --broker=broker --local --name=node_{i}",
-                "host": "localhost",
-                "name": f"node_{i}",
-            }
-        )
+    for i, assignment in enumerate(node_map):
+        if assignment == "house":
+            federates.append(
+                {
+                    "directory": ".",
+                    "exec": f"helics_player {input_file} --broker=broker --local --name=node_{i}",
+                    "host": "localhost",
+                    "name": f"node_{i}",
+                }
+            )
 
     runner = {"name": "house_federation", "federates": federates}
 
     with open(output_path, "w") as f:
         json.dump(runner, f, indent=2)
-    print(f"Generated {output_path} with {num_houses} node instances")
+
+    # Report what was created
+    assigned_nodes = [i for i, v in enumerate(node_map) if v is not None]
+
+    print(f"Generated {output_path} with {len(federates)} house node instances")
+    print(f"  Assigned nodes: {assigned_nodes}")
 
 
 def create_recorder_runner(conf, output_path):
