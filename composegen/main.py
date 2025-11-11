@@ -1,14 +1,24 @@
-# composegen/main_rework.py
+# composegen/main.py
 """
-Reworked composegen script with modular, data-driven approach.
+Modular, data-driven composegen script for HELICS co-simulation.
 """
 
-import yaml
 import json
 import os
 from pathlib import Path
+from typing import Dict, List
+
 import pandas as pd
-from omegaconf import OmegaConf, DictConfig
+import yaml
+from omegaconf import DictConfig, OmegaConf
+
+# Constants
+SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid"}
+DEFAULT_COMMAND_TEMPLATES = {
+    "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
+    "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
+    "recorder": "helics_recorder --name={name} --capture={target} --output={output_file} --broker=broker",
+}
 
 
 def get_num_nodes(grid_file_path: Path) -> int:
@@ -32,116 +42,97 @@ def get_num_nodes(grid_file_path: Path) -> int:
 
 def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictConfig:
     """
-    Load the experiment configuration, determine dynamic values, and resolve all interpolations.
+    Load experiment configuration and calculate dynamic values.
 
-    This function:
-    1. Loads experiment.yml using OmegaConf
-    2. Reads the grid file to determine num_nodes
-    3. Calculates placement maps for node-based federates
-    4. Validates that all nodes are assigned
-    5. Calculates the total number of federate instances
-    6. Resolves all OmegaConf interpolations
+    Steps:
+    1. Load experiment.yml with OmegaConf
+    2. Determine num_nodes from grid file
+    3. Calculate placement maps and validate node assignments
+    4. Calculate total federate count for broker
+    5. Resolve all interpolations
 
     Args:
         config_path: Path to experiment.yml
-        data_input_path: Path to the data/input directory
+        data_input_path: Path to data/input directory
 
     Returns:
-        Fully resolved OmegaConf configuration object
+        Fully resolved OmegaConf configuration
     """
-    # Register the eval resolver for OmegaConf
     OmegaConf.register_new_resolver("eval", eval)
-
-    # Load the configuration
     conf = OmegaConf.load(config_path)
 
-    # Determine number of nodes from the grid file
+    # Determine number of nodes from grid file
     grid_file_path = data_input_path / conf.federates.grid.grid_file
     num_nodes = get_num_nodes(grid_file_path)
     conf.federates.grid.num_nodes = num_nodes
     print(f"Grid has {num_nodes} nodes.")
 
-    # Track global node assignments across all federates
-    global_node_map = [None] * num_nodes
+    # Calculate node assignments
+    _calculate_node_assignments(conf, num_nodes)
 
-    # First pass: Apply explicit placements for all federates
-    fill_remaining_federate = None
-    for fed_name, fed_config in conf.federates.items():
-        # Skip federates that never need node assignments
-        if fed_name in ["broker", "recorder", "grid"]:
+    # Calculate total federates for broker
+    total = sum(
+        fed_config.get("num_instances", 1)
+        for fed_name, fed_config in conf.federates.items()
+        if fed_name != "broker"
+    )
+    conf.federates.broker.total_federates = total
+    print(f"Total federates: {total}")
+
+    OmegaConf.resolve(conf)
+    return conf
+
+
+def _calculate_node_assignments(conf: DictConfig, num_nodes: int) -> None:
+    """Calculate and validate node-to-federate assignments."""
+    global_node_map = [None] * num_nodes
+    fill_remaining_fed = None
+
+    # Set num_instances for simple federates
+    for fed_name in SKIP_NODE_ASSIGNMENT:
+        if fed_name in conf.federates:
             conf.federates[fed_name].num_instances = 1
+
+    # First pass: explicit placements
+    for fed_name, fed_config in conf.federates.items():
+        if fed_name in SKIP_NODE_ASSIGNMENT:
             continue
 
-        # Track which federate has fill_remaining for second pass
-        if fed_config.get("fill_remaining", False):
-            fill_remaining_federate = fed_name
+        if fed_config.get("fill_remaining"):
+            fill_remaining_fed = fed_name
 
-        # Apply explicit placements if provided
-        if "placement" in fed_config and fed_config.placement:
-            for node_idx in fed_config.placement:
+        if placements := fed_config.get("placement"):
+            for node_idx in placements:
                 if 0 <= node_idx < num_nodes:
-                    if global_node_map[node_idx] is not None:
+                    if global_node_map[node_idx]:
                         print(
-                            f"Warning: Node {node_idx} already assigned to {global_node_map[node_idx]}. Overwriting with {fed_name}."
+                            f"Warning: Node {node_idx} reassigned from "
+                            f"{global_node_map[node_idx]} to {fed_name}"
                         )
                     global_node_map[node_idx] = fed_name
                 else:
-                    print(
-                        f"Warning: Placement index {node_idx} is out of bounds for {num_nodes} nodes."
-                    )
+                    print(f"Warning: Node {node_idx} out of bounds (0-{num_nodes-1})")
 
-    # Second pass: Apply fill_remaining if specified
-    if fill_remaining_federate:
-        for i in range(num_nodes):
-            if global_node_map[i] is None:
-                global_node_map[i] = fill_remaining_federate
+    # Second pass: fill remaining
+    if fill_remaining_fed:
+        global_node_map = [fed or fill_remaining_fed for fed in global_node_map]
 
-    # Validation: Check that all nodes are assigned
-    if None in global_node_map:
-        unassigned = [i for i, v in enumerate(global_node_map) if v is None]
+    # Validate all nodes assigned
+    if unassigned := [i for i, v in enumerate(global_node_map) if v is None]:
         raise ValueError(
-            f"Incomplete node assignment! Nodes {unassigned} are not assigned to any federate. "
-            f"Use 'fill_remaining: true' on a federate to cover all nodes."
+            f"Nodes {unassigned} unassigned. Use 'fill_remaining: true' to cover all nodes."
         )
 
-    # Build placement maps and num_instances for each federate from global map
+    # Build placement maps
     for fed_name, fed_config in conf.federates.items():
-        # Skip federates that don't use nodes
-        if fed_name in ["broker", "recorder", "grid"]:
+        if fed_name in SKIP_NODE_ASSIGNMENT:
             continue
 
-        # Build placement map from global assignments
         placement_map = {
             i: fed_name for i in range(num_nodes) if global_node_map[i] == fed_name
         }
-
-        # Store the number of instances and placement map
         conf.federates[fed_name].num_instances = len(placement_map)
         conf.federates[fed_name].placement_map = placement_map
-
-    # Validation: Check that all nodes are assigned
-    if None in global_node_map:
-        unassigned = [i for i, v in enumerate(global_node_map) if v is None]
-        raise ValueError(
-            f"Incomplete node assignment! Nodes {unassigned} are not assigned to any federate. "
-            f"Use 'fill_remaining: true' on a federate to cover all nodes."
-        )
-
-    # Calculate total number of federates for the broker
-    # This is: grid (1) + recorder (1) + sum of all node-based federate instances
-    total_federates = 0
-    for fed_name, fed_config in conf.federates.items():
-        if fed_name == "broker":
-            continue
-        total_federates += fed_config.get("num_instances", 1)
-
-    conf.federates.broker.total_federates = total_federates
-    print(f"Total federates: {total_federates}")
-
-    # Resolve all interpolations
-    OmegaConf.resolve(conf)
-
-    return conf
 
 
 def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
@@ -159,7 +150,7 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
     # Generate a service for each federate
     for fed_name, fed_config in conf.federates.items():
         service = {
-            "build": {"context": f"../../{fed_config.build_folder}"},
+            "build": f"../../{fed_config.build_folder}",
             "container_name": fed_name,
             "volumes": [
                 "../../data:/data",
@@ -171,10 +162,6 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
         # Add command only if specified in config
         if "command" in fed_config:
             service["command"] = fed_config.command
-
-        # All services depend on broker except broker itself
-        if fed_name != "broker":
-            service["depends_on"] = ["broker"]
 
         compose_config["services"][fed_name] = service
 
@@ -189,89 +176,82 @@ def create_runner_files(conf: DictConfig, output_dir: Path) -> None:
     """
     Generate runner.json files for all federates.
 
-    Creates appropriate runner files based on federate type:
-    - Simple federates (broker, grid, recorder): Single instance
-    - Node-based federates (house, etc.): Multiple instances based on placement_map
-
     Args:
-        conf: Fully resolved configuration object
-        output_dir: Directory where runner files should be written
+        conf: Fully resolved configuration
+        output_dir: Directory for runner files
     """
     for fed_name, fed_config in conf.federates.items():
-        runner_content = {"name": fed_name, "federates": []}
+        federates_list = (
+            _create_node_based_instances(fed_name, fed_config)
+            if fed_config.get("placement_map")
+            else [_create_simple_instance(fed_name, fed_config, conf)]
+        )
 
-        # Check if this federate has a placement map (node-based federates)
-        if "placement_map" in fed_config and fed_config.placement_map:
-            # Node-based federate: Create instances for each assigned node
-            for node_idx in sorted(fed_config.placement_map.keys()):
-                instance_name = f"node_{node_idx}"
-
-                # Build command for this instance
-                if "command" in fed_config:
-                    # Replace the placeholder name in the command with the actual instance name
-                    instance_command = fed_config.command.replace(
-                        f"--name={fed_name}", f"--name={instance_name}"
-                    )
-                else:
-                    # Default command for node-based federates
-                    if "player" in fed_name:
-                        # For player federates, use helics_player
-                        input_file = fed_config.get(
-                            "input_file", f"/data/input/{fed_name}.csv"
-                        )
-                        instance_command = f"helics_player --input={input_file} --broker=broker --name={instance_name} --local"
-                    else:
-                        # For other federates (e.g., house with Python code), use python main.py
-                        instance_command = (
-                            f"python main.py --name={instance_name} --broker=broker"
-                        )
-
-                runner_content["federates"].append(
-                    {
-                        "directory": "/app",
-                        "exec": instance_command,
-                        "host": "localhost",
-                        "name": instance_name,
-                    }
-                )
-        else:
-            # Simple federate: Single instance
-            # Get command - either from config or use a default
-            if "command" in fed_config:
-                if fed_name == "broker":
-                    command = fed_config.command.replace(
-                        "${broker.federates}",
-                        str(conf.federates.broker.total_federates),
-                    )
-                else:
-                    command = fed_config.command
-            else:
-                # Default command for federates without explicit command
-                if fed_name == "broker":
-                    command = f"helics_broker --federates={conf.federates.broker.total_federates} --name={fed_name} --ipv4"
-                elif fed_name == "grid":
-                    command = f"python main.py --name={fed_name} --broker=broker --grid_file={fed_config.grid_file}"
-                elif fed_name == "recorder":
-                    target = fed_config.get("target", "grid")
-                    output = fed_config.get("output_file", f"/data/output/{target}.log")
-                    command = f"helics_recorder --name={fed_name} --capture={target} --output={output} --broker=broker"
-                else:
-                    command = f"--name={fed_name} --broker=broker"
-
-            runner_content["federates"].append(
-                {
-                    "directory": "/app",
-                    "exec": command,
-                    "host": "localhost",
-                    "name": fed_name,
-                }
-            )
-
-        # Write the runner file
         runner_path = output_dir / f"{fed_name}_runner.json"
         with open(runner_path, "w") as f:
-            json.dump(runner_content, f, indent=4)
+            json.dump({"name": fed_name, "federates": federates_list}, f, indent=4)
         print(f"Generated {runner_path.name}")
+
+
+def _create_node_based_instances(fed_name: str, fed_config: DictConfig) -> List[Dict]:
+    """Create federate instances for node-based federates."""
+    instances = []
+    for node_idx in sorted(fed_config.placement_map.keys()):
+        instance_name = f"node_{node_idx}"
+
+        if "command" in fed_config:
+            command = fed_config.command.replace(
+                f"--name={fed_name}", f"--name={instance_name}"
+            )
+        elif "player" in fed_name:
+            input_file = fed_config.get("input_file", f"/data/input/{fed_name}.csv")
+            # Player config is in /config/tmp
+            config_file = f"/config/tmp/{fed_name}_config.json"
+            command = f"helics_player --input={input_file} --config-file={config_file} --broker=broker --name={instance_name} --local"
+        else:
+            command = f"python main.py --name={instance_name} --broker=broker"
+
+        instances.append(
+            {
+                "directory": "/app",
+                "exec": command,
+                "host": "localhost",
+                "name": instance_name,
+            }
+        )
+    return instances
+
+
+def _create_simple_instance(
+    fed_name: str, fed_config: DictConfig, conf: DictConfig
+) -> Dict:
+    """Create a single federate instance for simple federates."""
+    if "command" in fed_config:
+        command = fed_config.command
+        if fed_name == "broker":
+            command = command.replace(
+                "${broker.federates}", str(conf.federates.broker.total_federates)
+            )
+    elif fed_name in DEFAULT_COMMAND_TEMPLATES:
+        params = {
+            "name": fed_name,
+            "total_federates": conf.federates.broker.total_federates,
+            "grid_file": fed_config.get("grid_file", ""),
+            "target": fed_config.get("target", "grid"),
+            "output_file": fed_config.get(
+                "output_file", f"/data/output/{fed_config.get('target', 'grid')}.log"
+            ),
+        }
+        command = DEFAULT_COMMAND_TEMPLATES[fed_name].format(**params)
+    else:
+        command = f"--name={fed_name} --broker=broker"
+
+    return {
+        "directory": "/app",
+        "exec": command,
+        "host": "localhost",
+        "name": fed_name,
+    }
 
 
 def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
@@ -304,6 +284,35 @@ def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
     print(f"Generated {config_path.name}")
 
 
+def create_player_config(
+    fed_name: str, fed_config: DictConfig, output_dir: Path
+) -> None:
+    """
+    Generate HELICS player config file with unit specifications.
+
+    Args:
+        fed_name: Name of the player federate
+        fed_config: Configuration for the player federate
+        output_dir: Directory where player config should be written
+    """
+    # Default publication configuration
+    player_config = {
+        "publications": [
+            {
+                "key": "P",
+                "type": "double",
+                "unit": "kW",  # CSV data is in kW
+                "global": False,
+            }
+        ]
+    }
+
+    config_path = output_dir / f"{fed_name}_config.json"
+    with open(config_path, "w") as f:
+        json.dump(player_config, f, indent=2)
+    print(f"Generated {config_path.name}")
+
+
 def main():
     """
     Main function to generate docker-compose.yml and runner files.
@@ -327,6 +336,11 @@ def main():
 
     # Generate grid config file
     create_grid_config(conf, output_dir)
+
+    # Generate player config files for any player federates
+    for fed_name, fed_config in conf.federates.items():
+        if "player" in fed_name and fed_name not in SKIP_NODE_ASSIGNMENT:
+            create_player_config(fed_name, fed_config, output_dir)
 
 
 if __name__ == "__main__":

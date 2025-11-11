@@ -57,7 +57,7 @@ class GridFederate(Federate):
         self.load_indices = list(self.net.load.index)
         for pp_idx in self.load_indices:
             sub_key = f"node_{pp_idx}/P"
-            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "double")
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
             # Track in CST's data structures so get_data_from_federation() works
             self.inputs[sub_key] = {"type": "double", "key": sub_key}
             self.data_from_federation["inputs"][sub_key] = None
@@ -87,8 +87,7 @@ class GridFederate(Federate):
             if sub_key in self.data_from_federation["inputs"]:
                 value_w = self.data_from_federation["inputs"][sub_key]
                 if value_w is not None:
-                    self.net.load.at[pp_idx, "p_mw"] = value_w / 1000.0
-
+                    self.net.load.at[pp_idx, "p_mw"] = value_w
         try:
             pp.runpp(self.net, numba=False)
             print("Power flow executed.")
