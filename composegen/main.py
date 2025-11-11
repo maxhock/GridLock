@@ -58,7 +58,6 @@ def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictCon
     Returns:
         Fully resolved OmegaConf configuration
     """
-    OmegaConf.register_new_resolver("eval", eval)
     conf = OmegaConf.load(config_path)
 
     # Determine number of nodes from grid file
@@ -99,6 +98,11 @@ def _calculate_node_assignments(conf: DictConfig, num_nodes: int) -> None:
             continue
 
         if fed_config.get("fill_remaining"):
+            if fill_remaining_fed is not None:
+                raise ValueError(
+                    f"Multiple federates have 'fill_remaining: true': {fill_remaining_fed}, {fed_name}. "
+                    "Only one federate can use fill_remaining."
+                )
             fill_remaining_fed = fed_name
 
         if placements := fed_config.get("placement"):
@@ -150,11 +154,11 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
     # Generate a service for each federate
     for fed_name, fed_config in conf.federates.items():
         service = {
-            "build": f"../../{fed_config.build_folder}",
+            "build": f"${{PWD}}/{fed_config.build_folder}",
             "container_name": fed_name,
             "volumes": [
-                "../../data:/data",
-                "../../config/tmp:/config/tmp:ro",
+                "${PWD}/data:/data",
+                "${PWD}/config/tmp:/config/tmp:ro",
             ],
             "networks": ["helics-net"],
         }
@@ -228,10 +232,6 @@ def _create_simple_instance(
     """Create a single federate instance for simple federates."""
     if "command" in fed_config:
         command = fed_config.command
-        if fed_name == "broker":
-            command = command.replace(
-                "${broker.federates}", str(conf.federates.broker.total_federates)
-            )
     elif fed_name in DEFAULT_COMMAND_TEMPLATES:
         params = {
             "name": fed_name,
@@ -244,7 +244,7 @@ def _create_simple_instance(
         }
         command = DEFAULT_COMMAND_TEMPLATES[fed_name].format(**params)
     else:
-        command = f"--name={fed_name} --broker=broker"
+        command = f"python main.py --name={fed_name} --broker=broker"
 
     return {
         "directory": "/app",
@@ -270,7 +270,7 @@ def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
         "loglevel": conf.general.loglevel,
         "coreType": "zmq",
         "period": conf.general.time_step,
-        "offset": conf.general.start_time,
+        "offset": conf.general.start_time - conf.general.start_time,
         "max_cosim_duration": conf.general.end_time,
         "broker": conf.federates.broker.name,
         "uninterruptible": False,

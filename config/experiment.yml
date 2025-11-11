@@ -2,7 +2,6 @@ federates:
   broker:
     name: broker
     build_folder: ${.name}
-    federates: ${eval:'${..grid.num_nodes}+2'}
   grid:
     name: grid
     build_folder: ${.name}
