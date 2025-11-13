@@ -1,0 +1,39 @@
+# ───────── Core scientific stack (let pip resolve) ─────────
+numpy
+scipy
+pandas
+matplotlib
+h5py
+
+# ───────── Grid sampling specific packages ─────────
+pandapower==3.0.0
+geopandas
+contextily
+rasterio
+shapely
+pyogrio
+pyproj
+geopy
+sqlalchemy
+psycopg2-binary
+
+# ───────── Demand allocation specific packages ─────────
+numba
+pvlib==0.12.0
+opendhw==0.2.5
+richardsonpy==0.2.1
+teaser==0.7.7
+
+# ───────── Utilities and I/O ─────────
+openpyxl
+xlrd
+pylightxl
+tables
+requests
+pyyaml
+python-dotenv
+
+# ───────── Testing and development ─────────
+pytest
+ipython
+jupyter

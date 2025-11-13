@@ -1,0 +1,13 @@
+# Compiled code
+**/__pycache__/
+*.py[cod]
+.ruff_cache/
+
+# Sensitive data
+0.data_preparation
+gurobi.lic
+
+# Others
+Archive/
+3.urbs/
+4.powerflow/

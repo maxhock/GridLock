@@ -1,0 +1,7 @@
+{
+	"name": "Data Generation Environment",
+	"build": {
+		"dockerfile": "../data-generation/Dockerfile"
+	},
+	"workspaceFolder": "/app"
+}
