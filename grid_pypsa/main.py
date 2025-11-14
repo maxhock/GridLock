@@ -104,9 +104,9 @@ class GridPyPSAFederate(Federate):
             gen_bus = self.network.generators.at[idx, "bus"]
             # Get power injection at that bus (positive = generation)
             p_mw = self.network.buses_t.p[gen_bus].iloc[-1]
-            self.data_to_federation["publications"][
-                f"Grid/transformer_{idx}_power"
-            ] = float(p_mw)
+            self.data_to_federation["publications"][f"Grid/transformer_{idx}_power"] = (
+                float(p_mw)
+            )
             print(f"Published generator {idx} p_mw: {p_mw}")
 
 

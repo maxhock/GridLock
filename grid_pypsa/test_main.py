@@ -63,9 +63,7 @@ def test_create_federate(mocker, tmp_path):
 
     # Verify dynamic publications registered for generators
     assert len(federate.ext_grid_indices) == 1
-    assert (
-        grid_pypsa_main.h.helicsFederateRegisterGlobalPublication.call_count == 1
-    )
+    assert grid_pypsa_main.h.helicsFederateRegisterGlobalPublication.call_count == 1
 
 
 def test_update_internal_model(mocker):
@@ -116,10 +114,10 @@ def test_update_internal_model(mocker):
     mock_network.pf.assert_called_once()
 
     # Verify publication was set
+    assert "Grid/transformer_0_power" in federate.data_to_federation["publications"]
     assert (
-        "Grid/transformer_0_power" in federate.data_to_federation["publications"]
+        federate.data_to_federation["publications"]["Grid/transformer_0_power"] == 1.5
     )
-    assert federate.data_to_federation["publications"]["Grid/transformer_0_power"] == 1.5
 
 
 def test_load_pypsa_from_pandapower_excel(mocker):
