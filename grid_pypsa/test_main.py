@@ -78,12 +78,17 @@ def test_update_internal_model(mocker):
     mock_loads_at.__setitem__ = mocker.MagicMock()
     mock_network.loads.at = mock_loads_at
 
-    # Mock generators_t.p to return power value
-    mock_gen_p = mocker.MagicMock()
-    mock_gen_p.__getitem__ = mocker.MagicMock(
+    # Mock generators.at to return bus name
+    mock_generators_at = mocker.MagicMock()
+    mock_generators_at.__getitem__ = mocker.MagicMock(return_value="0")
+    mock_network.generators.at = mock_generators_at
+
+    # Mock buses_t.p to return power value
+    mock_bus_p = mocker.MagicMock()
+    mock_bus_p.__getitem__ = mocker.MagicMock(
         return_value=mocker.MagicMock(iloc=mocker.MagicMock(__getitem__=lambda x: 1.5))
     )
-    mock_network.generators_t.p = mock_gen_p
+    mock_network.buses_t.p = mock_bus_p
 
     # Create federate instance
     federate = grid_pypsa_main.GridPyPSAFederate("grid", "/data/input/test.xlsx")

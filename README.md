@@ -29,7 +29,8 @@ This project provides a fully containerized, reproducible, and config-driven HEL
 ## Project Structure
 
 - `broker/`      — Broker Dockerfile
-- `grid/`        — Grid federate
+- `grid/`        — Grid federate (pandapower)
+- `grid_pypsa/`  — Grid federate (PyPSA alternative)
 - `house/`       — House federate (HELICS player)
 - `recorder/`    — Minimal HELICS recorder federate
 - `composegen/`  — Docker Compose generator script and Dockerfile
@@ -41,16 +42,42 @@ This project provides a fully containerized, reproducible, and config-driven HEL
 
 All runtime parameters are set in `config/experiment.yml`. Example:
 ```yaml
-experiment:
-        num_houses: 4
+federates:
         broker:
                 name: broker
-        house:
-                csv: /config/sample_house.csv
         grid:
-                script: GridSimulation.py
+                name: grid
+                build_folder: grid
+                grid_file: kerber_landnetz_freileitung_1.xlsx
+        house_player:
+                name: house_player
+                fill_remaining: true
+        recorder:
+                name: recorder
+                target: grid
 ```
-- Change `num_houses` to set the number of house federates.
+
+### Using PyPSA Instead of Pandapower
+
+To use PyPSA for power flow simulation, replace `grid:` with `grid_pypsa:` in your configuration:
+
+```yaml
+federates:
+        broker:
+                name: broker
+        grid_pypsa:
+                name: grid
+                build_folder: grid_pypsa
+                grid_file: kerber_landnetz_freileitung_1.xlsx
+        # ... other federates
+```
+
+See `config/experiment_pypsa.yml` for a complete example. Both grid federates use the same input format (pandapower Excel files) and provide identical HELICS interfaces, making them drop-in replacements for each other.
+
+### Configuration Options
+
+- Change grid federate implementation (`grid` or `grid_pypsa`)
+- Set number of houses using placement or fill_remaining
 - The broker, grid federate and recorder are always included.
 
 ## How It Works

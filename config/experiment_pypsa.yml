@@ -1,0 +1,23 @@
+federates:
+  broker:
+    name: broker
+    build_folder: ${.name}
+  grid_pypsa:
+    name: grid
+    build_folder: grid_pypsa
+    grid_file: kerber_landnetz_freileitung_1.xlsx
+  house_player:
+    name: house_player
+    build_folder: ${.name}
+    input_file: /data/input/sample_house.csv
+    fill_remaining: true
+  recorder:
+    name: recorder
+    build_folder: ${.name}
+    target: grid
+    output_file: /data/output/${.target}.log
+general:
+    start_time: 0
+    end_time: 82800  # You can adjust this as needed
+    time_step: 3600
+    loglevel: warning

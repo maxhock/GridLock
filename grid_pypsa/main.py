@@ -98,8 +98,12 @@ class GridPyPSAFederate(Federate):
             return
 
         # Write publications to CST's data structure
+        # For slack generators, get power from bus injection
         for idx in self.ext_grid_indices:
-            p_mw = self.network.generators_t.p[idx].iloc[-1]
+            # Get the bus where this generator is connected
+            gen_bus = self.network.generators.at[idx, "bus"]
+            # Get power injection at that bus (positive = generation)
+            p_mw = self.network.buses_t.p[gen_bus].iloc[-1]
             self.data_to_federation["publications"][
                 f"Grid/transformer_{idx}_power"
             ] = float(p_mw)
