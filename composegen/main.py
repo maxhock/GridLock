@@ -13,10 +13,11 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 # Constants
-SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid"}
+SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid", "grid_pypsa"}
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
     "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
+    "grid_pypsa": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
     "recorder": "helics_recorder --name={name} --capture={target} --output={output_file} --broker=broker",
 }
 
@@ -61,9 +62,11 @@ def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictCon
     conf = OmegaConf.load(config_path)
 
     # Determine number of nodes from grid file
-    grid_file_path = data_input_path / conf.federates.grid.grid_file
+    # Support both grid and grid_pypsa federates
+    grid_fed_name = "grid" if "grid" in conf.federates else "grid_pypsa"
+    grid_file_path = data_input_path / conf.federates[grid_fed_name].grid_file
     num_nodes = get_num_nodes(grid_file_path)
-    conf.federates.grid.num_nodes = num_nodes
+    conf.federates[grid_fed_name].num_nodes = num_nodes
     print(f"Grid has {num_nodes} nodes.")
 
     # Calculate node assignments
@@ -254,9 +257,9 @@ def _create_simple_instance(
     }
 
 
-def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
+def create_grid_config(conf: DictConfig, output_dir: Path, grid_fed_name: str) -> None:
     """
-    Generate grid_config.json for the grid federate.
+    Generate grid_config.json for the grid federate (grid or grid_pypsa).
 
     This config file contains general simulation parameters and HELICS settings
     that the grid federate needs.
@@ -264,9 +267,10 @@ def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
     Args:
         conf: Fully resolved configuration object
         output_dir: Directory where grid_config.json should be written
+        grid_fed_name: Name of the grid federate ("grid" or "grid_pypsa")
     """
     grid_config = {
-        "name": conf.federates.grid.name,
+        "name": conf.federates[grid_fed_name].name,
         "loglevel": conf.general.loglevel,
         "coreType": "zmq",
         "period": conf.general.time_step,
@@ -334,8 +338,9 @@ def main():
     # Generate runner files for all federates
     create_runner_files(conf, output_dir)
 
-    # Generate grid config file
-    create_grid_config(conf, output_dir)
+    # Generate grid config file (support both grid and grid_pypsa)
+    grid_fed_name = "grid" if "grid" in conf.federates else "grid_pypsa"
+    create_grid_config(conf, output_dir, grid_fed_name)
 
     # Generate player config files for any player federates
     for fed_name, fed_config in conf.federates.items():

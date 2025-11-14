@@ -143,8 +143,9 @@ def test_create_recorder_runner(tmp_path):
 def test_create_grid_config(tmp_path):
     conf = OmegaConf.create(MINIMAL_CONF)
     # Test grid config creation
-    output_path = tmp_path / "grid_config.json"
-    create_grid_config(conf, str(output_path))
+    output_dir = tmp_path
+    create_grid_config(conf, str(output_dir), "grid")
+    output_path = output_dir / "grid_config.json"
     assert output_path.exists()
     with open(output_path) as f:
         grid_conf = json.load(f)
