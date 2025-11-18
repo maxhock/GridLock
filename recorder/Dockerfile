@@ -13,5 +13,6 @@ VOLUME ["/data"]
 
 # Install HELICS CLI only
 RUN pip install --no-cache-dir helics[cli]
-# Default command: run a placeholder (will be overridden by compose)
-CMD ["helics_recorder"]
+
+# Default command: launch the recorder using helics run with config from mount
+CMD ["helics", "run", "--path=/config/tmp/recorder_runner.json", "--no-log-files"]

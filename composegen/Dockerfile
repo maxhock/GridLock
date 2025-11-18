@@ -12,7 +12,8 @@ RUN mkdir /data
 VOLUME ["/data"]
 
 # Install omegaconf, pyyaml, pandas, and openpyxl for config parsing and Excel reading
-RUN pip install omegaconf pyyaml pandas openpyxl
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the main generator script
 COPY main.py .

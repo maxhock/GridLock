@@ -14,5 +14,5 @@ VOLUME ["/data"]
 # Install HELICS CLI
 RUN pip install --no-cache-dir helics[cli]
 
-# Default command: launch the house federate as a HELICS player using the CSV from the /config mount
-CMD ["helics_player", "/config/sample_house.csv", "--broker=broker"]
+# Default command: launch all house_player federates using helics run with config from mount
+CMD ["helics", "run", "--path=/config/tmp/house_player_runner.json", "--no-log-files"]

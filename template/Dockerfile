@@ -11,11 +11,9 @@ VOLUME ["/config"]
 RUN mkdir /data
 VOLUME ["/data"]
 
-# Install dependencies from requirements.txt
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the grid simulation script into the container
+# Install HELICS CLI
+RUN pip install --no-cache-dir helics[cli] 
+# Copy the template script and runner.json into the container
 COPY main.py .
 
 
@@ -30,8 +28,8 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Default command: run via HELICS runner with config from mount
-CMD ["helics", "run", "--path=/config/tmp/grid_runner.json", "--no-log-files"]
+# Default command: run via HELICS runner
+CMD ["helics", "run", "--path=runner.json"]
 
 # --- Usage ---
 # To run tests during build:

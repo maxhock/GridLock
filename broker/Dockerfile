@@ -14,5 +14,5 @@ VOLUME ["/data"]
 # Install dependencies: HELICS CLI
 RUN pip install --no-cache-dir helics[cli]
 
-# Default command: launch the broker with required arguments
-CMD ["helics_broker", "--federates=4", "--name=broker", "--ipv4"]
+# Default command: launch the broker using helics run with config from mount
+CMD ["helics", "run", "--path=/config/tmp/broker_runner.json", "--no-log-files"]
