@@ -6,10 +6,12 @@ Loads pandapower network from Excel, converts to PyPSA, runs power flow, exchang
 from cosim_toolbox.sims import Federate
 import helics as h
 import pypsa
+import pandapower as pp
 import pandas as pd
 import argparse
 import os
 import json
+import math
 
 
 class GridPyPSAFederate(Federate):
@@ -114,23 +116,28 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
     """
     Load a pandapower network from Excel and convert to PyPSA network.
 
+    This function loads a pandapower network from an Excel file and then
+    converts it to PyPSA format. It uses pandapower's from_excel() to load
+    the network, then manually transfers components to PyPSA.
+
+    Note: PyPSA's built-in import_from_pandapower_net() has issues with
+    standard line/transformer types in some networks, so we use a custom
+    conversion approach.
+
     Args:
         excel_path: Path to Excel file with pandapower format
 
     Returns:
         PyPSA Network object
     """
+    # Load pandapower network from Excel
+    pp_net = pp.from_excel(excel_path)
+
     # Create PyPSA network
     network = pypsa.Network()
 
-    # Read pandapower Excel sheets
-    buses_df = pd.read_excel(excel_path, sheet_name="bus")
-    loads_df = pd.read_excel(excel_path, sheet_name="load")
-    ext_grid_df = pd.read_excel(excel_path, sheet_name="ext_grid")
-    lines_df = pd.read_excel(excel_path, sheet_name="line")
-
     # Add buses to PyPSA network
-    for idx, row in buses_df.iterrows():
+    for idx, row in pp_net.bus.iterrows():
         network.add(
             "Bus",
             name=str(idx),
@@ -138,7 +145,7 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
         )
 
     # Add loads to PyPSA network
-    for idx, row in loads_df.iterrows():
+    for idx, row in pp_net.load.iterrows():
         network.add(
             "Load",
             name=str(idx),
@@ -147,7 +154,7 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
         )
 
     # Add external grids as generators in PyPSA
-    for idx, row in ext_grid_df.iterrows():
+    for idx, row in pp_net.ext_grid.iterrows():
         network.add(
             "Generator",
             name=str(idx),
@@ -157,24 +164,28 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
         )
 
     # Add lines to PyPSA network
-    for idx, row in lines_df.iterrows():
+    SQRT_3 = math.sqrt(3)  # For three-phase apparent power calculation
+    for idx, row in pp_net.line.iterrows():
+        from_bus = row["from_bus"]
+        # Get bus voltage with error handling
+        if from_bus in pp_net.bus.index:
+            v_nom = pp_net.bus.at[from_bus, "vn_kv"]
+        else:
+            v_nom = 1.0  # Default if bus not found
+
         network.add(
             "Line",
             name=str(idx),
-            bus0=str(row["from_bus"]),
+            bus0=str(from_bus),
             bus1=str(row["to_bus"]),
             r=row.get("r_ohm_per_km", 0.0) * row.get("length_km", 1.0),
             x=row.get("x_ohm_per_km", 0.0) * row.get("length_km", 1.0),
-            s_nom=row.get("max_i_ka", 1.0)
-            * row.get("df", 1.0)
-            * buses_df.loc[row["from_bus"], "vn_kv"]
-            * 1.732,
+            s_nom=row.get("max_i_ka", 1.0) * row.get("df", 1.0) * v_nom * SQRT_3,
         )
 
-    # Try to add transformers if they exist
-    try:
-        trafo_df = pd.read_excel(excel_path, sheet_name="trafo")
-        for idx, row in trafo_df.iterrows():
+    # Add transformers if they exist
+    if len(pp_net.trafo) > 0:
+        for idx, row in pp_net.trafo.iterrows():
             network.add(
                 "Transformer",
                 name=str(idx),
@@ -184,9 +195,6 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
                 x=row.get("vk_percent", 5.0) / 100.0,
                 r=row.get("vkr_percent", 0.5) / 100.0,
             )
-    except Exception:
-        # No transformers in this grid
-        pass
 
     # Set a snapshot for the power flow
     network.set_snapshots([pd.Timestamp("2025-01-01")])

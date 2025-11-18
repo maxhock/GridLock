@@ -35,6 +35,6 @@ CMD ["helics", "run", "--path=/config/tmp/grid_runner.json", "--no-log-files"]
 
 # --- Usage ---
 # To run tests during build:
-# docker build --target test --build-arg RUN_TESTS=true -t grid-pypsa-test .
+# docker build --target test -t grid-pypsa-test .
 # To build production image:
 # docker build --target final -t grid-pypsa-prod .

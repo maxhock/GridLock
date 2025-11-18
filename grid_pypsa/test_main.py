@@ -7,7 +7,6 @@ import main as grid_pypsa_main
 # Auto-mock helics, pypsa, and cosim_toolbox modules for all tests
 @pytest.fixture(autouse=True)
 def patch_modules(mocker):
-    import sys
 
     modules_patch = {
         "helics": mocker.MagicMock(),
@@ -122,13 +121,16 @@ def test_update_internal_model(mocker):
 
 def test_load_pypsa_from_pandapower_excel(mocker):
     """Unit: load_pypsa_from_pandapower_excel converts pandapower Excel to PyPSA network."""
+    # Mock pandapower network
+    mock_pp_net = mocker.MagicMock()
+
+    # Create mock DataFrames
     import pandas as pd
 
-    # Mock pandas read_excel
-    mock_buses = pd.DataFrame({"vn_kv": [20.0, 0.4]}, index=[0, 1])
-    mock_loads = pd.DataFrame({"bus": [1, 1], "p_mw": [1.0, 2.0]}, index=[0, 1])
-    mock_ext_grid = pd.DataFrame({"bus": [0]}, index=[0])
-    mock_lines = pd.DataFrame(
+    mock_pp_net.bus = pd.DataFrame({"vn_kv": [20.0, 0.4]}, index=[0, 1])
+    mock_pp_net.load = pd.DataFrame({"bus": [1, 1], "p_mw": [1.0, 2.0]}, index=[0, 1])
+    mock_pp_net.ext_grid = pd.DataFrame({"bus": [0]}, index=[0])
+    mock_pp_net.line = pd.DataFrame(
         {
             "from_bus": [0],
             "to_bus": [1],
@@ -140,19 +142,19 @@ def test_load_pypsa_from_pandapower_excel(mocker):
         },
         index=[0],
     )
+    mock_pp_net.trafo = pd.DataFrame(
+        {
+            "hv_bus": [0],
+            "lv_bus": [1],
+            "sn_mva": [1.0],
+            "vk_percent": [5.0],
+            "vkr_percent": [0.5],
+        },
+        index=[0],
+    )
 
-    def read_excel_side_effect(path, sheet_name):
-        sheets = {
-            "bus": mock_buses,
-            "load": mock_loads,
-            "ext_grid": mock_ext_grid,
-            "line": mock_lines,
-        }
-        if sheet_name == "trafo":
-            raise Exception("No trafo sheet")
-        return sheets[sheet_name]
-
-    mocker.patch("pandas.read_excel", side_effect=read_excel_side_effect)
+    # Mock pandapower from_excel
+    mocker.patch.object(grid_pypsa_main.pp, "from_excel", return_value=mock_pp_net)
 
     # Mock PyPSA Network
     mock_network = mocker.MagicMock()
@@ -165,8 +167,8 @@ def test_load_pypsa_from_pandapower_excel(mocker):
     # Verify network was created
     assert result is mock_network
 
-    # Verify components were added (2 buses, 2 loads, 1 generator, 1 line)
-    assert mock_network.add.call_count >= 6
+    # Verify components were added (2 buses, 2 loads, 1 generator, 1 line, 1 transformer)
+    assert mock_network.add.call_count >= 7
 
     # Verify snapshots were set
     mock_network.set_snapshots.assert_called_once()

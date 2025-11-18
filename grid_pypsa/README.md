@@ -51,9 +51,9 @@ This matches the pandapower grid federate interface exactly.
 - `load_pypsa_from_pandapower_excel()`: Converts pandapower Excel to PyPSA network
 - `update_internal_model()`: Runs PyPSA power flow each timestep
 
-### Pandapower to PyPSA Mapping
+### pandapower to PyPSA Mapping
 
-| Pandapower Component | PyPSA Component |
+| pandapower Component | PyPSA Component |
 |---------------------|-----------------|
 | bus                 | Bus             |
 | load                | Load            |
@@ -88,7 +88,7 @@ pytest -v test_main.py
 - openpyxl: Excel file reading
 - pandas: Data manipulation
 
-## Differences from Pandapower Grid
+## Differences from pandapower Grid
 
 While the interface is identical, there are some internal differences:
 

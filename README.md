@@ -57,7 +57,7 @@ federates:
                 target: grid
 ```
 
-### Using PyPSA Instead of Pandapower
+### Using PyPSA Instead of pandapower
 
 To use PyPSA for power flow simulation, replace `grid:` with `grid_pypsa:` in your configuration:
 
