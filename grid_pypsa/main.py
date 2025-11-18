@@ -11,7 +11,6 @@ import pandas as pd
 import argparse
 import os
 import json
-import math
 
 
 class GridPyPSAFederate(Federate):
@@ -116,13 +115,8 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
     """
     Load a pandapower network from Excel and convert to PyPSA network.
 
-    This function loads a pandapower network from an Excel file and then
-    converts it to PyPSA format. It uses pandapower's from_excel() to load
-    the network, then manually transfers components to PyPSA.
-
-    Note: PyPSA's built-in import_from_pandapower_net() has issues with
-    standard line/transformer types in some networks, so we use a custom
-    conversion approach.
+    This function uses pandapower's from_excel() to load the network and then
+    PyPSA's built-in import_from_pandapower_net() to convert it.
 
     Args:
         excel_path: Path to Excel file with pandapower format
@@ -133,71 +127,40 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
     # Load pandapower network from Excel
     pp_net = pp.from_excel(excel_path)
 
-    # Create PyPSA network
+    # Assign unique names to components that have None as name
+    # This prevents duplicate name errors in PyPSA
+    for component_type in ["load", "bus", "line", "trafo", "ext_grid"]:
+        if hasattr(pp_net, component_type):
+            component = getattr(pp_net, component_type)
+            if "name" in component.columns:
+                # Replace None/empty with index-based names
+                component["name"] = component["name"].fillna("").astype(str)
+                component.loc[component["name"] == "", "name"] = component.index.astype(
+                    str
+                )
+
+    # Clear type references to use actual parameter values instead of types
+    # This prevents issues with non-standard types that don't exist in PyPSA
+    if "type" in pp_net.line.columns:
+        pp_net.line["type"] = None
+    if "std_type" in pp_net.trafo.columns:
+        pp_net.trafo["std_type"] = None
+
+    # Create PyPSA network and import from pandapower
     network = pypsa.Network()
+    network.import_from_pandapower_net(pp_net, use_pandapower_index=True)
 
-    # Add buses to PyPSA network
-    for idx, row in pp_net.bus.iterrows():
-        network.add(
-            "Bus",
-            name=str(idx),
-            v_nom=row.get("vn_kv", 1.0),
-        )
-
-    # Add loads to PyPSA network
-    for idx, row in pp_net.load.iterrows():
-        network.add(
-            "Load",
-            name=str(idx),
-            bus=str(row["bus"]),
-            p_set=row.get("p_mw", 0.0),
-        )
-
-    # Add external grids as generators in PyPSA
-    for idx, row in pp_net.ext_grid.iterrows():
-        network.add(
-            "Generator",
-            name=str(idx),
-            bus=str(row["bus"]),
-            p_nom=1000.0,  # Large capacity
-            control="Slack",
-        )
-
-    # Add lines to PyPSA network
-    SQRT_3 = math.sqrt(3)  # For three-phase apparent power calculation
-    for idx, row in pp_net.line.iterrows():
-        from_bus = row["from_bus"]
-        # Get bus voltage with error handling
-        if from_bus in pp_net.bus.index:
-            v_nom = pp_net.bus.at[from_bus, "vn_kv"]
-        else:
-            v_nom = 1.0  # Default if bus not found
-
-        network.add(
-            "Line",
-            name=str(idx),
-            bus0=str(from_bus),
-            bus1=str(row["to_bus"]),
-            r=row.get("r_ohm_per_km", 0.0) * row.get("length_km", 1.0),
-            x=row.get("x_ohm_per_km", 0.0) * row.get("length_km", 1.0),
-            s_nom=row.get("max_i_ka", 1.0) * row.get("df", 1.0) * v_nom * SQRT_3,
-        )
-
-    # Add transformers if they exist
-    if len(pp_net.trafo) > 0:
-        for idx, row in pp_net.trafo.iterrows():
-            network.add(
-                "Transformer",
-                name=str(idx),
-                bus0=str(row["hv_bus"]),
-                bus1=str(row["lv_bus"]),
-                s_nom=row.get("sn_mva", 1.0),
-                x=row.get("vk_percent", 5.0) / 100.0,
-                r=row.get("vkr_percent", 0.5) / 100.0,
-            )
+    # Clear type columns in PyPSA network to prevent type lookup errors
+    # The import may have created type references, but we want to use actual values
+    if "type" in network.lines.columns:
+        network.lines["type"] = ""
+    if "type" in network.transformers.columns:
+        network.transformers["type"] = ""
 
     # Set a snapshot for the power flow
     network.set_snapshots([pd.Timestamp("2025-01-01")])
+
+    return network
 
     return network
 

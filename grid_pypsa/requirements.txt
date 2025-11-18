@@ -4,4 +4,5 @@ cosim-toolbox
 # HELICS and simulation dependencies
 helics[cli]
 pypsa
+pandapower
 openpyxl
