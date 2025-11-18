@@ -139,23 +139,58 @@ def load_pypsa_from_pandapower_excel(excel_path: str) -> pypsa.Network:
                     str
                 )
 
-    # Clear type references to use actual parameter values instead of types
-    # This prevents issues with non-standard types that don't exist in PyPSA
-    if "type" in pp_net.line.columns:
-        pp_net.line["type"] = None
-    if "std_type" in pp_net.trafo.columns:
-        pp_net.trafo["std_type"] = None
-
     # Create PyPSA network and import from pandapower
+    # Use extra_line_data=True to import actual parameter values for lines
     network = pypsa.Network()
-    network.import_from_pandapower_net(pp_net, use_pandapower_index=True)
+    network.import_from_pandapower_net(
+        pp_net, extra_line_data=True, use_pandapower_index=True
+    )
 
-    # Clear type columns in PyPSA network to prevent type lookup errors
-    # The import may have created type references, but we want to use actual values
+    # Clear type columns in PyPSA network to prevent type lookup errors during power flow
+    # The parameter values are already imported, so we just need to clear the type references
     if "type" in network.lines.columns:
         network.lines["type"] = ""
     if "type" in network.transformers.columns:
         network.transformers["type"] = ""
+
+    # Fix transformer parameters - PyPSA's import doesn't handle all transformer parameters correctly
+    # We need to manually copy the transformer impedances from pandapower
+    if len(network.transformers) > 0 and len(pp_net.trafo) > 0:
+        for pp_idx, row in pp_net.trafo.iterrows():
+            # PyPSA may name transformers differently - try to find the corresponding one
+            # Usually it's "trafo {idx}" but the index may be off by 1
+            pypsa_name = None
+            for name in network.transformers.index:
+                if str(pp_idx) in name or f"{pp_idx+1}" in name:
+                    pypsa_name = name
+                    break
+
+            if pypsa_name is None and len(network.transformers) == 1:
+                # If there's only one transformer, use it
+                pypsa_name = network.transformers.index[0]
+
+            if pypsa_name:
+                # Get s_nom from pandapower
+                s_nom_mva = row.get("sn_mva", 0.16)
+                network.transformers.at[pypsa_name, "s_nom"] = s_nom_mva
+
+                # Calculate impedances from pandapower's vk and vkr percentages
+                vk_percent = row.get("vk_percent", 4.0)
+                vkr_percent = row.get("vkr_percent", 1.2)
+
+                # Convert to per-unit impedances
+                # In PyPSA, transformer impedances are in per-unit on the transformer base
+                network.transformers.at[pypsa_name, "x"] = vk_percent / 100.0
+                network.transformers.at[pypsa_name, "r"] = vkr_percent / 100.0
+
+    # Fix slack generator capacity - ext_grids in pandapower have infinite capacity
+    # but PyPSA needs a finite value. Set to a large value (1000 MW)
+    for idx in network.generators.index:
+        if network.generators.at[idx, "control"] == "Slack":
+            network.generators.at[idx, "p_nom"] = 1000.0
+            # Also ensure the slack bus has correct control
+            slack_bus = network.generators.at[idx, "bus"]
+            network.buses.at[slack_bus, "control"] = "Slack"
 
     # Set a snapshot for the power flow
     network.set_snapshots([pd.Timestamp("2025-01-01")])
