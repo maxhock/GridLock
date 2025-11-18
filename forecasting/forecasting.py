@@ -37,7 +37,7 @@ def predict_agg_load(forecast_input: ForecastInput) -> ForecastOutput:
 def fast_api(forecast_input: ForecastInput) -> ForecastOutput:
     """Call external FastAPI server for forecasting"""
 
-    api_host = os.getenv("FASTAPI_HOST", "fastapi-server")  # Default to container name
+    api_host = os.getenv("FASTAPI_HOST", "fastapi_server")  # Default to container name
     api_port = os.getenv("FASTAPI_PORT", "8000")  # Default port
     api_url = f"http://{api_host}:{api_port}/forecast"
 

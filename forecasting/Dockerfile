@@ -34,7 +34,8 @@ COPY forecasting.py .
 # --- Final image ---
 FROM base AS final
 # Default command: run the grid simulation Python script
-CMD ["python", "main.py"]
+#CMD ["python", "main.py"]
+CMD ["helics", "run", "--path=/config/tmp/forecasting_runner.json", "--no-log-files"]
 
 # --- Usage ---
 # To run tests during build:
