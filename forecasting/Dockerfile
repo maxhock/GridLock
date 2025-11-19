@@ -12,7 +12,7 @@ RUN mkdir /data
 VOLUME ["/data"]
 
 # Install HELICS CLI, and requests for webserver testing
-RUN pip install --no-cache-dir helics[cli] openpyxl lxml requests 
+RUN pip install --no-cache-dir helics[cli] requests 
 
 
 # Copy the forecasting script into the container
