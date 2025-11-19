@@ -9,9 +9,6 @@ federates:
   forecasting:
     name: forecasting
     build_folder: ${.name}    
-  fastapi_server:
-    name: fastapi_server
-    build_folder: ${.name}        
   house_player:
     name: house_player
     build_folder: ${.name}

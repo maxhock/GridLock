@@ -13,7 +13,7 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 # Constants
-SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid", "forecasting", "fastapi_server"}
+SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid", "forecasting"}
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
     "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
