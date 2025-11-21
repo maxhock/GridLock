@@ -1,6 +1,10 @@
 # PowerShell equivalent of run.sh
 $ErrorActionPreference = "Stop"
 
+# Build and run data generation
+docker build -f data-generation/Dockerfile -t data-generation data-generation
+docker run --rm -v "${PSScriptRoot}/config:/config" -v "${PSScriptRoot}/data:/data" data-generation
+
 # Build the compose generator image
 docker build -f composegen/Dockerfile -t composegen composegen
 

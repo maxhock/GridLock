@@ -62,10 +62,19 @@ class GridFederate(Federate):
             self.inputs[sub_key] = {"type": "double", "key": sub_key}
             self.data_from_federation["inputs"][sub_key] = None
 
+        # Register dynamic subscriptions for ext_grids
+        self.ext_grid_indices = list(self.net.ext_grid.index)
+        for pp_idx in self.ext_grid_indices:
+            sub_key = f"transformer_{pp_idx}/VM"
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "pu")
+            # Track in CST's data structures so send_data_to_federation() works
+            self.inputs[sub_key] = {"type": "double", "key": sub_key}
+            self.data_from_federation["inputs"][sub_key] = None
+
         # Register dynamic publications for ext_grids
         self.ext_grid_indices = list(self.net.ext_grid.index)
         for pp_idx in self.ext_grid_indices:
-            pub_key = f"Grid/transformer_{pp_idx}_power"
+            pub_key = f"Grid/transformer_{pp_idx}/P"
             h.helicsFederateRegisterGlobalPublication(
                 self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
             )
@@ -73,8 +82,30 @@ class GridFederate(Federate):
             self.pubs[pub_key] = {"type": "double", "key": pub_key}
             self.data_to_federation["publications"][pub_key] = None
 
+        # Register publications for all buses (vm_pu only)
+        self.bus_indices = list(self.net.bus.index)
+        for pp_idx in self.bus_indices:
+            # Voltage Magnitude
+            pub_key_vm = f"Grid/bus_{pp_idx}/VM"
+            h.helicsFederateRegisterGlobalPublication(
+                self.hfed, pub_key_vm, h.HELICS_DATA_TYPE_DOUBLE, "pu"
+            )
+            self.pubs[pub_key_vm] = {"type": "double", "key": pub_key_vm}
+            self.data_to_federation["publications"][pub_key_vm] = None
+
+        # # Subscribe to transformer voltage
+        # self.transformer_voltage_key = "Grid/transformer_voltage"
+        # h.helicsFederateRegisterSubscription(
+        #     self.hfed, self.transformer_voltage_key, "pu"
+        # )
+        # self.inputs[self.transformer_voltage_key] = {
+        #     "type": "double",
+        #     "key": self.transformer_voltage_key,
+        # }
+        # self.data_from_federation["inputs"][self.transformer_voltage_key] = None
+
         print(
-            f"Grid federate initialized: {len(self.load_indices)} loads, {len(self.ext_grid_indices)} ext_grids"
+            f"Grid federate initialized: {len(self.load_indices)} loads, {len(self.ext_grid_indices)} ext_grids, {len(self.bus_indices)} buses"
         )
 
     def update_internal_model(self):
@@ -82,6 +113,12 @@ class GridFederate(Federate):
         print(f"\n=== Time: {self.granted_time} ===")
 
         # Read subscriptions from CST's data structure
+        # # Update transformer voltage if available
+        # if self.transformer_voltage_key in self.data_from_federation["inputs"]:
+        #     vm_pu = self.data_from_federation["inputs"][self.transformer_voltage_key]
+        #     if vm_pu is not None:
+        #         self.net.ext_grid["vm_pu"] = vm_pu
+
         for pp_idx in self.load_indices:
             sub_key = f"node_{pp_idx}/P"
             if sub_key in self.data_from_federation["inputs"]:
@@ -98,10 +135,17 @@ class GridFederate(Federate):
         # Write publications to CST's data structure
         for pp_idx in self.ext_grid_indices:
             p_mw = self.net.res_ext_grid.at[pp_idx, "p_mw"]
-            self.data_to_federation["publications"][
-                f"Grid/transformer_{pp_idx}_power"
-            ] = float(p_mw)
-            print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
+            self.data_to_federation["publications"][f"Grid/transformer_{pp_idx}/P"] = (
+                float(p_mw)
+            )
+            # print(f"Published ext_grid {pp_idx} p_mw: {p_mw}")
+
+        for pp_idx in self.bus_indices:
+            # vm_pu
+            vm_pu = self.net.res_bus.at[pp_idx, "vm_pu"]
+            pub_key_vm = f"Grid/bus_{pp_idx}/VM"
+            self.data_to_federation["publications"][pub_key_vm] = float(vm_pu)
+            # print(f"Published bus {pp_idx} vm_pu: {vm_pu}")
 
 
 def parse_args():

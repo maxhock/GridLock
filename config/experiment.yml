@@ -18,8 +18,25 @@ federates:
   recorder:
     name: recorder
     build_folder: ${.name}
-    target: grid
-    output_file: /data/output/${.target}.log
+    output_file: /data/output/federation.log
+  logger:
+    name: logger
+    build_folder: ${.name}
+    output_file: /data/output/federation_processed.csv
+  transformer:
+    name: transformer
+    build_folder: ${.name}
+    voltage: 1.0
+  # surrogate_collector:
+  #   name: surrogate_collector
+  #   build_folder: ${.name}
+  #   output_file: /data/output/surrogate_data.h5
+
+data_generation:
+  latitude: 48.1351
+  longitude: 11.5820
+  matching_mode: "closest"
+
 general:
     start_time: 0
     end_time: 82800  # You can adjust this as needed

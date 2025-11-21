@@ -24,6 +24,9 @@ COPY 2.demand_allocation/gridalloc ./gridalloc/
 RUN rm -rf /app/gridalloc/data/grids
 RUN ln -s /app/gridreadout/results /app/gridalloc/data/grids
 
+# Copy the script into the container
+COPY main.py .
+
 # --- Test stage ---
 FROM base AS test
 # Install test dependencies (pytest is already in environment_HPC.yml)

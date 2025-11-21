@@ -155,6 +155,32 @@ def test_create_grid_config(tmp_path):
     assert grid_conf["broker"] == "broker"
 
 
+def test_create_surrogate_config(tmp_path):
+    conf = OmegaConf.create(MINIMAL_CONF)
+    # ensure grid num_nodes set
+    conf.federates.grid.num_nodes = 3
+    # add minimal surrogate_collector section
+    conf.federates.surrogate_collector = {
+        "name": "surrogate_collector",
+        "build_folder": "surrogate_collector",
+        "output_file": "/data/output/surrogate_data.h5",
+    }
+
+    output_path = tmp_path / "surrogate_collector_config.json"
+    # call helper directly
+    from main import create_surrogate_config
+
+    create_surrogate_config(conf, tmp_path)
+    assert output_path.exists()
+    with open(output_path) as f:
+        sc = json.load(f)
+    # should contain subscriptions for nodes, buses and transformer
+    keys = [s["key"] for s in sc["subscriptions"]]
+    assert "node_0/P" in keys
+    assert "grid/bus_0/vm_pu" in keys
+    assert "Grid/transformer_voltage" in keys
+
+
 def test_excel_node_counting(tmp_path, monkeypatch):
     """Test that num_nodes is detected from Excel file load sheet"""
     # Create a mock Excel file with a 'load' sheet of 5 rows

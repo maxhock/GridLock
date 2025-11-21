@@ -7,6 +7,7 @@ h5py
 
 # ───────── Grid sampling specific packages ─────────
 pandapower==3.0.0
+xlsxwriter
 geopandas
 contextily
 rasterio
@@ -32,6 +33,7 @@ tables
 requests
 pyyaml
 python-dotenv
+omegaconf
 
 # ───────── Testing and development ─────────
 pytest
