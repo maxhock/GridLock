@@ -9,7 +9,6 @@ import argparse
 import os
 import pandas as pd
 import json
-from typing import List
 from forecasting import ForecastInput, predict_agg_load
 
 
