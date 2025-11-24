@@ -8,3 +8,5 @@ openpyxl
 requests
 
 pandas
+
+types-requests
