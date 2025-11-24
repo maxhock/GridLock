@@ -13,11 +13,12 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 # Constants
-SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid"}
+SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid", "forecasting"}
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
     "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
     "recorder": "helics_recorder --name={name} --capture={target} --output={output_file} --broker=broker",
+    "forecasting": "python main.py --name={name} --broker=broker --grid_file={grid_file} --api_host={api_host} --api_port={api_port}",
 }
 
 
@@ -241,6 +242,8 @@ def _create_simple_instance(
             "output_file": fed_config.get(
                 "output_file", f"/data/output/{fed_config.get('target', 'grid')}.log"
             ),
+            "api_host": fed_config.get("api_host", "fastapi_server"),
+            "api_port": fed_config.get("api_port", 8000),
         }
         command = DEFAULT_COMMAND_TEMPLATES[fed_name].format(**params)
     else:
@@ -281,6 +284,36 @@ def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
     config_path = output_dir / "grid_config.json"
     with open(config_path, "w") as f:
         json.dump(grid_config, f, indent=4)
+    print(f"Generated {config_path.name}")
+
+
+def create_forecasting_config(conf: DictConfig, output_dir: Path) -> None:
+    """
+    Generate forecasting_config.json for the forecasting federate.
+
+    This config file contains general simulation parameters and HELICS settings
+    that the forecasting federate needs.
+
+    Args:
+        conf: Fully resolved configuration object
+        output_dir: Directory where forecasting_config.json should be written
+    """
+    forecasting_config = {
+        "name": conf.federates.forecasting.name,
+        "loglevel": conf.general.loglevel,
+        "coreType": "zmq",
+        "period": conf.general.time_step,
+        "offset": conf.general.start_time - conf.general.start_time,
+        "max_cosim_duration": conf.general.end_time,
+        "broker": conf.federates.broker.name,
+        "uninterruptible": False,
+        "terminate_on_error": True,
+        "wait_for_current_time_update": True,
+    }
+
+    config_path = output_dir / "forecasting_config.json"
+    with open(config_path, "w") as f:
+        json.dump(forecasting_config, f, indent=4)
     print(f"Generated {config_path.name}")
 
 
@@ -336,6 +369,9 @@ def main():
 
     # Generate grid config file
     create_grid_config(conf, output_dir)
+
+    # Generate forecasting config file
+    create_forecasting_config(conf, output_dir)
 
     # Generate player config files for any player federates
     for fed_name, fed_config in conf.federates.items():

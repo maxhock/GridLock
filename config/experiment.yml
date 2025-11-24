@@ -6,6 +6,12 @@ federates:
     name: grid
     build_folder: ${.name}
     grid_file: kerber_landnetz_freileitung_1.xlsx
+  forecasting:
+    name: forecasting
+    build_folder: ${.name}    
+    grid_file: kerber_landnetz_freileitung_1.xlsx
+    api_host: fastapi_server
+    api_port: 8000
   house_player:
     name: house_player
     build_folder: ${.name}
