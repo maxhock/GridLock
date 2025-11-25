@@ -1,3 +1,4 @@
 cosim-toolbox
 helics[cli]
 pandas
+tables

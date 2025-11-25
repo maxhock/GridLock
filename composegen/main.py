@@ -25,7 +25,7 @@ DEFAULT_COMMAND_TEMPLATES = {
     "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
     "recorder": "helics_recorder --name={name} --capture={target} --output={output_file} --broker=broker",
     "transformer": "helics_app source /config/tmp/transformer_config.json --broker=broker",
-    "logger": "helics_recorder --name={name} --capture={target} --output=/tmp/logger_raw.log --broker=broker && python process_log.py --input=/tmp/logger_raw.log --output={output_file}",
+    "logger": "helics_recorder --name={name} --capture={target} --output=/app/logger_raw.log --broker=broker",
 }
 
 
@@ -202,6 +202,10 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
         # Add command only if specified in config
         if "command" in fed_config:
             service["command"] = fed_config.command
+
+        # Add environment variables for logger
+        if fed_name == "logger" and "output_file" in fed_config:
+            service["environment"] = {"LOGGER_OUTPUT_FILE": fed_config.output_file}
 
         compose_config["services"][fed_name] = service
 

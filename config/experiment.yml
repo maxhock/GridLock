@@ -15,10 +15,10 @@ federates:
   #   name: house
   #   build_folder: ${.name}
   #   placement: [0, 2, 5, 8]
-  recorder:
-    name: recorder
-    build_folder: ${.name}
-    output_file: /data/output/federation.log
+  # recorder:
+  #   name: recorder
+  #   build_folder: ${.name}
+  #   output_file: /data/output/federation.log
   logger:
     name: logger
     build_folder: ${.name}
