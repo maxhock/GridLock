@@ -1,7 +1,19 @@
 {
 	"name": "Data Generation Environment",
 	"build": {
-		"dockerfile": "../data-generation/Dockerfile"
+		"dockerfile": "../data-gen/Dockerfile"
 	},
-	"workspaceFolder": "/app"
+	"mounts": ["source=${localWorkspaceFolder}/data,target=/data,type=bind",
+		"source=${localWorkspaceFolder}/config,target=/config,type=bind",
+		"source=${localWorkspaceFolder}/data-gen,target=/app,type=bind"
+	],
+	"workspaceFolder": "/app",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-toolsai.jupyter"
+			]
+		}
+	}
 }

@@ -2,8 +2,8 @@
 set -e
 
 # Build and run data generation
-docker build -f data-generation/Dockerfile -t data-generation data-generation
-docker run --rm -v "$(pwd)/config:/config" -v "$(pwd)/data:/data" data-generation
+docker build -f data-gen/Dockerfile -t data-gen data-gen
+docker run --rm -v "$(pwd)/config:/config" -v "$(pwd)/data:/data" data-gen
 
 # Build the compose generator image
 docker build -f composegen/Dockerfile -t composegen composegen

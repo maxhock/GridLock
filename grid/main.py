@@ -51,6 +51,7 @@ class GridFederate(Federate):
         self.create_helics_fed()
 
         # Load pandapower network
+        print(f"Loading pandapower network from {self.grid_path}...")
         self.net = pp.from_excel(self.grid_path)
 
         # Register dynamic subscriptions for loads

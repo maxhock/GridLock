@@ -87,14 +87,24 @@ def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictCon
     """
     conf = OmegaConf.load(config_path)
 
-    # Determine number of nodes from grid file
+    # Determine load indices from grid file and number of nodes
     grid_file_path = data_input_path / conf.federates.grid.grid_file
-    num_nodes = get_num_nodes(grid_file_path)
-    conf.federates.grid.num_nodes = num_nodes
-    print(f"Grid has {num_nodes} nodes.")
+    try:
+        node_indices = get_load_indices(grid_file_path)
+        num_nodes = len(node_indices)
+        conf.federates.grid.num_nodes = num_nodes
+        # keep a list of actual load indices so we name nodes using these values
+        conf.federates.grid.node_indices = node_indices
+        print(f"Grid has {num_nodes} nodes with indices: {node_indices}")
+    except Exception:
+        # Fall back to old behaviour if anything goes wrong with reading indices
+        num_nodes = get_num_nodes(grid_file_path)
+        conf.federates.grid.num_nodes = num_nodes
+        conf.federates.grid.node_indices = list(range(num_nodes))
+        print(f"Grid has {num_nodes} nodes (fallback indices 0..{num_nodes-1}).")
 
     # Calculate node assignments
-    _calculate_node_assignments(conf, num_nodes, grid_file_path)
+    _calculate_node_assignments(conf, conf.federates.grid.node_indices, grid_file_path)
 
     # Calculate total federates for broker
     total = sum(
