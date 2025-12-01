@@ -1,25 +1,30 @@
-# composegen/main.py
 """
-Modular, data-driven composegen script for HELICS co-simulation.
+Composegen: Configuration generator for GridLock HELICS co-simulation.
+
+This script reads experiment.yml, validates the configuration, expands
+multi-instance federates based on a node placement strategy, and generates
+docker-compose.yml, runner.json, and config.json files for each federate.
 """
 
 import json
 import os
+import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any
 
 import pandas as pd
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-# Constants
-SKIP_NODE_ASSIGNMENT = {
-    "broker",
-    "recorder",
-    "grid",
-    "transformer",
-    "logger",
-}
+
+# --- Constants ---
+
+# Federates that do not get assigned to nodes
+SKIP_NODE_ASSIGNMENT = frozenset(
+    {"broker", "recorder", "grid", "transformer", "logger"}
+)
+
+# Default command templates for known federates
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
     "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
@@ -29,178 +34,299 @@ DEFAULT_COMMAND_TEMPLATES = {
 }
 
 
-def get_num_nodes(grid_file_path: Path) -> int:
+# --- Validation and Loading ---
+
+
+def load_experiment_config(config_path: Path) -> DictConfig:
     """
-    Read the grid Excel file and determine the number of load nodes.
-
-    Args:
-        grid_file_path: Path to the grid Excel file
-
-    Returns:
-        Number of load nodes in the grid
-    """
-    try:
-        df = pd.read_excel(grid_file_path, sheet_name="load")
-        return len(df)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Grid file not found at {grid_file_path}")
-    except Exception as e:
-        raise RuntimeError(f"Error reading grid file: {e}")
-
-
-def get_num_ext_grids(grid_file_path: Path) -> int:
-    """
-    Read the grid Excel file and determine the number of external grid connections.
-
-    Args:
-        grid_file_path: Path to the grid Excel file
-
-    Returns:
-        Number of ext_grid connections in the grid
-    """
-    try:
-        df = pd.read_excel(grid_file_path, sheet_name="ext_grid")
-        return len(df)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Grid file not found at {grid_file_path}")
-    except Exception as e:
-        raise RuntimeError(f"Error reading grid file: {e}")
-
-
-def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictConfig:
-    """
-    Load experiment configuration and calculate dynamic values.
-
-    Steps:
-    1. Load experiment.yml with OmegaConf
-    2. Determine num_nodes from grid file
-    3. Calculate placement maps and validate node assignments
-    4. Calculate total federate count for broker
-    5. Resolve all interpolations
+    Load experiment.yml and return an OmegaConf DictConfig.
 
     Args:
         config_path: Path to experiment.yml
-        data_input_path: Path to data/input directory
 
     Returns:
-        Fully resolved OmegaConf configuration
+        OmegaConf DictConfig object
+
+    Raises:
+        FileNotFoundError: If the config file does not exist
+        SystemExit: If the config is invalid
     """
+    if not config_path.exists():
+        print(f"ERROR: Configuration file not found at {config_path}")
+        sys.exit(1)
+
     conf = OmegaConf.load(config_path)
 
-    # Determine load indices from grid file and number of nodes
-    grid_file_path = data_input_path / conf.federates.grid.grid_file
+    # Validate required top-level keys
+    if "federates" not in conf:
+        print("ERROR: 'federates' section is missing from experiment.yml")
+        sys.exit(1)
+
+    if "general" not in conf:
+        print("ERROR: 'general' section is missing from experiment.yml")
+        sys.exit(1)
+
+    # Validate grid federate has grid_file
+    if "grid" not in conf.federates:
+        print("ERROR: 'grid' federate is required in experiment.yml")
+        sys.exit(1)
+
+    if not conf.federates.grid.get("grid_file"):
+        print("ERROR: 'grid_file' must be specified for the grid federate")
+        sys.exit(1)
+
+    return conf
+
+
+def get_load_indices(grid_file_path: Path) -> list[int]:
+    """
+    Read the grid Excel file and return the list of load indices.
+
+    These indices represent the available nodes that federates can be
+    assigned to. The indices are read from the first column of the Excel
+    file, which contains the original pandapower load indices.
+
+    Args:
+        grid_file_path: Path to the grid Excel file
+
+    Returns:
+        List of load indices from the grid
+
+    Raises:
+        SystemExit: If the file cannot be read or has no loads
+    """
+    if not grid_file_path.exists():
+        print(f"ERROR: Grid file not found at {grid_file_path}")
+        sys.exit(1)
+
     try:
-        node_indices = get_load_indices(grid_file_path)
-        num_nodes = len(node_indices)
-        conf.federates.grid.num_nodes = num_nodes
-        # keep a list of actual load indices so we name nodes using these values
-        conf.federates.grid.node_indices = node_indices
-        print(f"Grid has {num_nodes} nodes with indices: {node_indices}")
+        df = pd.read_excel(grid_file_path, sheet_name="load", index_col=0)
+    except Exception as e:
+        print(f"ERROR: Could not read 'load' sheet from grid file: {e}")
+        sys.exit(1)
+
+    if df.empty:
+        print("ERROR: Grid file has no loads defined")
+        sys.exit(1)
+
+    return list(df.index)
+
+
+def get_ext_grid_indices(grid_file_path: Path) -> list[int]:
+    """
+    Read the grid Excel file and return the list of ext_grid indices.
+
+    The indices are read from the first column of the Excel file,
+    which contains the original pandapower ext_grid indices.
+
+    Args:
+        grid_file_path: Path to the grid Excel file
+
+    Returns:
+        List of ext_grid indices from the grid
+    """
+    try:
+        df = pd.read_excel(grid_file_path, sheet_name="ext_grid", index_col=0)
+        return list(df.index)
     except Exception:
-        # Fall back to old behaviour if anything goes wrong with reading indices
-        num_nodes = get_num_nodes(grid_file_path)
-        conf.federates.grid.num_nodes = num_nodes
-        conf.federates.grid.node_indices = list(range(num_nodes))
-        print(f"Grid has {num_nodes} nodes (fallback indices 0..{num_nodes-1}).")
+        return [0]  # Default to single ext_grid if not found
 
-    # Calculate node assignments
-    _calculate_node_assignments(conf, conf.federates.grid.node_indices, grid_file_path)
 
-    # Calculate total federates for broker
-    total = sum(
+# --- Placement Logic ---
+
+
+def build_node_placement_matrix(
+    conf: DictConfig, node_indices: list[int]
+) -> dict[int, str]:
+    """
+    Build a placement matrix mapping each node index to a federate name.
+
+    This function validates:
+    - All nodes in explicit placements exist in the grid
+    - No node is double-booked
+    - Exactly one federate uses fill_remaining (if not all nodes are explicitly placed)
+    - All nodes are assigned
+
+    Args:
+        conf: The experiment configuration
+        node_indices: List of valid node indices from the grid
+
+    Returns:
+        Dictionary mapping node index -> federate name
+
+    Raises:
+        SystemExit: If any validation fails
+    """
+    node_set = set(node_indices)
+    placement_matrix: dict[int, str] = {}
+    fill_remaining_federate: str | None = None
+
+    # First pass: Process explicit placements and find fill_remaining
+    for fed_name, fed_config in conf.federates.items():
+        if fed_name in SKIP_NODE_ASSIGNMENT:
+            continue
+
+        # Check for fill_remaining flag
+        if fed_config.get("fill_remaining", False):
+            if fill_remaining_federate is not None:
+                print(
+                    f"ERROR: Multiple federates have 'fill_remaining: true': "
+                    f"'{fill_remaining_federate}' and '{fed_name}'. "
+                    f"Only one federate can use fill_remaining."
+                )
+                sys.exit(1)
+            fill_remaining_federate = fed_name
+
+        # Process explicit placements
+        if placement := fed_config.get("placement"):
+            for node_idx in placement:
+                # Validate node exists
+                if node_idx not in node_set:
+                    print(
+                        f"ERROR: Federate '{fed_name}' references node {node_idx}, "
+                        f"but it does not exist in the grid. "
+                        f"Valid nodes: {sorted(node_indices)}"
+                    )
+                    sys.exit(1)
+
+                # Check for double-booking
+                if node_idx in placement_matrix:
+                    print(
+                        f"ERROR: Node {node_idx} is double-booked. "
+                        f"Already assigned to '{placement_matrix[node_idx]}', "
+                        f"but '{fed_name}' also claims it."
+                    )
+                    sys.exit(1)
+
+                placement_matrix[node_idx] = fed_name
+
+    # Second pass: Fill remaining nodes
+    unassigned_nodes = [n for n in node_indices if n not in placement_matrix]
+
+    if unassigned_nodes:
+        if fill_remaining_federate is None:
+            print(
+                f"ERROR: Nodes {unassigned_nodes} are not assigned to any federate. "
+                f"Either add explicit placements or set 'fill_remaining: true' on one federate."
+            )
+            sys.exit(1)
+
+        for node_idx in unassigned_nodes:
+            placement_matrix[node_idx] = fill_remaining_federate
+
+    return placement_matrix
+
+
+def expand_federate_configs(
+    conf: DictConfig,
+    node_indices: list[int],
+    placement_matrix: dict[int, str],
+    ext_grid_indices: list[int],
+) -> DictConfig:
+    """
+    Expand multi-instance federates into individual instance configurations.
+
+    For each node-based federate, this creates a placement_map that maps
+    node indices to instance names (node_X), and optionally an input_file_map
+    that maps node indices to their specific input files.
+
+    Args:
+        conf: The experiment configuration
+        node_indices: List of valid node indices
+        placement_matrix: Mapping of node index -> federate name
+        ext_grid_indices: List of ext_grid indices for transformer
+
+    Returns:
+        Updated configuration with expanded federate details
+
+    Raises:
+        SystemExit: If input_files count doesn't match placement count
+    """
+    # Store node indices for reference
+    conf.federates.grid.node_indices = node_indices
+    conf.federates.grid.num_nodes = len(node_indices)
+
+    # Build placement maps for each node-based federate
+    for fed_name, fed_config in conf.federates.items():
+        if fed_name in SKIP_NODE_ASSIGNMENT:
+            # Simple federates get 1 instance
+            conf.federates[fed_name].num_instances = 1
+            continue
+
+        # Build placement map: {node_idx: "node_X"}
+        placement_map = {}
+        assigned_nodes = []
+        for node_idx in node_indices:
+            if placement_matrix.get(node_idx) == fed_name:
+                placement_map[node_idx] = f"node_{node_idx}"
+                assigned_nodes.append(node_idx)
+
+        conf.federates[fed_name].placement_map = placement_map
+        conf.federates[fed_name].num_instances = len(placement_map)
+
+        # Handle multiple input files for player federates
+        if input_files := fed_config.get("input_files"):
+            input_files_list = list(input_files)
+            num_files = len(input_files_list)
+            num_instances = len(assigned_nodes)
+
+            if num_files != num_instances:
+                print(
+                    f"ERROR: Federate '{fed_name}' has {num_files} input_files "
+                    f"but {num_instances} node placements. These must match."
+                )
+                sys.exit(1)
+
+            # Map each node index to its input file (in order)
+            input_file_map = {}
+            for i, node_idx in enumerate(sorted(assigned_nodes)):
+                input_file_map[node_idx] = input_files_list[i]
+
+            conf.federates[fed_name].input_file_map = input_file_map
+            print(f"      {fed_name}: mapped {num_files} input files to nodes")
+
+    # Handle transformer (one per ext_grid)
+    if "transformer" in conf.federates:
+        ext_grid_map = {idx: f"transformer_{idx}" for idx in ext_grid_indices}
+        conf.federates.transformer.ext_grid_map = ext_grid_map
+        conf.federates.transformer.num_instances = len(ext_grid_indices)
+
+    # Calculate total federates for broker (excluding broker itself)
+    total_federates = sum(
         fed_config.get("num_instances", 1)
         for fed_name, fed_config in conf.federates.items()
         if fed_name != "broker"
     )
-    conf.federates.broker.total_federates = total
-    print(f"Total federates: {total}")
+    conf.federates.broker.total_federates = total_federates
 
-    OmegaConf.resolve(conf)
     return conf
 
 
-def _calculate_node_assignments(
-    conf: DictConfig, num_nodes: int, grid_file_path: Path
-) -> None:
-    """Calculate and validate node-to-federate assignments."""
-    global_node_map = [None] * num_nodes
-    fill_remaining_fed = None
-
-    # Set num_instances for simple federates
-    for fed_name in SKIP_NODE_ASSIGNMENT:
-        if fed_name in conf.federates:
-            conf.federates[fed_name].num_instances = 1
-
-    # First pass: explicit placements
-    for fed_name, fed_config in conf.federates.items():
-        if fed_name in SKIP_NODE_ASSIGNMENT:
-            continue
-
-        if fed_config.get("fill_remaining"):
-            if fill_remaining_fed is not None:
-                raise ValueError(
-                    f"Multiple federates have 'fill_remaining: true': {fill_remaining_fed}, {fed_name}. "
-                    "Only one federate can use fill_remaining."
-                )
-            fill_remaining_fed = fed_name
-
-        if placements := fed_config.get("placement"):
-            for node_idx in placements:
-                if 0 <= node_idx < num_nodes:
-                    if global_node_map[node_idx]:
-                        print(
-                            f"Warning: Node {node_idx} reassigned from "
-                            f"{global_node_map[node_idx]} to {fed_name}"
-                        )
-                    global_node_map[node_idx] = fed_name
-                else:
-                    print(f"Warning: Node {node_idx} out of bounds (0-{num_nodes-1})")
-
-    # Second pass: fill remaining
-    if fill_remaining_fed:
-        global_node_map = [fed or fill_remaining_fed for fed in global_node_map]
-
-    # Validate all nodes assigned
-    if unassigned := [i for i, v in enumerate(global_node_map) if v is None]:
-        raise ValueError(
-            f"Nodes {unassigned} unassigned. Use 'fill_remaining: true' to cover all nodes."
-        )
-
-    # Build placement maps
-    for fed_name, fed_config in conf.federates.items():
-        if fed_name in SKIP_NODE_ASSIGNMENT:
-            continue
-
-        placement_map = {
-            i: fed_name for i in range(num_nodes) if global_node_map[i] == fed_name
-        }
-        conf.federates[fed_name].num_instances = len(placement_map)
-        conf.federates[fed_name].placement_map = placement_map
-
-    # Build ext_grid_map for transformer (similar to placement_map)
-    if "transformer" in conf.federates:
-        num_ext_grids = get_num_ext_grids(grid_file_path)
-        ext_grid_map = {i: i for i in range(num_ext_grids)}  # Simple 1:1 mapping
-        conf.federates.transformer.num_instances = num_ext_grids
-        conf.federates.transformer.ext_grid_map = ext_grid_map
+# --- Docker Compose Generation ---
 
 
 def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
     """
     Generate docker-compose.yml from the configuration.
 
-    Dynamically creates a service for each federate defined in experiment.yml.
+    Creates one service per federate type. Multi-instance federates
+    are handled by their runner.json files.
 
     Args:
         conf: Fully resolved configuration object
         output_path: Path where docker-compose.yml should be written
     """
-    compose_config = {"networks": {"helics-net": {"driver": "bridge"}}, "services": {}}
+    compose_config = {
+        "networks": {"helics-net": {"driver": "bridge"}},
+        "services": {},
+    }
 
-    # Generate a service for each federate
     for fed_name, fed_config in conf.federates.items():
-        service = {
-            "build": f"${{PWD}}/{fed_config.build_folder}",
+        # Infer build_folder if not specified
+        build_folder = fed_config.get("build_folder", fed_name)
+
+        service: dict[str, Any] = {
+            "build": f"${{PWD}}/{build_folder}",
             "container_name": fed_name,
             "volumes": [
                 "${PWD}/data:/data",
@@ -209,7 +335,7 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
             "networks": ["helics-net"],
         }
 
-        # Add command only if specified in config
+        # Add command if specified in config
         if "command" in fed_config:
             service["command"] = fed_config.command
 
@@ -219,139 +345,166 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
 
         compose_config["services"][fed_name] = service
 
-    # Write the docker-compose.yml file
     with open(output_path, "w") as f:
         yaml.dump(compose_config, f, default_flow_style=False, sort_keys=False)
 
-    print(f"Generated docker-compose.yml at {output_path}")
+    print(f"Generated: {output_path}")
+
+
+# --- Runner JSON Generation ---
 
 
 def create_runner_files(conf: DictConfig, output_dir: Path) -> None:
     """
     Generate runner.json files for all federates.
 
+    For multi-instance federates, creates entries for each instance.
+
     Args:
         conf: Fully resolved configuration
         output_dir: Directory for runner files
     """
-    # First pass: collect all federate instance names for recorder/logger
-    all_federate_names = []
+    # Collect all federate instance names for recorder/logger
+    all_instance_names = _collect_all_instance_names(conf)
 
-    for fed_name, fed_config in conf.federates.items():
-        # Skip broker and observer federates (recorder, logger)
-        if fed_name in ["broker", "recorder", "logger"]:
-            continue
-
-        if fed_config.get("placement_map"):
-            # Node-based federates
-            for node_idx in sorted(fed_config.placement_map.keys()):
-                all_federate_names.append(f"node_{node_idx}")
-        elif fed_config.get("ext_grid_map"):
-            # Transformer instances
-            for ext_grid_idx in sorted(fed_config.ext_grid_map.keys()):
-                all_federate_names.append(f"transformer_{ext_grid_idx}")
-        else:
-            # Simple federates
-            all_federate_names.append(fed_name)
-
-    # Store the list for recorder
+    # Store for recorder/logger target
     if "recorder" in conf.federates:
-        conf.federates.recorder.all_federate_names = ";".join(all_federate_names)
-
-    # Store the list for logger
+        conf.federates.recorder.all_targets = ";".join(all_instance_names)
     if "logger" in conf.federates:
-        conf.federates.logger.all_federate_names = ";".join(all_federate_names)
+        conf.federates.logger.all_targets = ";".join(all_instance_names)
 
-    # Second pass: create runner files with complete information
+    # Generate runner file for each federate
     for fed_name, fed_config in conf.federates.items():
-        if fed_config.get("placement_map"):
-            federates_list = _create_node_based_instances(fed_name, fed_config)
-        elif fed_config.get("ext_grid_map"):
-            federates_list = _create_transformer_instances(fed_config)
-        else:
-            federates_list = [_create_simple_instance(fed_name, fed_config, conf)]
+        federates_list = _build_federates_list(fed_name, fed_config, conf)
+
+        runner_content = {
+            "name": fed_name,
+            "federates": federates_list,
+        }
 
         runner_path = output_dir / f"{fed_name}_runner.json"
         with open(runner_path, "w") as f:
-            json.dump({"name": fed_name, "federates": federates_list}, f, indent=4)
-        print(f"Generated {runner_path.name}")
+            json.dump(runner_content, f, indent=4)
+
+        print(f"Generated: {runner_path.name}")
 
 
-def _create_transformer_instances(fed_config: DictConfig) -> List[Dict]:
-    """Create transformer federate instances (one per ext_grid)."""
+def _collect_all_instance_names(conf: DictConfig) -> list[str]:
+    """Collect names of all federate instances for recorder/logger targeting."""
+    names = []
+
+    for fed_name, fed_config in conf.federates.items():
+        if fed_name in {"broker", "recorder", "logger"}:
+            continue
+
+        if placement_map := fed_config.get("placement_map"):
+            for node_idx in sorted(placement_map.keys()):
+                names.append(f"node_{node_idx}")
+        elif ext_grid_map := fed_config.get("ext_grid_map"):
+            for idx in sorted(ext_grid_map.keys()):
+                names.append(f"transformer_{idx}")
+        else:
+            names.append(fed_name)
+
+    return names
+
+
+def _build_federates_list(
+    fed_name: str, fed_config: DictConfig, conf: DictConfig
+) -> list[dict]:
+    """Build the list of federate instances for a runner.json."""
+    if placement_map := fed_config.get("placement_map"):
+        return _build_node_instances(fed_name, fed_config, placement_map)
+    elif ext_grid_map := fed_config.get("ext_grid_map"):
+        return _build_transformer_instances(ext_grid_map)
+    else:
+        return [_build_simple_instance(fed_name, fed_config, conf)]
+
+
+def _build_node_instances(
+    fed_name: str, fed_config: DictConfig, placement_map: dict
+) -> list[dict]:
+    """Build instances for node-based federates.
+
+    For player federates, uses input_file_map if available (multiple files),
+    otherwise falls back to single input_file. Paths without a leading '/'
+    are assumed to be relative to /data/input/.
+    """
     instances = []
-    config_file = "/config/tmp/transformer_config.json"
+    input_file_map = fed_config.get("input_file_map", {})
 
-    for ext_grid_idx in sorted(fed_config.ext_grid_map.keys()):
-        instance_name = f"transformer_{ext_grid_idx}"
-        command = f"helics_app source {config_file} --broker=broker --name={instance_name} --local"
-
-        instances.append(
-            {
-                "directory": "/app",
-                "exec": command,
-                "host": "localhost",
-                "name": instance_name,
-            }
-        )
-    return instances
-
-
-def _create_node_based_instances(fed_name: str, fed_config: DictConfig) -> List[Dict]:
-    """Create federate instances for node-based federates."""
-    instances = []
-    for node_idx in sorted(fed_config.placement_map.keys()):
+    for node_idx in sorted(placement_map.keys()):
         instance_name = f"node_{node_idx}"
 
-        if "command" in fed_config:
-            command = fed_config.command.replace(
-                f"--name={fed_name}", f"--name={instance_name}"
-            )
-        elif "player" in fed_name:
-            input_file = fed_config.get("input_file", f"/data/input/{fed_name}.csv")
-            # Player config is in /config/tmp
+        if "player" in fed_name:
+            # Use per-node file if available, otherwise fall back to single file
+            if node_idx in input_file_map:
+                input_file = input_file_map[node_idx]
+            else:
+                input_file = fed_config.get("input_file", f"{fed_name}.csv")
+
+            # Prepend /data/input/ if the path is not absolute
+            if not input_file.startswith("/"):
+                input_file = f"/data/input/{input_file}"
+
             config_file = f"/config/tmp/{fed_name}_config.json"
-            command = f"helics_player --input={input_file} --config-file={config_file} --broker=broker --name={instance_name} --local"
+            command = (
+                f"helics_player --input={input_file} "
+                f"--config-file={config_file} "
+                f"--broker=broker --name={instance_name} --local"
+            )
         else:
             command = f"python main.py --name={instance_name} --broker=broker"
 
-        instances.append(
-            {
-                "directory": "/app",
-                "exec": command,
-                "host": "localhost",
-                "name": instance_name,
-            }
-        )
+        instances.append({
+            "directory": "/app",
+            "exec": command,
+            "host": "localhost",
+            "name": instance_name,
+        })
+
     return instances
 
 
-def _create_simple_instance(
+def _build_transformer_instances(ext_grid_map: dict) -> list[dict]:
+    """Build instances for transformer federates."""
+    instances = []
+    config_file = "/config/tmp/transformer_config.json"
+
+    for idx in sorted(ext_grid_map.keys()):
+        instance_name = f"transformer_{idx}"
+        command = (
+            f"helics_app source {config_file} "
+            f"--broker=broker --name={instance_name} --local"
+        )
+
+        instances.append({
+            "directory": "/app",
+            "exec": command,
+            "host": "localhost",
+            "name": instance_name,
+        })
+
+    return instances
+
+
+def _build_simple_instance(
     fed_name: str, fed_config: DictConfig, conf: DictConfig
-) -> Dict:
-    """Create a single federate instance for simple federates."""
+) -> dict:
+    """Build a single instance for simple federates."""
     if "command" in fed_config:
         command = fed_config.command
     elif fed_name in DEFAULT_COMMAND_TEMPLATES:
-        # For recorder and logger, use the dynamically built list of all federates
         target = fed_config.get("target", "grid")
-        if fed_name == "recorder" and hasattr(
-            conf.federates.recorder, "all_federate_names"
-        ):
-            target = conf.federates.recorder.all_federate_names
-        elif fed_name == "logger" and hasattr(
-            conf.federates.logger, "all_federate_names"
-        ):
-            target = conf.federates.logger.all_federate_names
+        if fed_name in {"recorder", "logger"} and fed_config.get("all_targets"):
+            target = fed_config.all_targets
 
         params = {
             "name": fed_name,
             "total_federates": conf.federates.broker.total_federates,
-            "grid_file": fed_config.get("grid_file", ""),
+            "grid_file": conf.federates.grid.get("grid_file", ""),
             "target": target,
-            "output_file": fed_config.get(
-                "output_file", f"/data/output/{fed_config.get('target', 'grid')}.log"
-            ),
+            "output_file": fed_config.get("output_file", "/data/output/federation.log"),
             "stop_time": conf.general.end_time,
             "voltage": fed_config.get("voltage", 1.0),
         }
@@ -367,23 +520,42 @@ def _create_simple_instance(
     }
 
 
-def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate grid_config.json for the grid federate.
+# --- Config JSON Generation ---
 
-    This config file contains general simulation parameters and HELICS settings
-    that the grid federate needs.
+
+def create_config_files(conf: DictConfig, output_dir: Path) -> None:
+    """
+    Generate config.json files for federates that need them.
 
     Args:
-        conf: Fully resolved configuration object
-        output_dir: Directory where grid_config.json should be written
+        conf: Fully resolved configuration
+        output_dir: Directory for config files
     """
-    grid_config = {
+    # Grid config
+    _create_grid_config(conf, output_dir)
+
+    # Logger config
+    if "logger" in conf.federates:
+        _create_logger_config(conf, output_dir)
+
+    # Transformer config
+    if "transformer" in conf.federates:
+        _create_transformer_config(conf, output_dir)
+
+    # Player configs for any player federates
+    for fed_name, fed_config in conf.federates.items():
+        if "player" in fed_name and fed_name not in SKIP_NODE_ASSIGNMENT:
+            _create_player_config(fed_name, output_dir)
+
+
+def _create_grid_config(conf: DictConfig, output_dir: Path) -> None:
+    """Generate grid_config.json."""
+    config = {
         "name": conf.federates.grid.name,
         "loglevel": conf.general.loglevel,
         "coreType": "zmq",
         "period": conf.general.time_step,
-        "offset": conf.general.start_time - conf.general.start_time,
+        "offset": 0,
         "max_cosim_duration": conf.general.end_time,
         "broker": conf.federates.broker.name,
         "uninterruptible": False,
@@ -393,26 +565,19 @@ def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
 
     config_path = output_dir / "grid_config.json"
     with open(config_path, "w") as f:
-        json.dump(grid_config, f, indent=4)
-    print(f"Generated {config_path.name}")
+        json.dump(config, f, indent=4)
+
+    print(f"Generated: {config_path.name}")
 
 
-def create_logger_config(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate logger_config.json.
-    Logger uses helics_recorder with --capture flag, so no subscriptions needed.
-
-    Args:
-        conf: Fully resolved configuration object
-        output_dir: Directory where config should be written
-    """
-    # Minimal config - helics_recorder handles subscriptions via --capture flag
-    cfg = {
+def _create_logger_config(conf: DictConfig, output_dir: Path) -> None:
+    """Generate logger_config.json."""
+    config = {
         "name": conf.federates.logger.name,
         "loglevel": conf.general.get("loglevel", "warning"),
         "coreType": "zmq",
         "period": conf.general.time_step,
-        "offset": conf.general.start_time - conf.general.start_time,
+        "offset": 0,
         "max_cosim_duration": conf.general.end_time,
         "broker": conf.federates.broker.name,
         "uninterruptible": False,
@@ -422,83 +587,16 @@ def create_logger_config(conf: DictConfig, output_dir: Path) -> None:
 
     config_path = output_dir / "logger_config.json"
     with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=4)
-    print(f"Generated {config_path.name}")
+        json.dump(config, f, indent=4)
+
+    print(f"Generated: {config_path.name}")
 
 
-def create_player_config(
-    fed_name: str, fed_config: DictConfig, output_dir: Path
-) -> None:
-    """
-    Generate HELICS player config file with unit specifications.
-
-    Args:
-        fed_name: Name of the player federate
-        fed_config: Configuration for the player federate
-        output_dir: Directory where player config should be written
-    """
-    # Default publication configuration
-    player_config = {
-        "publications": [
-            {
-                "key": "P",
-                "type": "double",
-                "unit": "kW",  # CSV data is in kW
-                "global": False,
-            }
-        ]
-    }
-
-    config_path = output_dir / f"{fed_name}_config.json"
-    with open(config_path, "w") as f:
-        json.dump(player_config, f, indent=2)
-    print(f"Generated {config_path.name}")
-
-
-def main():
-    """
-    Main function to generate docker-compose.yml and runner files.
-    """
-    config_path = Path(os.environ.get("CONFIG_PATH", "/config/experiment.yml"))
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "/config/tmp"))
-    data_input_dir = Path(os.environ.get("DATA_INPUT_DIR", "/data/input"))
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load and prepare the configuration
-    conf = load_and_prepare_config(config_path, data_input_dir)
-
-    print("Configuration loaded and prepared successfully.")
-
-    # Generate docker-compose.yml
-    create_docker_compose(conf, output_dir / "docker-compose.yml")
-
-    # Generate runner files for all federates (this builds the federate name list)
-    create_runner_files(conf, output_dir)
-
-    # Generate grid config file
-    create_grid_config(conf, output_dir)
-    # Generate logger config (wildcard subscriptions)
-    if "logger" in conf.federates:
-        create_logger_config(conf, output_dir)
-    # Generate transformer config for helics_app source
-    if "transformer" in conf.federates:
-        create_transformer_config(conf, output_dir)
-
-
-def create_transformer_config(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate transformer config file for helics_app source.
-    Creates a single shared config (like house_player) that publishes VM.
-    The --local flag will prepend the federate name to make unique keys.
-
-    Args:
-        conf: configuration
-        output_dir: output directory for config files
-    """
+def _create_transformer_config(conf: DictConfig, output_dir: Path) -> None:
+    """Generate transformer_config.json for helics_app source."""
     voltage = conf.federates.transformer.get("voltage", 1.0)
 
-    cfg = {
+    config = {
         "publications": [
             {
                 "key": "VM",
@@ -511,13 +609,91 @@ def create_transformer_config(conf: DictConfig, output_dir: Path) -> None:
 
     config_path = output_dir / "transformer_config.json"
     with open(config_path, "w") as f:
-        json.dump(cfg, f, indent=2)
-    print(f"Generated {config_path.name}")
+        json.dump(config, f, indent=2)
 
-    # Generate player config files for any player federates
+    print(f"Generated: {config_path.name}")
+
+
+def _create_player_config(fed_name: str, output_dir: Path) -> None:
+    """Generate player config file with publication specifications."""
+    config = {
+        "publications": [
+            {
+                "key": "P",
+                "type": "double",
+                "unit": "kW",
+                "global": False,
+            }
+        ]
+    }
+
+    config_path = output_dir / f"{fed_name}_config.json"
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+    print(f"Generated: {config_path.name}")
+
+
+# --- Main Entry Point ---
+
+
+def main() -> None:
+    """
+    Main function: orchestrates configuration loading, validation,
+    expansion, and file generation.
+    """
+    # Paths from environment or defaults
+    config_path = Path(os.environ.get("CONFIG_PATH", "/config/experiment.yml"))
+    output_dir = Path(os.environ.get("OUTPUT_DIR", "/config/tmp"))
+    data_input_dir = Path(os.environ.get("DATA_INPUT_DIR", "/data/input"))
+
+    print("=" * 60)
+    print("COMPOSEGEN: GridLock Configuration Generator")
+    print("=" * 60)
+
+    # Ensure output directory exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Load and validate configuration
+    print("\n[1/5] Loading configuration...")
+    conf = load_experiment_config(config_path)
+    print(f"      Loaded {config_path}")
+
+    # Step 2: Read grid to get node indices
+    print("\n[2/5] Reading grid file...")
+    grid_file_path = data_input_dir / conf.federates.grid.grid_file
+    node_indices = get_load_indices(grid_file_path)
+    ext_grid_indices = get_ext_grid_indices(grid_file_path)
+    print(f"      Found {len(node_indices)} nodes: {node_indices}")
+    print(f"      Found {len(ext_grid_indices)} ext_grids: {ext_grid_indices}")
+
+    # Step 3: Build and validate placement matrix
+    print("\n[3/5] Building placement matrix...")
+    placement_matrix = build_node_placement_matrix(conf, node_indices)
+    print("      Placement matrix:")
+    for node_idx, fed_name in sorted(placement_matrix.items()):
+        print(f"        node_{node_idx} -> {fed_name}")
+
+    # Step 4: Expand federate configurations
+    print("\n[4/5] Expanding federate configurations...")
+    conf = expand_federate_configs(conf, node_indices, placement_matrix, ext_grid_indices)
     for fed_name, fed_config in conf.federates.items():
-        if "player" in fed_name and fed_name not in SKIP_NODE_ASSIGNMENT:
-            create_player_config(fed_name, fed_config, output_dir)
+        num = fed_config.get("num_instances", 1)
+        print(f"        {fed_name}: {num} instance(s)")
+    print(f"      Total federates for broker: {conf.federates.broker.total_federates}")
+
+    # Resolve all interpolations
+    OmegaConf.resolve(conf)
+
+    # Step 5: Generate output files
+    print("\n[5/5] Generating output files...")
+    create_docker_compose(conf, output_dir / "docker-compose.yml")
+    create_runner_files(conf, output_dir)
+    create_config_files(conf, output_dir)
+
+    print("\n" + "=" * 60)
+    print("COMPOSEGEN: Complete!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

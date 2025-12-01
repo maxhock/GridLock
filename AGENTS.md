@@ -109,47 +109,20 @@ Alternatively if using /todos is not possible, print this task list as markdown 
 - [ ] Implement function
 ```
 
-## Current Project: Paper Project (Surrogate Model Training Data)
+## Agent Task: Refactor `composegen` for Dynamic Configurations
 
-### Goal
-Create an end-to-end pipeline to generate grid and demand data based on geolocation, simulate the grid with high fidelity, and collect comprehensive training data (voltages, powers) for a surrogate model.
+This plan refactors the `composegen` module to dynamically generate configurations from `experiment.yml`. It introduces validation, a robust placement strategy for multi-instance federates, and clear instance naming, halting with an error on any validation failure.
 
-### Architecture Updates
-1.  **Data Generation (`data-generation`):**
-    *   **Role:** Pre-experiment setup. Fetches grid data from external DB based on lat/lon and generates household demand profiles.
-    *   **Input:** `experiment.yml` (lat, lon, matching criteria).
-    *   **Output:** Pandapower Excel file and Demand CSVs in `data/input`.
-    *   **Execution:** Runs as a Docker container before `composegen`.
+### Steps
+1.  **Load and Validate Configuration**: In `composegen/main.py`, load `experiment.yml` and validate that `federates.grid.grid_file` is specified. Halt with an error if it's missing.
+2.  **Read Grid and Create Node List**: Create a new function `get_load_indices(grid_file_path)` that uses `pandas.read_excel` to read the `load` sheet from the grid file and returns the list of indices. This will serve as the definitive list of available nodes.
+3.  **Implement Placement Logic**: Refactor the placement logic to use the list of load indices. It will validate that all nodes in `placement` lists exist, are not double-booked, and that only one federate has `fill_remaining: true`.
+4.  **Expand Federate Configurations**: Create a function that iterates through federates, and for those with a `placement_map`, it generates a unique configuration for each instance (e.g., `house_player` becomes `node_0`, `node_2`, etc.).
+5.  **Generate Docker Compose File**: Update the Docker Compose generation to create a single service for each federate *type* (e.g., one `house_player` service), which will manage all its instances. The runner file will handle starting the individual instances.
+6.  **Generate Runner and Config JSONs**: Modify the runner file generation to create a `runner.json` for each federate type. For multi-instance federates, this file will contain a list of all its uniquely named instances (`node_x`) and their commands.
 
-2.  **Grid Federate (`grid`):**
-    *   **Update:** Extend to publish voltage magnitude (vm_pu) and active power (p_mw) for *every* node/bus individually, following the existing pattern used for external grid power.
+### Further Considerations
+1.  **Data Input Path**: The path to the `data/input` directory is currently hardcoded in a few places. We should consider making this a configurable variable at the top of the script.
+2.  **Command Generation**: The command generation logic is a bit scattered. We could centralize this into a more robust function that handles all federate types.
+3.  **Extending to Other Multi-Instance Federates**: The current plan focuses on `house_player`. The new logic should be generic enough to easily support other multi-instance federate types in the future.
 
-3.  **Surrogate Collector (`surrogate_collector`):**
-    *   **Role:** Specialized observer for training data.
-    *   **Input:** Subscribes to all grid node states (P, V) and transformer state.
-    *   **Output:** HDF5 (.h5) file containing synchronized time-series.
-
-4.  **Dummy Transformer (`transformer`):**
-    *   **Role:** Simulates the high-voltage side or transformer characteristics.
-    *   **Action:** Uses HELICS Signal Generator to publish transformer voltage (defined in `experiment.yml`).
-
-### Todo List
-- [x] **Configuration & Orchestration**
-    - [x] Update `experiment.yml` schema to include `data_generation` (lat, lon, mode) and `transformer` (voltage) sections. (Note: `target_size` is not needed).
-    - [x] Update `run.sh` and `run.ps1` to build and run `data-generation` container before `composegen`.
-    - [x] Update `composegen` to handle the new `surrogate_collector` and `transformer` (Signal Generator) federates.
-
-- [x] **Data Generation Container**
-    - [x] Create `data-generation/main.py` merging logic from `gridreadout` and `gridalloc`.
-    - [x] Ensure it reads config from `experiment.yml` (or passed env vars) and outputs to `data/input`.
-
-- [x] **Grid Federate**
-    - [x] Modify `grid/main.py` to iterate over all buses and publish `vm_pu` and `p_mw`.
-
-- [x] **Dummy Transformer**
-    - [x] Configure HELICS Signal Generator in `composegen` to publish voltage signal.
-
-- [x] **Surrogate Collector**
-    - [x] Create `surrogate_collector/` folder with Dockerfile and `main.py`.
-    - [x] Implement dynamic subscription (wildcard or list from config) to all grid topics.
-    - [x] Implement HDF5 writing logic using `h5py`.

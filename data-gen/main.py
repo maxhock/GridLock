@@ -24,11 +24,6 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
 conf = OmegaConf.load("/config/experiment.yml")
-out_path = Path(f"/data/input/{conf.federates.grid.grid_file}")
-if out_path.exists():
-    raise FileExistsError(
-        f"Grid file already exists at {out_path}. Aborting to avoid overwrite."
-    )
 
 try:
     lat, lon = conf.data_generation.latitude, conf.data_generation.longitude
@@ -40,6 +35,12 @@ try:
 except AttributeError:
     print("No data generation configuration found. Exiting.")
     sys.exit(0)
+
+out_grid = Path(f"/data/input/{conf.federates.grid.grid_file}")
+if out_grid.exists():
+    raise FileExistsError(
+        f"Grid file already exists at {out_grid}. Aborting to avoid overwrite."
+    )
 
 df_grid_set = pd.read_hdf("input_data/valid_grids")  # Source: pylovo
 df_grid_set.head()
@@ -78,9 +79,9 @@ df_census.head()
 
 def find_nearest_census_cell(lat, lon, df_census):
     """
-        Find the nearest cenout_path = Path(f"/data/input/{conf.federates.grid.grid_file}")
-    if out_path.exists():
-        raise FileExistsError(f"Grid file already exists at {out_path}. Aborting to avoid overwrite.")sus cell to the given lat/lon coordinates.
+        Find the nearest cenout_grid = Path(f"/data/input/{conf.federates.grid.grid_file}")
+    if out_grid.exists():
+        raise FileExistsError(f"Grid file already exists at {out_grid}. Aborting to avoid overwrite.")sus cell to the given lat/lon coordinates.
 
         Args:
             lat: Latitude (EPSG:4326)
@@ -454,7 +455,7 @@ def retrieve_pylovo_grid(df_region_specs):
 
 
 SF_paths, net = df_sampled_grids[0:100].apply(retrieve_pylovo_grid, axis=1)[0]
-pp.to_excel(net, str(out_path))
+pp.to_excel(net, str(out_grid))
 
 # # Demand Generation
 
@@ -570,10 +571,49 @@ def replaceBusLoad(df_demand, net):
 
 df_demand = replaceBusLoad(GRD.df_demand, net)
 # df_demand = GRD.df_demand
-df_demand.to_csv(f"/data/input/demand_{out_path.stem.split('_',1)[1]}.csv", index=False)
-print(
-    f"Succesfully retrieved grid and electrical demand data under name: {out_path.stem.split('_',1)[1]}"
-)
+
+# Add time column with hourly seconds (0, 3600, 7200, ...)
+time_step = conf.general.time_step  # seconds per step from experiment config
+df_demand.insert(0, "time", [i * time_step for i in range(len(df_demand))])
+
+# Check if we should split into per-node files
+split_by_node = conf.data_generation.get("split_by_node", False)
+
+if split_by_node:
+    # Create tmp directory for split files
+    tmp_dir = Path("/data/input/tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get node columns (all columns except 'time')
+    node_columns = [col for col in df_demand.columns if col != "time"]
+
+    # Create a separate CSV for each node in HELICS player format
+    input_files = []
+    for node_idx in node_columns:
+        node_file = tmp_dir / f"node_{node_idx}.csv"
+        
+        # Write HELICS player format file
+        with open(node_file, "w") as f:
+            # Header comment
+            f.write("#second,topic,type(opt),value\n")
+            f.write(f"# Generated demand data for node {node_idx}\n")
+            
+            # Initialization line at t=-1 with type declaration
+            first_value = df_demand[node_idx].iloc[0]
+            f.write(f"-1,P,d,{first_value}\n")
+            
+            # Data lines: second,topic,value
+            for _, row in df_demand.iterrows():
+                f.write(f"{int(row['time'])},P,{row[node_idx]}\n")
+        
+        input_files.append(f"tmp/node_{node_idx}.csv")
+
+    print(f"Split demand data into {len(node_columns)} node files in {tmp_dir}")
+else:
+    df_demand.to_csv(out_demand, index=False)
+    print(
+        f"Succesfully retrieved grid and electrical demand data under name: {out_demand}"
+    )
 
 
 # df = GRD.save_grid_data()

@@ -6,12 +6,27 @@ federates:
     name: grid
     build_folder: ${.name}
     # grid_file: kerber_landnetz_freileitung_1.xlsx
-    grid_file: grid_N2781730E4438792_80539_1_19.xlsx
+    grid_file: grid_berlin.xlsx
     # grid_file: grid.xlsx
   house_player:
     name: house_player
     build_folder: ${.name}
-    input_file: /data/input/sample_house.csv
+    input_files:
+      - tmp/node_0.csv
+      - tmp/node_1.csv
+      - tmp/node_2.csv
+      - tmp/node_3.csv
+      - tmp/node_7.csv
+      - tmp/node_11.csv
+      - tmp/node_12.csv
+      - tmp/node_13.csv
+      - tmp/node_32.csv
+      - tmp/node_33.csv
+      - tmp/node_57.csv
+      - tmp/node_91.csv
+      - tmp/node_116.csv
+      - tmp/node_119.csv
+      - tmp/node_122.csv
     fill_remaining: true
   # house:
   #   name: house
@@ -38,6 +53,7 @@ data_generation:
   latitude: 48.1351
   longitude: 11.5820
   matching_mode: "distance" # match by closest distance or population
+  split_by_node: true # if true, creates separate CSV files per node in data/input/tmp/
 
 general:
     start_time: 0
