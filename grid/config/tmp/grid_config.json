@@ -1,0 +1,10 @@
+{
+  "name": "grid",
+  "loglevel": "trace",
+  "core_type": "zmq",
+  "core_init": "--federates=3 --broker=localhost --port=23405",
+  "period": 900.0,
+  "max_cosim_duration": 86400.0,
+  "publications": {},
+  "subscriptions": {}
+}
