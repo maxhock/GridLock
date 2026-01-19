@@ -26,6 +26,7 @@ import house.sample_data_generator
 import helics as h
 import jax.numpy as jnp
 import equinox as eqx 
+import os
 
 
 logging.basicConfig(
@@ -98,6 +99,9 @@ def setup_simulator(config_path: str) -> tuple:
 def setup_federate(federate_name: str, dt_seconds: int):
     logger.info(f"Creating HELICS federate: {federate_name}")
     fed_info = h.helicsCreateFederateInfo()
+    h.helicsFederateInfoSetCoreInitString(
+    fed_info, f"--broker={os.getenv('HELICS_BROKER','broker')}")
+
     h.helicsFederateInfoSetCoreTypeFromString(fed_info, "zmq")
     h.helicsFederateInfoSetIntegerProperty(
         fed_info, h.helics_property_int_log_level, h.helics_log_level_debug
@@ -126,8 +130,8 @@ def setup_federate(federate_name: str, dt_seconds: int):
     
     # 4. Publish net load (for grid federate)
     pub_load = h.helicsFederateRegisterGlobalPublication(
-        fed, f"{federate_name}/house_load", h.HELICS_DATA_TYPE_DOUBLE, "W"
-    )
+        fed, f"node_{fed_index}/P", h.HELICS_DATA_TYPE_DOUBLE, "MW"
+)
 
     logger.info(f"Federate '{federate_name}' subscribing to:")
     logger.info(f"  - {federate_name}/action")
@@ -144,28 +148,17 @@ def publish_result(pub: h.HelicsPublication, result: dict):
     h.helicsPublicationPublishString(pub, result_str)
 
 
-#def get_action(sub: h.HelicsInput) -> Dict[str, Any]:
-#    """Retrieve and decode the action from the subscription."""
-#    action_str = h.helicsInputGetString(sub)
-#    # Return an empty dict if no action, so simulator.step() receives {}
-#    try:
-#        return json.loads(action_str) if action_str else {}
-#    except json.JSONDecodeError:
-#        logger.warning(f"Invalid action JSON received: {action_str}. Defaulting to {{}}.")
-#        return {}
-
 def get_action(sub: h.HelicsInput) -> Dict[str, Any]:
     """Retrieve and decode the action from the subscription."""
     action_str = h.helicsInputGetString(sub)
 
     if not action_str:
-        # Nichts publiziert -> leere Aktion
+        
         return {}
 
     try:
         data = json.loads(action_str)
 
-        # Wir wollen IMMER ein Dict, alles andere ignorieren
         if isinstance(data, dict):
             return data
         else:
@@ -180,14 +173,6 @@ def get_action(sub: h.HelicsInput) -> Dict[str, Any]:
         )
         return {}
 
-#def dict_to_system_actions(action_dict: Dict[str, Any], n_rooms: int) -> SystemActions:
-#    # Default: alles 0, falls Feld fehlt
-#    return SystemActions(
-#        battery_power_w=jnp.array(action_dict.get("battery_power_w", 0.0)),
-#        heat_pump_power_w=jnp.array(action_dict.get("heat_pump_power_w", [0.0] * n_rooms)),
-#        ac_power_w=jnp.array(action_dict.get("ac_power_w", [0.0] * n_rooms)),
-#        storage_discharge_w=jnp.array(action_dict.get("storage_discharge_w", [0.0] * n_rooms)),
-#    )
 
 def dict_to_system_actions(action_dict: Dict[str, Any], n_rooms: int) -> SystemActions:
     
@@ -260,7 +245,7 @@ def run_federate(
 
         raw_action = get_action(sub_action)
         action = dict_to_system_actions(raw_action, n_rooms)
-        #cost statt timestep_result
+    
         simulator, cost = simulator.step(action, previous_action, exo)
         state = simulator.state
         previous_action = action
@@ -272,9 +257,24 @@ def run_federate(
         }
 
         publish_result(pub_result, result)
+
+        # Calculate net load for grid federate
+        hp_p_el = jnp.sum(state.heat_pump.current_electrical_w)
+        ac_p_el = jnp.sum(state.air_conditioner.current_electrical_w)
+        print(f"  Heat Pump Power: {hp_p_el} W, AC Power: {ac_p_el} W")
+
+        # Battery power (from action)
+        bat_p_el = jnp.asarray(action.battery_power_w*1000.0)  # Convert kW to W
+        print(f"  Battery Power Action: {bat_p_el} W")
+
+        total_net_power_w = float(hp_p_el + ac_p_el + bat_p_el)
+
         #total_net_power_w = timestep_result.system_balance.electrical_energy.net / dt_seconds
-        total_net_power_w = 0.0  # Placeholder for actual net power calculation
-        h.helicsPublicationPublishDouble(pub_load, float(total_net_power_w))
+        #total_net_power_w = 0.0  # Placeholder for actual net power calculation
+        #total_net_power_w = total_net_power_w / dt_seconds
+        total_net_power_mw = total_net_power_w / 1e6
+        print(f"Time {current_time}s: Net Load = {total_net_power_mw:.6f} MW")
+        h.helicsPublicationPublishDouble(pub_load, float(total_net_power_mw))
 
     h.helicsFederateFinalize(fed)
     h.helicsFederateFree(fed)
@@ -286,6 +286,7 @@ def main():
     parser.add_argument("--config", type=str, default="house/config.yaml", help="Path to house config YAML")
     parser.add_argument("--stop_time", type=float, default=86400, help="Simulation stop time in seconds")
     parser.add_argument("--dt", type=int, default=900, help="Time step in seconds")
+    #parser.add_argument("--data_file", type=str, default=os.getenv("DATA_FILE", "/data/input/sample_house.csv"),help="Path to CSV file for SimulationDataset")
     
     args = parser.parse_args()
     logger.info(f"Starting federate '{args.name}' with dt={args.dt}s")

@@ -1,4 +1,5 @@
 helics
 gymnasium
 pyyaml
+dacite
 git+https://github.com/phierhager/EnergySim.git

@@ -25,14 +25,14 @@ class GridFederate(Federate):
         """Initialize HELICS federate and load pandapower network."""
 
         # Load config from JSON file (bypassing CST's database requirement)
-        #config_path = f"/config/tmp/{self.federate_name}_config.json" ###For Docker ###
+        config_path = f"/config/tmp/{self.federate_name}_config.json" ###For Docker ###
 
          ###For Testing without Docker###
-        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_path = os.path.join(
+        #repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        #config_path = os.path.join(
         #repo_root, "config", "tmp", f"{self.federate_name}_config.json"
-        repo_root, "grid", "config", "tmp", "grid_config.json"
-        )
+        #repo_root, "grid", "config", "tmp", "grid_config.json"
+        #)
 
         with open(config_path, "r") as f:
             self.config = json.load(f)
@@ -138,9 +138,9 @@ def parse_args():
 def main():
     args = parse_args()
     #For Testing without Docker###
-    #grid_path = os.path.join("/data", "input", args.grid_file)
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    grid_path = os.path.join(repo_root, "data", "input", args.grid_file)
+    grid_path = os.path.join("/data", "input", args.grid_file)##For Docker###
+    #repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    #grid_path = os.path.join(repo_root, "data", "input", args.grid_file)
     federate = GridFederate("grid", grid_path)
 
     try:
