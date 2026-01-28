@@ -3,3 +3,5 @@ pyyaml
 types-pyyaml
 pandas
 openpyxl
+treelib
+cosim_toolbox

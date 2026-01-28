@@ -2,7 +2,7 @@ import os
 import yaml
 import json
 from omegaconf import OmegaConf
-from main import (
+from composegen.main_old import (
     create_docker_compose,
     create_grid_config,
     create_broker_runner,

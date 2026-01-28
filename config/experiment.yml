@@ -1,33 +1,50 @@
-federates:
-  broker:
-    name: broker
-    build_folder: ${.name}
-  grid:
-    name: grid
-    build_folder: ${.name}
-    grid_file: kerber_landnetz_freileitung_1.xlsx
-  forecasting:
-    name: forecasting
-    build_folder: ${.name}    
-    grid_file: kerber_landnetz_freileitung_1.xlsx
-    api_host: fastapi_server
-    api_port: 8000
-  house_player:
-    name: house_player
-    build_folder: ${.name}
-    input_file: /data/input/sample_house.csv
-    fill_remaining: true
-  # house:
-  #   name: house
-  #   build_folder: ${.name}
-  #   placement: [0, 2, 5, 8]
-  recorder:
-    name: recorder
-    build_folder: ${.name}
-    target: grid
-    output_file: /data/output/${.target}.log
 general:
-    start_time: 0
-    end_time: 82800  # You can adjust this as needed
-    time_step: 3600
-    loglevel: warning
+ name: "Demo Experiment Medium Voltage Grid with Houses"
+ start_time: 
+ end_time: 86400
+ time_step: 300
+ duration: 86400
+federation:
+  id: "lv-grid_0"
+  name: "LowVoltageGrid"
+  type: "grid"
+  config:
+    placement: 3 # [3, 7]
+    layout: "kerber_landnetz_freileitung_1.xlsx"
+  sub_federates:
+    - id: "loadhouse_0"
+      name: "Load profile house"
+      type: "load"
+      config:
+        placement: "fill"
+        electrical_load: "H0" # "H25", "electricloadcurve.csv"
+        heat_load: "" # "heatloadcurve.csv"
+    - id: "house_0"
+      name: "sim house"
+      type: "house"
+      config:
+        placement: [4,6]
+        model:
+          type: "1R1C"
+          resistance: "5 Ohm"
+          capacitance: "8 F"
+      sub_federates:
+        - id: "battery_0"
+          name: "BYD Battery"
+          type: "battery"
+          config:
+            placement: 0
+            capacity: "5kWh"
+            power: "5 kW"
+        - id: "pv_1"
+          name: "Sunwell PV"
+          type: "pv"
+          config:
+            capacity: "5 5 kW"
+            max_production: "renewables_ninja2019_munich.csv"
+        - id: "hems_0"
+          name: "Smart HEMS"
+          type: "hems"
+          config:
+            control_strategy: "mpc"
+            accessible: ["battery_0", "pv_1"]

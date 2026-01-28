@@ -1,383 +1,436 @@
-# composegen/main.py
-"""
-Modular, data-driven composegen script for HELICS co-simulation.
-"""
-
-import json
-import os
-from pathlib import Path
-from typing import Dict, List
-
-import pandas as pd
 import yaml
-from omegaconf import DictConfig, OmegaConf
+import json
+import argparse
+import pandas as pd
+from pathlib import Path
+from treelib import Tree
+import copy
+import traceback
+from cosim_toolbox.sims import FederationConfig, FederateConfig, DockerRunner, Collect
 
-# Constants
-SKIP_NODE_ASSIGNMENT = {"broker", "recorder", "grid", "forecasting"}
-DEFAULT_COMMAND_TEMPLATES = {
-    "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
-    "grid": "python main.py --name={name} --broker=broker --grid_file={grid_file}",
-    "recorder": "helics_recorder --name={name} --capture={target} --output={output_file} --broker=broker",
-    "forecasting": "python main.py --name={name} --broker=broker --grid_file={grid_file} --api_host={api_host} --api_port={api_port}",
-}
-
-
-def get_num_nodes(grid_file_path: Path) -> int:
-    """
-    Read the grid Excel file and determine the number of load nodes.
-
-    Args:
-        grid_file_path: Path to the grid Excel file
-
-    Returns:
-        Number of load nodes in the grid
-    """
-    try:
-        df = pd.read_excel(grid_file_path, sheet_name="load")
-        return len(df)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Grid file not found at {grid_file_path}")
-    except Exception as e:
-        raise RuntimeError(f"Error reading grid file: {e}")
-
-
-def load_and_prepare_config(config_path: Path, data_input_path: Path) -> DictConfig:
-    """
-    Load experiment configuration and calculate dynamic values.
-
-    Steps:
-    1. Load experiment.yml with OmegaConf
-    2. Determine num_nodes from grid file
-    3. Calculate placement maps and validate node assignments
-    4. Calculate total federate count for broker
-    5. Resolve all interpolations
-
-    Args:
-        config_path: Path to experiment.yml
-        data_input_path: Path to data/input directory
-
-    Returns:
-        Fully resolved OmegaConf configuration
-    """
-    conf = OmegaConf.load(config_path)
-
-    # Determine number of nodes from grid file
-    grid_file_path = data_input_path / conf.federates.grid.grid_file
-    num_nodes = get_num_nodes(grid_file_path)
-    conf.federates.grid.num_nodes = num_nodes
-    print(f"Grid has {num_nodes} nodes.")
-
-    # Calculate node assignments
-    _calculate_node_assignments(conf, num_nodes)
-
-    # Calculate total federates for broker
-    total = sum(
-        fed_config.get("num_instances", 1)
-        for fed_name, fed_config in conf.federates.items()
-        if fed_name != "broker"
+def add_to_tree(tree, node_dict, parent=None):
+    """Recursively add nodes from config dict to tree structure."""
+    node_id = f"{parent}/{node_dict.get('id')}" if parent else node_dict.get("id")
+    node_tag = node_dict.get("name")
+    node_config = node_dict.get("config", {}).copy()
+    node_config["type"] = node_dict.get("type")
+    # Convert empty string values in node_config to None
+    node_config = {k: (v if v != "" else None) for k, v in node_config.items()}
+    
+    # Create node with config data
+    tree.create_node(
+        tag=f"{node_tag}", 
+        identifier=node_id, 
+        parent=parent,
+        data=node_config
     )
-    conf.federates.broker.total_federates = total
-    print(f"Total federates: {total}")
+    
+    for sub in node_dict.get("sub_federates", []):
+        add_to_tree(tree, sub, parent=node_id)
 
-    OmegaConf.resolve(conf)
-    return conf
-
-
-def _calculate_node_assignments(conf: DictConfig, num_nodes: int) -> None:
-    """Calculate and validate node-to-federate assignments."""
-    global_node_map = [None] * num_nodes
-    fill_remaining_fed = None
-
-    # Set num_instances for simple federates
-    for fed_name in SKIP_NODE_ASSIGNMENT:
-        if fed_name in conf.federates:
-            conf.federates[fed_name].num_instances = 1
-
-    # First pass: explicit placements
-    for fed_name, fed_config in conf.federates.items():
-        if fed_name in SKIP_NODE_ASSIGNMENT:
+def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> Tree:
+    """
+    Expands the tree by placing federates onto grid buses according to 'placement' rules.
+    - Removes original definition nodes from the grid parent.
+    - Replicates subtrees for 'list' or 'fill' placements.
+    - Ensures unique IDs for all placed nodes.
+    """
+    
+    for grid_id, buses in grid_nodes.items():
+        if not tree.contains(grid_id):
+            continue
+            
+        # If no buses are defined for this grid, skip
+        if not buses:
             continue
 
-        if fed_config.get("fill_remaining"):
-            if fill_remaining_fed is not None:
-                raise ValueError(
-                    f"Multiple federates have 'fill_remaining: true': {fill_remaining_fed}, {fed_name}. "
-                    "Only one federate can use fill_remaining."
+        # 1. Classify logic and extract prototypes
+        # We process current children to build placement plan
+        explicit_placements = {} # Map[bus_id] -> template_subtree
+        fill_templates = []      # List[template_subtree]
+        
+        # Get current children nodes to iterate over
+        children = tree.children(grid_id)
+        
+        for child in children:
+            placement = child.data.get("placement")
+            
+            # Extract the full subtree (template) for this federate
+            # We use remove_subtree to detach it from the main tree immediately
+            # giving us a clean slate to paste back onto.
+            template_subtree = tree.remove_subtree(child.identifier)
+            
+            if isinstance(placement, int):
+                placement = [placement]  # Normalize to list for uniform processing
+
+            if isinstance(placement, list):
+                for p in placement:
+                    if p in explicit_placements:
+                         raise ValueError(f"Configuration Error: Bus {p} in grid '{grid_id}' is claimed by multiple federates.")
+                    if p not in buses:
+                        raise ValueError(f"Configuration Error: Federate '{child.tag}' placed on bus {p} which does not exist in grid '{grid_id}'.")
+                    # We store the same template reference; we must deepcopy when pasting
+                    explicit_placements[p] = template_subtree
+
+            elif placement == "fill":
+                fill_templates.append(template_subtree)
+                
+            else:
+                # If placement is None/Empty in config, we treat it simply as not having a specific spot.
+                # Since we stripped the tree, we discard it unless specific logic is needed.
+                raise ValueError(f"Configuration Error: Federate '{child.tag}' does not have a valid placement in grid '{grid_id}'.")
+
+        # 2. Re-populate the grid node with concrete instances per bus
+        for bus in buses:
+            # Determine which template to use
+            template = None
+            is_fill = False
+
+            if bus in explicit_placements:
+                template = explicit_placements[bus]
+            elif fill_templates:
+                # Use the first fill template available (simple logic)
+                template = fill_templates[0]
+                is_fill = True
+            
+            new_root_id = f"{grid_id}/bus_{bus}"
+
+            if template:
+                # We must modify the subtree to have unique IDs before pasting
+                # Deepcopy ensures we don't mutate the template for other buses
+                subtree_to_paste = copy.deepcopy(template)
+                
+                # Update IDs inside the subtree to be unique
+                # Old Root ID -> New Root ID
+                old_root_id = subtree_to_paste.root
+                root_node = subtree_to_paste[old_root_id]
+                
+                # We need to systematically rename everything in this subtree
+                # Mapping: old_id -> new_id
+                # Strategy: Append grid and bus info to ensure global uniqueness
+                
+                # Logic: Rename the root specifically to the requested format
+                # Rename descendants to strictly unique IDs
+                
+                # 1. Update root
+                root_node.identifier = new_root_id
+                # Update data to reflect actual placement
+                root_node.data["placement"] = bus 
+                subtree_to_paste.update_node(old_root_id, identifier=new_root_id)
+                
+                # 2. Update all other nodes in subtree
+                # BFS/DFS transversal to rename. Note: changing IDs while iterating needs care.
+                # treelib doesn't support bulk re-id easily, so we iterate keys
+                for node_id in list(subtree_to_paste.nodes.keys()):
+                    if node_id == new_root_id: 
+                        continue # Already handled root
+                    
+                    # Generate unique ID by replacing the old root prefix with the new root ID
+                    if node_id.startswith(old_root_id):
+                        new_sub_id = node_id.replace(old_root_id, new_root_id, 1)
+                    else:
+                        new_sub_id = f"{new_root_id}/{node_id}"
+                        
+                    subtree_to_paste.update_node(node_id, identifier=new_sub_id)
+
+                # Paste the prepared subtree back into the main tree
+                tree.paste(grid_id, subtree_to_paste)
+
+            else:
+                # "if placement is empty or none make a node of type 'empty'"
+                # (And no fill template was available)
+                tree.create_node(
+                    tag=f"Empty Slot {bus}",
+                    identifier=new_root_id,
+                    parent=grid_id,
+                    data={"type": "empty", "bus": bus, "placement": bus}
                 )
-            fill_remaining_fed = fed_name
 
-        if placements := fed_config.get("placement"):
-            for node_idx in placements:
-                if 0 <= node_idx < num_nodes:
-                    if global_node_map[node_idx]:
-                        print(
-                            f"Warning: Node {node_idx} reassigned from "
-                            f"{global_node_map[node_idx]} to {fed_name}"
-                        )
-                    global_node_map[node_idx] = fed_name
-                else:
-                    print(f"Warning: Node {node_idx} out of bounds (0-{num_nodes-1})")
+    return tree
 
-    # Second pass: fill remaining
-    if fill_remaining_fed:
-        global_node_map = [fed or fill_remaining_fed for fed in global_node_map]
+def add_pub_sub(node, topic, unit, type="publication"):
+    """Helper to add pub/sub to node data structure."""
+    key = "publications" if type == "publication" else "subscriptions"
+    if key not in node.data:
+        node.data[key] = {}
+    node.data[key][topic] = unit
 
-    # Validate all nodes assigned
-    if unassigned := [i for i, v in enumerate(global_node_map) if v is None]:
-        raise ValueError(
-            f"Nodes {unassigned} unassigned. Use 'fill_remaining: true' to cover all nodes."
-        )
-
-    # Build placement maps
-    for fed_name, fed_config in conf.federates.items():
-        if fed_name in SKIP_NODE_ASSIGNMENT:
-            continue
-
-        placement_map = {
-            i: fed_name for i in range(num_nodes) if global_node_map[i] == fed_name
+def map_params_to_type(federate_type):
+    """Maps internal federate types to Docker images and commands."""
+    mapping = {
+        "grid": {
+            "image": "gridlock-grid:latest",
+            "command": "python3 main.py",
+        },
+        "house": {
+            "image": "gridlock-house:latest",
+            "command": "python3 main.py",
+        },
+        "recorder": {
+            "image": "gridlock-recorder:latest",
+            "command": "helics_recorder", 
+        },
+        "pv": {
+             "image": "gridlock-house:latest", 
+             "command": "python3 main.py"
+        },
+        "battery": {
+             "image": "gridlock-house:latest",
+             "command": "python3 main.py"
+        },
+        "hems": {
+             "image": "gridlock-house:latest",
+             "command": "python3 main.py"
         }
-        conf.federates[fed_name].num_instances = len(placement_map)
-        conf.federates[fed_name].placement_map = placement_map
-
-
-def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
-    """
-    Generate docker-compose.yml from the configuration.
-
-    Dynamically creates a service for each federate defined in experiment.yml.
-
-    Args:
-        conf: Fully resolved configuration object
-        output_path: Path where docker-compose.yml should be written
-    """
-    compose_config = {"networks": {"helics-net": {"driver": "bridge"}}, "services": {}}
-
-    # Generate a service for each federate
-    for fed_name, fed_config in conf.federates.items():
-        service = {
-            "build": f"${{PWD}}/{fed_config.build_folder}",
-            "container_name": fed_name,
-            "volumes": [
-                "${PWD}/data:/data",
-                "${PWD}/config/tmp:/config/tmp:ro",
-            ],
-            "networks": ["helics-net"],
-        }
-
-        # Add command only if specified in config
-        if "command" in fed_config:
-            service["command"] = fed_config.command
-
-        compose_config["services"][fed_name] = service
-
-    # Write the docker-compose.yml file
-    with open(output_path, "w") as f:
-        yaml.dump(compose_config, f, default_flow_style=False, sort_keys=False)
-
-    print(f"Generated docker-compose.yml at {output_path}")
-
-
-def create_runner_files(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate runner.json files for all federates.
-
-    Args:
-        conf: Fully resolved configuration
-        output_dir: Directory for runner files
-    """
-    for fed_name, fed_config in conf.federates.items():
-        federates_list = (
-            _create_node_based_instances(fed_name, fed_config)
-            if fed_config.get("placement_map")
-            else [_create_simple_instance(fed_name, fed_config, conf)]
-        )
-
-        runner_path = output_dir / f"{fed_name}_runner.json"
-        with open(runner_path, "w") as f:
-            json.dump({"name": fed_name, "federates": federates_list}, f, indent=4)
-        print(f"Generated {runner_path.name}")
-
-
-def _create_node_based_instances(fed_name: str, fed_config: DictConfig) -> List[Dict]:
-    """Create federate instances for node-based federates."""
-    instances = []
-    for node_idx in sorted(fed_config.placement_map.keys()):
-        instance_name = f"node_{node_idx}"
-
-        if "command" in fed_config:
-            command = fed_config.command.replace(
-                f"--name={fed_name}", f"--name={instance_name}"
-            )
-        elif "player" in fed_name:
-            input_file = fed_config.get("input_file", f"/data/input/{fed_name}.csv")
-            # Player config is in /config/tmp
-            config_file = f"/config/tmp/{fed_name}_config.json"
-            command = f"helics_player --input={input_file} --config-file={config_file} --broker=broker --name={instance_name} --local"
-        else:
-            command = f"python main.py --name={instance_name} --broker=broker"
-
-        instances.append(
-            {
-                "directory": "/app",
-                "exec": command,
-                "host": "localhost",
-                "name": instance_name,
-            }
-        )
-    return instances
-
-
-def _create_simple_instance(
-    fed_name: str, fed_config: DictConfig, conf: DictConfig
-) -> Dict:
-    """Create a single federate instance for simple federates."""
-    if "command" in fed_config:
-        command = fed_config.command
-    elif fed_name in DEFAULT_COMMAND_TEMPLATES:
-        params = {
-            "name": fed_name,
-            "total_federates": conf.federates.broker.total_federates,
-            "grid_file": fed_config.get("grid_file", ""),
-            "target": fed_config.get("target", "grid"),
-            "output_file": fed_config.get(
-                "output_file", f"/data/output/{fed_config.get('target', 'grid')}.log"
-            ),
-            "api_host": fed_config.get("api_host", "fastapi_server"),
-            "api_port": fed_config.get("api_port", 8000),
-        }
-        command = DEFAULT_COMMAND_TEMPLATES[fed_name].format(**params)
-    else:
-        command = f"python main.py --name={fed_name} --broker=broker"
-
-    return {
-        "directory": "/app",
-        "exec": command,
-        "host": "localhost",
-        "name": fed_name,
     }
-
-
-def create_grid_config(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate grid_config.json for the grid federate.
-
-    This config file contains general simulation parameters and HELICS settings
-    that the grid federate needs.
-
-    Args:
-        conf: Fully resolved configuration object
-        output_dir: Directory where grid_config.json should be written
-    """
-    grid_config = {
-        "name": conf.federates.grid.name,
-        "loglevel": conf.general.loglevel,
-        "coreType": "zmq",
-        "period": conf.general.time_step,
-        "offset": conf.general.start_time - conf.general.start_time,
-        "max_cosim_duration": conf.general.end_time,
-        "broker": conf.federates.broker.name,
-        "uninterruptible": False,
-        "terminate_on_error": True,
-        "wait_for_current_time_update": True,
-    }
-
-    config_path = output_dir / "grid_config.json"
-    with open(config_path, "w") as f:
-        json.dump(grid_config, f, indent=4)
-    print(f"Generated {config_path.name}")
-
-
-def create_forecasting_config(conf: DictConfig, output_dir: Path) -> None:
-    """
-    Generate forecasting_config.json for the forecasting federate.
-
-    This config file contains general simulation parameters and HELICS settings
-    that the forecasting federate needs.
-
-    Args:
-        conf: Fully resolved configuration object
-        output_dir: Directory where forecasting_config.json should be written
-    """
-    forecasting_config = {
-        "name": conf.federates.forecasting.name,
-        "loglevel": conf.general.loglevel,
-        "coreType": "zmq",
-        "period": conf.general.time_step,
-        "offset": conf.general.start_time - conf.general.start_time,
-        "max_cosim_duration": conf.general.end_time,
-        "broker": conf.federates.broker.name,
-        "uninterruptible": False,
-        "terminate_on_error": True,
-        "wait_for_current_time_update": True,
-    }
-
-    config_path = output_dir / "forecasting_config.json"
-    with open(config_path, "w") as f:
-        json.dump(forecasting_config, f, indent=4)
-    print(f"Generated {config_path.name}")
-
-
-def create_player_config(
-    fed_name: str, fed_config: DictConfig, output_dir: Path
-) -> None:
-    """
-    Generate HELICS player config file with unit specifications.
-
-    Args:
-        fed_name: Name of the player federate
-        fed_config: Configuration for the player federate
-        output_dir: Directory where player config should be written
-    """
-    # Default publication configuration
-    player_config = {
-        "publications": [
-            {
-                "key": "P",
-                "type": "double",
-                "unit": "kW",  # CSV data is in kW
-                "global": False,
-            }
-        ]
-    }
-
-    config_path = output_dir / f"{fed_name}_config.json"
-    with open(config_path, "w") as f:
-        json.dump(player_config, f, indent=2)
-    print(f"Generated {config_path.name}")
-
+    return mapping.get(federate_type, {
+        "image": "cosim-cst:latest",
+        "command": "python3 main.py"
+    })
 
 def main():
-    """
-    Main function to generate docker-compose.yml and runner files.
-    """
-    config_path = Path(os.environ.get("CONFIG_PATH", "/config/experiment.yml"))
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "/config/tmp"))
-    data_input_dir = Path(os.environ.get("DATA_INPUT_DIR", "/data/input"))
+    parser = argparse.ArgumentParser(description="Generate federation configuration.")
+    parser.add_argument("config_file", nargs="?", help="Path to the experiment configuration YAML file")
+    args = parser.parse_args()
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # --- ETL: EXTRACT ---
+    print("--- Extracting Configuration ---")
+    tree = Tree()
+    
+    if args.config_file:
+        config_path = Path(args.config_file)
+    else:
+        config_path = Path("../config/MV-LV.yml")
+        # Fallback if experiment.yml logic from notebook was specific
+        if not config_path.exists():
+            # Notebook had hardcoded load from MV-LV.yml at some point, checking
+            config_path = Path("../config/experiment.yml")
+            if not config_path.exists():
+                config_path = Path("../config/experiment.yml") # revert to default path for generic script
 
-    # Load and prepare the configuration
-    conf = load_and_prepare_config(config_path, data_input_dir)
+    print(f"Loading configuration from {config_path}")
+    with open(config_path, "r") as f:
+        cfg = yaml.safe_load(f)
 
-    print("Configuration loaded and prepared successfully.")
+    add_to_tree(tree, cfg["federation"])
+    
+    # Extract grid nodes
+    grid_ids = [node_id for node_id in tree.expand_tree(filter=lambda x: x.data["type"] == "grid")]
+    grid_nodes = {}
+    
+    for grid_id in grid_ids:
+        grid_node = tree.get_node(grid_id)
+        layout = grid_node.data.get("layout")
+        location = grid_node.data.get("location")
+        
+        if layout is None:
+            if location is None:
+                raise ValueError(f"No layout or location specified for grid {grid_id}")
+            else:
+                # TODO: infDB.load(location)
+                grid_nodes[grid_id] = None
+                print(f"Loading layout from infDB for {grid_id} at location {location}")
+        else:        
+            if location is not None:
+                raise ValueError(f"Both layout and location specified for grid {grid_id}. Please specify only one.")
+            else:
+                layout_path = Path("../data/input") / layout
+                # Assuming pandas is available
+                data_df = pd.read_excel(layout_path, sheet_name="load")
+                grid_nodes[grid_id] = data_df["bus"].tolist()
+                print(f"Loaded layout from file for {grid_id} from {layout_path}")
 
-    # Generate docker-compose.yml
-    create_docker_compose(conf, output_dir / "docker-compose.yml")
+    # --- ETL: TRANSFORM ---
+    print("--- Transforming Configuration ---")
+    
+    # Validation Code
+    validation_errors = []
+    for node in tree.all_nodes():
+        data = node.data
+        node_type = data.get("type")
+        
+        if not node_type:
+            validation_errors.append(f"[Structure] Node '{node.tag}' ({node.identifier}) is missing a 'type' definition.")
+            continue
 
-    # Generate runner files for all federates
-    create_runner_files(conf, output_dir)
+        match node_type:
+            case "grid":
+                layout = data.get("layout")
+                location = data.get("location")
+                if not layout and not location:
+                    validation_errors.append(f"[Grid] Node '{node.tag}' ({node.identifier}) must specify either 'layout' or 'location'.")
+                if layout and location:
+                    validation_errors.append(f"[Grid] Node '{node.tag}' ({node.identifier}) specifies both 'layout' and 'location'.")
 
-    # Generate grid config file
-    create_grid_config(conf, output_dir)
+            case "load":
+                if not data.get("electrical_load") and not data.get("heat_load"):
+                    validation_errors.append(f"[Load] Node '{node.tag}' ({node.identifier}) requires 'electrical_load' or 'heat_load'.")
 
-    # Generate forecasting config file
-    create_forecasting_config(conf, output_dir)
+            case "house":
+                if not data.get("model"):
+                    validation_errors.append(f"[House] Node '{node.tag}' ({node.identifier}) requires a 'model' definition.")
+            
+            case "pv":
+                if not data.get("max_production"):
+                    validation_errors.append(f"[PV] Node '{node.tag}' ({node.identifier}) requires 'max_production' (profile path).")
+                if not data.get("capacity"):
+                    validation_errors.append(f"[PV] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition.")
 
-    # Generate player config files for any player federates
-    for fed_name, fed_config in conf.federates.items():
-        if "player" in fed_name and fed_name not in SKIP_NODE_ASSIGNMENT:
-            create_player_config(fed_name, fed_config, output_dir)
+            case "battery":
+                if not data.get("capacity"):
+                    validation_errors.append(f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition.")
+                if not data.get("power"):
+                    validation_errors.append(f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'power' definition.")
+            
+            case "hems":
+                if not data.get("control_strategy"):
+                    validation_errors.append(f"[HEMS] Node '{node.tag}' ({node.identifier}) requires 'control_strategy' definition.")
 
+    if validation_errors:
+        print("Configuration Invalid:")
+        for error in validation_errors:
+            print(f" - {error}")
+        raise ValueError("Configuration validation failed due to errors listed above.")
+
+    # Expand Grid Nodes
+    expand_grid_nodes(tree, grid_nodes)
+    
+    # Process General Config
+    general_cfg = cfg.get("general", {})
+    required_fields = ["end_time"]
+    for field in required_fields:
+        if field not in general_cfg or general_cfg[field] is None:
+            raise ValueError(f"[General] Missing required field '{field}'.")
+
+    if "start_time" not in general_cfg or general_cfg["start_time"] is None:
+        general_cfg["start_time"] = "2023-01-01T00:00:00"
+
+    start_time = general_cfg["start_time"]
+    end_time = general_cfg["end_time"]
+    try:
+        start_ts = pd.Timestamp(start_time)
+        if isinstance(end_time, (int, float)):
+            end_ts = start_ts + pd.Timedelta(seconds=end_time)
+            general_cfg["end_time"] = end_ts.isoformat()
+        elif isinstance(end_time, str):
+            pd.Timestamp(end_time)
+        else:
+            raise ValueError(f"End time format not recognized: {end_time}")
+    except Exception as e:
+        raise ValueError(f"Timestamp logic failed: {e}")
+
+    # Add Publications/Subscriptions
+    # Clean up previous runs if any (not strictly needed in script but good practice)
+    for node in tree.all_nodes():
+        if "publications" in node.data: del node.data["publications"]
+        if "subscriptions" in node.data: del node.data["subscriptions"]
+
+    for parent_node in tree.all_nodes():
+        parent_type = parent_node.data.get("type")
+        children = tree.children(parent_node.identifier)
+        
+        for child_node in children:
+            child_type = child_node.data.get("type")
+            
+            if parent_type == "grid":
+                voltage_topic = f"{child_node.identifier}/voltage"
+                add_pub_sub(parent_node, voltage_topic, "V", "publication")
+                add_pub_sub(child_node, voltage_topic, "V", "subscription")
+
+                if child_type in ["house", "load", "battery", "pv", "grid"]:
+                    p_topic = f"{child_node.identifier}/active_power"
+                    q_topic = f"{child_node.identifier}/reactive_power"
+                    add_pub_sub(parent_node, p_topic, "W", "subscription")
+                    add_pub_sub(parent_node, q_topic, "VAr", "subscription")
+                    add_pub_sub(child_node, p_topic, "W", "publication")
+                    add_pub_sub(child_node, q_topic, "VAr", "publication")
+
+                if child_type == "house":
+                    control_topic = f"{child_node.identifier}/control"
+                    add_pub_sub(parent_node, control_topic, "json", "publication")
+                    add_pub_sub(child_node, control_topic, "json", "subscription")
+
+            elif parent_type == "house":
+                if child_type in ["pv", "battery", "hems"]:
+                    p_topic = f"{child_node.identifier}/active_power"
+                    q_topic = f"{child_node.identifier}/reactive_power"
+                    v_topic = f"{child_node.identifier}/voltage"
+                    
+                    add_pub_sub(parent_node, p_topic, "W", "subscription")
+                    add_pub_sub(parent_node, q_topic, "VAr", "subscription")
+                    add_pub_sub(parent_node, v_topic, "V", "subscription")
+                    
+                    add_pub_sub(child_node, p_topic, "W", "publication")
+                    add_pub_sub(child_node, q_topic, "VAr", "publication")
+                    add_pub_sub(child_node, v_topic, "V", "publication")
+
+                    control_topic = f"{child_node.identifier}/control"
+                    add_pub_sub(parent_node, control_topic, "json", "publication")
+                    add_pub_sub(child_node, control_topic, "json", "subscription")
+
+    # --- ETL: LOAD / GENERATE ---
+    print("--- Generating CST Configuration ---")
+    
+    name = general_cfg.get("name", "GridLock")
+    federation = FederationConfig(
+        f"{name}Scenario",
+        f"{name}Analysis",
+        f"{name}Federation",
+        True,
+        "json",
+        "csv"
+    )
+
+    for node in tree.all_nodes():
+        data = node.data
+        node_type = data.get("type")
+        
+        if not node_type or node_type == "empty":
+            continue
+
+        time_step = general_cfg.get("time_step", 1.0)
+        fed = FederateConfig(node.identifier, period=time_step)
+        
+        federation.add_federate_config(fed)
+        
+        mapped = map_params_to_type(node_type)
+        fed.config("image", mapped["image"])
+        fed.config("command", mapped["command"])
+        fed.config("federate_type", node_type) 
+        
+        for topic, unit in data.get("publications", {}).items():
+            dtype = "string" if unit == "json" else "double"
+            if not hasattr(fed, 'publications'): fed.publications = []
+            
+            fed.publications.append({
+                "key": topic,
+                "type": dtype,
+                "unit": unit,
+                "global": True
+            })
+            
+        for topic, unit in data.get("subscriptions", {}).items():
+            dtype = "string" if unit == "json" else "double"
+            if not hasattr(fed, 'subscriptions'): fed.subscriptions = []
+            
+            fed.subscriptions.append({
+                "key": topic,
+                "type": dtype,
+                "unit": unit,
+                "required": True 
+            })
+
+    start_str = general_cfg["start_time"]
+    end_str = general_cfg["end_time"]
+
+    print("Generating configuration definitions...")
+    try:
+        federation.write_config(start_str, end_str)
+        DockerRunner.define_yaml(federation.scenario_name, use_meta_db="json")
+        print("Success: Federation configuration and docker-compose.yml generated.")
+    except Exception as e:
+        print(f"Error generating config: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()
