@@ -2,6 +2,7 @@ import argparse
 import copy
 import traceback
 from pathlib import Path
+from typing import Dict, List, Optional
 
 import pandas as pd
 import yaml
@@ -9,8 +10,33 @@ from treelib import Tree
 
 from cosim_toolbox.sims import DockerRunner, FederateConfig, FederationConfig
 
+# Constants
+DEFAULT_CONFIG_PATH = Path("../config/experiment.yml")
+FALLBACK_CONFIG_PATH = Path("../config/MV-LV.yml")
+DATA_INPUT_PATH = Path("../data/input")
+DEFAULT_START_TIME = "2023-01-01T00:00:00"
 
-def add_to_tree(tree, node_dict, parent=None):
+FEDERATE_TYPE_MAPPING = {
+    "grid": {
+        "image": "gridlock-grid:latest",
+        "command": "python3 main.py",
+    },
+    "house": {
+        "image": "gridlock-house:latest",
+        "command": "python3 main.py",
+    },
+    "recorder": {
+        "image": "gridlock-recorder:latest",
+        "command": "helics_recorder",
+    },
+    "pv": {"image": "gridlock-house:latest", "command": "python3 main.py"},
+    "battery": {"image": "gridlock-house:latest", "command": "python3 main.py"},
+    "hems": {"image": "gridlock-house:latest", "command": "python3 main.py"},
+}
+DEFAULT_FEDERATE_MAPPING = {"image": "cosim-cst:latest", "command": "python3 main.py"}
+
+
+def add_to_tree(tree: Tree, node_dict: dict, parent: Optional[str] = None) -> None:
     """Recursively add nodes from config dict to tree structure."""
     node_id = f"{parent}/{node_dict.get('id')}" if parent else node_dict.get("id")
     node_tag = node_dict.get("name")
@@ -153,69 +179,138 @@ def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> Tree:
     return tree
 
 
-def add_pub_sub(node, topic, unit, type="publication"):
-    """Helper to add pub/sub to node data structure."""
+def add_pub_sub(node, topic: str, unit: str, type: str = "publication") -> None:
+    """
+    Helper to add publication or subscription to node data structure.
+
+    Args:
+        node: Tree node to add pub/sub to
+        topic: Topic name
+        unit: Unit of measurement
+        type: Either "publication" or "subscription"
+    """
     key = "publications" if type == "publication" else "subscriptions"
     if key not in node.data:
         node.data[key] = {}
     node.data[key][topic] = unit
 
 
-def map_params_to_type(federate_type):
-    """Maps internal federate types to Docker images and commands."""
-    mapping = {
-        "grid": {
-            "image": "gridlock-grid:latest",
-            "command": "python3 main.py",
-        },
-        "house": {
-            "image": "gridlock-house:latest",
-            "command": "python3 main.py",
-        },
-        "recorder": {
-            "image": "gridlock-recorder:latest",
-            "command": "helics_recorder",
-        },
-        "pv": {"image": "gridlock-house:latest", "command": "python3 main.py"},
-        "battery": {"image": "gridlock-house:latest", "command": "python3 main.py"},
-        "hems": {"image": "gridlock-house:latest", "command": "python3 main.py"},
-    }
-    return mapping.get(
-        federate_type, {"image": "cosim-cst:latest", "command": "python3 main.py"}
-    )
+def map_params_to_type(federate_type: str) -> dict:
+    """
+    Maps internal federate types to Docker images and commands.
+
+    Args:
+        federate_type: Type of federate (grid, house, pv, etc.)
+
+    Returns:
+        Dictionary with image and command keys
+    """
+    return FEDERATE_TYPE_MAPPING.get(federate_type, DEFAULT_FEDERATE_MAPPING)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Generate federation configuration.")
-    parser.add_argument(
-        "config_file", nargs="?", help="Path to the experiment configuration YAML file"
-    )
-    args = parser.parse_args()
+def validate_node(node, validation_errors: List[str]) -> None:
+    """
+    Validate a single node's configuration based on its type.
 
-    # --- ETL: EXTRACT ---
-    print("--- Extracting Configuration ---")
-    tree = Tree()
+    Args:
+        node: Tree node to validate
+        validation_errors: List to append errors to
+    """
+    data = node.data
+    node_type = data.get("type")
 
-    if args.config_file:
-        config_path = Path(args.config_file)
-    else:
-        config_path = Path("../config/MV-LV.yml")
-        # Fallback if experiment.yml logic from notebook was specific
-        if not config_path.exists():
-            # Notebook had hardcoded load from MV-LV.yml at some point, checking
-            config_path = Path("../config/experiment.yml")
-            if not config_path.exists():
-                config_path = Path(
-                    "../config/experiment.yml"
-                )  # revert to default path for generic script
+    if not node_type:
+        validation_errors.append(
+            f"[Structure] Node '{node.tag}' ({node.identifier}) is missing a 'type' definition."
+        )
+        return
 
-    print(f"Loading configuration from {config_path}")
-    with open(config_path, "r") as f:
-        cfg = yaml.safe_load(f)
+    match node_type:
+        case "grid":
+            layout = data.get("layout")
+            location = data.get("location")
+            if not layout and not location:
+                validation_errors.append(
+                    f"[Grid] Node '{node.tag}' ({node.identifier}) must specify either 'layout' or 'location'."
+                )
+            if layout and location:
+                validation_errors.append(
+                    f"[Grid] Node '{node.tag}' ({node.identifier}) specifies both 'layout' and 'location'."
+                )
 
-    add_to_tree(tree, cfg["federation"])
+        case "load":
+            if not data.get("electrical_load") and not data.get("heat_load"):
+                validation_errors.append(
+                    f"[Load] Node '{node.tag}' ({node.identifier}) requires 'electrical_load' or 'heat_load'."
+                )
 
-    # Extract grid nodes
+        case "house":
+            if not data.get("model"):
+                validation_errors.append(
+                    f"[House] Node '{node.tag}' ({node.identifier}) requires a 'model' definition."
+                )
+
+        case "pv":
+            if not data.get("max_production"):
+                validation_errors.append(
+                    f"[PV] Node '{node.tag}' ({node.identifier}) requires 'max_production' (profile path)."
+                )
+            if not data.get("capacity"):
+                validation_errors.append(
+                    f"[PV] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition."
+                )
+
+        case "battery":
+            if not data.get("capacity"):
+                validation_errors.append(
+                    f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition."
+                )
+            if not data.get("power"):
+                validation_errors.append(
+                    f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'power' definition."
+                )
+
+        case "hems":
+            if not data.get("control_strategy"):
+                validation_errors.append(
+                    f"[HEMS] Node '{node.tag}' ({node.identifier}) requires 'control_strategy' definition."
+                )
+
+
+def validate_tree(tree: Tree) -> None:
+    """
+    Validate all nodes in the tree and raise error if any validation fails.
+
+    Args:
+        tree: Tree structure to validate
+
+    Raises:
+        ValueError: If validation errors are found
+    """
+    validation_errors = []
+    for node in tree.all_nodes():
+        validate_node(node, validation_errors)
+
+    if validation_errors:
+        print("Configuration Invalid:")
+        for error in validation_errors:
+            print(f" - {error}")
+        raise ValueError("Configuration validation failed due to errors listed above.")
+
+
+def extract_grid_nodes(tree: Tree) -> Dict[str, Optional[List[int]]]:
+    """
+    Extract grid nodes and their bus information from tree.
+
+    Args:
+        tree: Tree structure containing grid nodes
+
+    Returns:
+        Dictionary mapping grid IDs to lists of bus numbers
+
+    Raises:
+        ValueError: If grid configuration is invalid
+    """
     grid_ids = [
         node_id
         for node_id in tree.expand_tree(filter=lambda x: x.data["type"] == "grid")
@@ -240,96 +335,31 @@ def main():
                     f"Both layout and location specified for grid {grid_id}. Please specify only one."
                 )
             else:
-                layout_path = Path("../data/input") / layout
-                # Assuming pandas is available
+                layout_path = DATA_INPUT_PATH / layout
                 data_df = pd.read_excel(layout_path, sheet_name="load")
                 grid_nodes[grid_id] = data_df["bus"].tolist()
                 print(f"Loaded layout from file for {grid_id} from {layout_path}")
 
-    # --- ETL: TRANSFORM ---
-    print("--- Transforming Configuration ---")
+    return grid_nodes
 
-    # Validation Code
-    validation_errors = []
-    for node in tree.all_nodes():
-        data = node.data
-        node_type = data.get("type")
 
-        if not node_type:
-            validation_errors.append(
-                f"[Structure] Node '{node.tag}' ({node.identifier}) is missing a 'type' definition."
-            )
-            continue
+def process_general_config(general_cfg: dict) -> None:
+    """
+    Process and validate general configuration settings.
 
-        match node_type:
-            case "grid":
-                layout = data.get("layout")
-                location = data.get("location")
-                if not layout and not location:
-                    validation_errors.append(
-                        f"[Grid] Node '{node.tag}' ({node.identifier}) must specify either 'layout' or 'location'."
-                    )
-                if layout and location:
-                    validation_errors.append(
-                        f"[Grid] Node '{node.tag}' ({node.identifier}) specifies both 'layout' and 'location'."
-                    )
+    Args:
+        general_cfg: General configuration dictionary
 
-            case "load":
-                if not data.get("electrical_load") and not data.get("heat_load"):
-                    validation_errors.append(
-                        f"[Load] Node '{node.tag}' ({node.identifier}) requires 'electrical_load' or 'heat_load'."
-                    )
-
-            case "house":
-                if not data.get("model"):
-                    validation_errors.append(
-                        f"[House] Node '{node.tag}' ({node.identifier}) requires a 'model' definition."
-                    )
-
-            case "pv":
-                if not data.get("max_production"):
-                    validation_errors.append(
-                        f"[PV] Node '{node.tag}' ({node.identifier}) requires 'max_production' (profile path)."
-                    )
-                if not data.get("capacity"):
-                    validation_errors.append(
-                        f"[PV] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition."
-                    )
-
-            case "battery":
-                if not data.get("capacity"):
-                    validation_errors.append(
-                        f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'capacity' definition."
-                    )
-                if not data.get("power"):
-                    validation_errors.append(
-                        f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'power' definition."
-                    )
-
-            case "hems":
-                if not data.get("control_strategy"):
-                    validation_errors.append(
-                        f"[HEMS] Node '{node.tag}' ({node.identifier}) requires 'control_strategy' definition."
-                    )
-
-    if validation_errors:
-        print("Configuration Invalid:")
-        for error in validation_errors:
-            print(f" - {error}")
-        raise ValueError("Configuration validation failed due to errors listed above.")
-
-    # Expand Grid Nodes
-    expand_grid_nodes(tree, grid_nodes)
-
-    # Process General Config
-    general_cfg = cfg.get("general", {})
+    Raises:
+        ValueError: If required fields are missing or invalid
+    """
     required_fields = ["end_time"]
     for field in required_fields:
         if field not in general_cfg or general_cfg[field] is None:
             raise ValueError(f"[General] Missing required field '{field}'.")
 
     if "start_time" not in general_cfg or general_cfg["start_time"] is None:
-        general_cfg["start_time"] = "2023-01-01T00:00:00"
+        general_cfg["start_time"] = DEFAULT_START_TIME
 
     start_time = general_cfg["start_time"]
     end_time = general_cfg["end_time"]
@@ -345,8 +375,15 @@ def main():
     except Exception as e:
         raise ValueError(f"Timestamp logic failed: {e}")
 
-    # Add Publications/Subscriptions
-    # Clean up previous runs if any (not strictly needed in script but good practice)
+
+def setup_publications_subscriptions(tree: Tree) -> None:
+    """
+    Add publication and subscription topics to all nodes based on hierarchy.
+
+    Args:
+        tree: Tree structure to add pub/sub topics to
+    """
+    # Clean up previous runs if any
     for node in tree.all_nodes():
         if "publications" in node.data:
             del node.data["publications"]
@@ -396,7 +433,35 @@ def main():
                     add_pub_sub(parent_node, control_topic, "json", "publication")
                     add_pub_sub(child_node, control_topic, "json", "subscription")
 
-    # --- ETL: LOAD / GENERATE ---
+
+def load_config_file(config_path: Optional[Path] = None) -> dict:
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to configuration file. If None, uses default paths.
+
+    Returns:
+        Configuration dictionary
+    """
+    if config_path is None:
+        config_path = FALLBACK_CONFIG_PATH
+        if not config_path.exists():
+            config_path = DEFAULT_CONFIG_PATH
+
+    print(f"Loading configuration from {config_path}")
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def generate_cst_config(tree: Tree, general_cfg: dict) -> None:
+    """
+    Generate CST (CoSim Toolbox) configuration and write output files.
+
+    Args:
+        tree: Tree structure with federation configuration
+        general_cfg: General configuration dictionary
+    """
     print("--- Generating CST Configuration ---")
 
     name = general_cfg.get("name", "GridLock")
@@ -450,6 +515,46 @@ def main():
     except Exception as e:
         print(f"Error generating config: {e}")
         traceback.print_exc()
+
+
+def main() -> None:
+    """Main entry point for the composegen configuration generator."""
+    parser = argparse.ArgumentParser(description="Generate federation configuration.")
+    parser.add_argument(
+        "config_file", nargs="?", help="Path to the experiment configuration YAML file"
+    )
+    args = parser.parse_args()
+
+    # --- ETL: EXTRACT ---
+    print("--- Extracting Configuration ---")
+    tree = Tree()
+
+    config_path = Path(args.config_file) if args.config_file else None
+    cfg = load_config_file(config_path)
+
+    add_to_tree(tree, cfg["federation"])
+
+    # Extract grid nodes
+    grid_nodes = extract_grid_nodes(tree)
+
+    # --- ETL: TRANSFORM ---
+    print("--- Transforming Configuration ---")
+
+    # Validate configuration
+    validate_tree(tree)
+
+    # Expand grid nodes based on placement rules
+    expand_grid_nodes(tree, grid_nodes)
+
+    # Process general configuration
+    general_cfg = cfg.get("general", {})
+    process_general_config(general_cfg)
+
+    # Add publications and subscriptions
+    setup_publications_subscriptions(tree)
+
+    # --- ETL: LOAD / GENERATE ---
+    generate_cst_config(tree, general_cfg)
 
 
 if __name__ == "__main__":
