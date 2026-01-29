@@ -93,7 +93,7 @@ def parse_args():
 def main():
     args = parse_args()
     grid_path = os.path.join("/data", "input", args.grid_file)
-    federate = GridFederate("grid", grid_path)
+    federate = GridFederate("mv-grid_0", grid_path)
 
     try:
         federate.create_federate(scenario_name="gridScenario", use_meta_db="json", use_data_db="csv")
