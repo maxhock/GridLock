@@ -7,7 +7,7 @@ general:
 federation:
  id: "mv-grid_0"
  name: "MediumVoltageGrid"
- type: "grid"
+ type: "value"
  config:
    layout: "kerber_landnetz_freileitung_1.xlsx"
    location: #"Forchheim" # [45.555, 28.444]
@@ -15,21 +15,21 @@ federation:
  sub_federates:
    - id: "lv-grid_0"
      name: "LowVoltageGrid"
-     type: "grid"
+     type: "value"
      config:
        placement: 3 # [3, 7]
        layout: "kerber_landnetz_freileitung_1.xlsx"
      sub_federates:
        - id: "loadhouse_0"
          name: "Load profile house"
-         type: "load"
+         type: "value"
          config:
            placement: "fill"
            electrical_load: "H0" # "H25", "electricloadcurve.csv"
            heat_load: "" # "heatloadcurve.csv"
        - id: "house_0"
          name: "sim house"
-         type: "house"
+         type: "value"
          config:
            placement: [4,6]
            model:
@@ -39,26 +39,26 @@ federation:
          sub_federates:
            - id: "battery_0"
              name: "BYD Battery"
-             type: "battery"
+             type: "value"
              config:
                placement: 0
                capacity: "5kWh"
                power: "5 kW"
            - id: "pv_1"
              name: "Sunwell PV"
-             type: "pv"
+             type: "value"
              config:
                capacity: "5 5 kW"
                max_production: "renewables_ninja2019_munich.csv"
            - id: "hems_0"
              name: "Smart HEMS"
-             type: "hems"
+             type: "value"
              config:
                control_strategy: "mpc"
                accessible: ["battery_0", "pv_1"]
    - id: "pv_0"
      name: "PV Power Plant SWM"
-     type: "pv"
+     type: "value"
      config:
        placement: 5
        capacity: "5 MW"
