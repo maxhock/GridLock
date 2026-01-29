@@ -1,6 +1,8 @@
 config/tmp/
 data/output/
 __pycache__/
+meta_store/
+*Scenario.yaml
 .venv/
 *.pyc
 *.pyo
