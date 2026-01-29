@@ -54,12 +54,16 @@ def add_to_tree(tree: Tree, node_dict: dict, parent: Optional[str] = None) -> No
         add_to_tree(tree, sub, parent=node_id)
 
 
-def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> Tree:
+def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> None:
     """
     Expands the tree by placing federates onto grid buses according to 'placement' rules.
     - Removes original definition nodes from the grid parent.
     - Replicates subtrees for 'list' or 'fill' placements.
     - Ensures unique IDs for all placed nodes.
+
+    Args:
+        tree: Tree structure to modify in-place
+        grid_nodes: Dictionary mapping grid IDs to lists of bus numbers
     """
 
     for grid_id, buses in grid_nodes.items():
@@ -176,8 +180,6 @@ def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> Tree:
                     data={"type": "empty", "bus": bus, "placement": bus},
                 )
 
-    return tree
-
 
 def add_pub_sub(node, topic: str, unit: str, type: str = "publication") -> None:
     """
@@ -188,7 +190,15 @@ def add_pub_sub(node, topic: str, unit: str, type: str = "publication") -> None:
         topic: Topic name
         unit: Unit of measurement
         type: Either "publication" or "subscription"
+
+    Raises:
+        ValueError: If type is not "publication" or "subscription"
     """
+    if type not in ["publication", "subscription"]:
+        raise ValueError(
+            f"Invalid type '{type}'. Must be 'publication' or 'subscription'"
+        )
+
     key = "publications" if type == "publication" else "subscriptions"
     if key not in node.data:
         node.data[key] = {}
@@ -445,9 +455,9 @@ def load_config_file(config_path: Optional[Path] = None) -> dict:
         Configuration dictionary
     """
     if config_path is None:
-        config_path = FALLBACK_CONFIG_PATH
+        config_path = DEFAULT_CONFIG_PATH
         if not config_path.exists():
-            config_path = DEFAULT_CONFIG_PATH
+            config_path = FALLBACK_CONFIG_PATH
 
     print(f"Loading configuration from {config_path}")
     with open(config_path, "r") as f:
