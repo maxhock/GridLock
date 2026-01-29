@@ -6,6 +6,10 @@ federates:
     name: grid
     build_folder: ${.name}
     grid_file: kerber_landnetz_freileitung_1.xlsx
+  # grid:
+  #   name: grid-pypsa
+  #   build_folder: ${.name}
+  #   grid_file: kerber_landnetz_freileitung_1.xlsx
   forecasting:
     name: forecasting
     build_folder: ${.name}    
