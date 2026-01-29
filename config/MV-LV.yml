@@ -1,5 +1,5 @@
 general:
- name: "Demo Experiment Medium Voltage Grid with Houses"
+ name: "grid"
  start_time: 
  end_time: 86400
  time_step: 300
