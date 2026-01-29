@@ -4,12 +4,14 @@ Loads pandapower network, runs power flow, exchanges data via HELICS.
 """
 
 from cosim_toolbox.sims import Federate
+from cosim_toolbox.sims import FederationConfig, FederateConfig
+from cosim_toolbox.dbms import create_metadata_manager
+from cosim_toolbox.dbms import create_timeseries_manager
 import helics as h
 import pandapower as pp
 import argparse
 import os
 import json
-
 
 class GridFederate(Federate):
     """Grid federate with pandapower power flow simulation."""
@@ -21,36 +23,8 @@ class GridFederate(Federate):
         self.ext_grid_indices = []  # List of pandapower ext_grid indices
         self.grid_path = grid_path
 
-    def create_federate(self):
-        """Initialize HELICS federate and load pandapower network."""
+    def load_pp_net(self):
 
-        # Load config from JSON file (bypassing CST's database requirement)
-        config_path = f"/config/tmp/{self.federate_name}_config.json"
-        with open(config_path, "r") as f:
-            self.config = json.load(f)
-
-        # Initialize CST's required attributes
-        self.scenario_name = "grid"
-        self.federate_type = "value"
-        self.period = self.config.get("period", 3600.0)
-        self.stop_time = self.config.get("max_cosim_duration", 82800.0)
-        self.granted_time = 0.0
-
-        self.scenario = {}
-        self.scenario["start_time"] = "2025-01-01T00:00:00"
-        self.scenario["stop_time"] = "2025-01-02T00:00:00"
-        self.set_metadata()
-
-        # Initialize CST's data exchange dictionaries
-        self.pubs = {}
-        self.inputs = {}
-        self.data_from_federation = {"inputs": {}, "endpoints": {}}
-        self.data_to_federation = {"publications": {}, "endpoints": {}}
-
-        # Use CST's create_helics_fed() method - it reads from self.config
-        self.create_helics_fed()
-
-        # Load pandapower network
         self.net = pp.from_excel(self.grid_path)
 
         # Register dynamic subscriptions for loads
@@ -122,7 +96,8 @@ def main():
     federate = GridFederate("grid", grid_path)
 
     try:
-        federate.create_federate()
+        federate.create_federate(scenario_name="gridScenario", use_meta_db="json", use_data_db="csv")
+        federate.load_pp_net()
         federate.run_cosim_loop()
     finally:
         federate.destroy_federate()
