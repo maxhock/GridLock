@@ -1,0 +1,161 @@
+services:
+  helics:
+    image: "cosim-cst:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.2
+    command: /bin/bash -c "helics_broker --ipv4 -f 8 --loglevel=warning --name=broker"
+  mv-grid_0:
+    image: "gridlock-grid:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.3
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3:
+    image: "gridlock-grid:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.4
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3/loadhouse_0:
+    image: "cosim-cst:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.5
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3/house_0:
+    image: "gridlock-house:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.6
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3/house_0/battery_0:
+    image: "gridlock-house:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.7
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3/house_0/hems_0:
+    image: "gridlock-house:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.8
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_3/house_0/pv_1:
+    image: "gridlock-house:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.9
+    command: /bin/bash -c "python3 main.py"
+  mv-grid_0/bus_5:
+    image: "gridlock-house:latest"
+    environment:
+      CST_HOST: "localhost"
+      LOCAL_USER: "worker"
+      POSTGRES_HOST: "localhost"
+      MONGO_HOST: "mongodb://localhost"
+      MONGO_PORT: "27017"
+    user: worker
+    working_dir: /home/worker/case
+    volumes:
+      - .:/home/worker/case
+      - ../../../data:/home/worker/tesp/data
+    networks:
+      cst_net:
+        ipv4_address: 10.5.0.10
+    command: /bin/bash -c "python3 main.py"
+networks:
+  cst_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.5.0.0/16
+          gateway: 10.5.0.1
