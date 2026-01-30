@@ -1,0 +1,15 @@
+infdb-data:
+    config-infdb: "config-infdb.yml" # only filename - change path in ".env" file "CONFIG_INFDB_PATH"
+    logging:
+        path: "infdb-data.log"
+        level: "INFO" # ERROR, WARNING, INFO, DEBUG
+    hosts:
+        postgres:
+            user: infdb_user
+            password: infdb
+            db: infdb
+            host: localhost
+            exposed_port: 54329
+            epsg: 25832
+    data:
+        plz: 80803

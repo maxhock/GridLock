@@ -1,0 +1,11 @@
+[project]
+name = "infdb-data"
+version = "1"
+requires-python = "==3.12.*"
+dependencies = [
+    "infdb",
+    "geopandas",
+]
+
+[tool.uv.sources]
+infdb = { path = "/workspaces/infdb_package", editable = true }
