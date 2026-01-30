@@ -12,6 +12,8 @@ import pandapower as pp
 import argparse
 import os
 import json
+import shutil
+from pathlib import Path
 
 class GridFederate(Federate):
     """Grid federate with pandapower power flow simulation."""
@@ -93,9 +95,13 @@ def parse_args():
 def main():
     args = parse_args()
     grid_path = os.path.join("/data", "input", args.grid_file)
+    # Copy meta_store configuration into working directory
+    shutil.copytree("../config/composegen/meta_store", Path.cwd() / "meta_store", dirs_exist_ok=True)
+    # Initialize federate with entrypoint federate
     federate = GridFederate("mv-grid_0", grid_path)
 
     try:
+        # Create CST and HELICS federates
         federate.create_federate(scenario_name="gridScenario", use_meta_db="json", use_data_db="csv")
         federate.load_pp_net()
         federate.run_cosim_loop()
