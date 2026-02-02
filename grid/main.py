@@ -102,7 +102,7 @@ def main():
 
     try:
         # Create CST and HELICS federates
-        federate.create_federate(scenario_name="gridScenario", use_meta_db="json", use_data_db="csv")
+        federate.create_federate(scenario_name="TestGridScenario", use_meta_db="json", use_data_db="csv")
         federate.load_pp_net()
         federate.run_cosim_loop()
     finally:

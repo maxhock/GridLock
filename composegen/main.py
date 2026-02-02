@@ -13,7 +13,9 @@ def add_to_tree(tree, node_dict, parent=None):
     node_id = f"{parent}/{node_dict.get('id')}" if parent else node_dict.get("id")
     node_tag = node_dict.get("name")
     node_config = node_dict.get("config", {}).copy()
-    node_config["type"] = node_dict.get("type")
+    node_config["class"] = node_dict.get("class")
+    node_config["type"] = "value"
+
     # Convert empty string values in node_config to None
     node_config = {k: (v if v != "" else None) for k, v in node_config.items()}
     
@@ -155,7 +157,7 @@ def add_pub_sub(node, topic, unit, type="publication"):
         node.data[key] = {}
     node.data[key][topic] = unit
 
-def map_params_to_type(federate_type):
+def map_params_to_class(federate_class):
     """Maps internal federate types to Docker images and commands."""
     mapping = {
         "grid": {
@@ -183,7 +185,7 @@ def map_params_to_type(federate_type):
              "command": "python3 main.py"
         }
     }
-    return mapping.get(federate_type, {
+    return mapping.get(federate_class, {
         "image": "cosim-cst:latest",
         "command": "python3 main.py"
     })
@@ -200,13 +202,10 @@ def main():
     if args.config_file:
         config_path = Path(args.config_file)
     else:
-        config_path = Path("../config/MV-LV.yml")
+        config_path = Path("/config/experiment-LV.yml")
         # Fallback if experiment.yml logic from notebook was specific
         if not config_path.exists():
-            # Notebook had hardcoded load from MV-LV.yml at some point, checking
-            config_path = Path("../config/experiment.yml")
-            if not config_path.exists():
-                config_path = Path("../config/experiment.yml") # revert to default path for generic script
+            config_path = Path("../config/experiment-LV.yml") # revert to default path for generic script
 
     print(f"Loading configuration from {config_path}")
     with open(config_path, "r") as f:
@@ -326,18 +325,18 @@ def main():
         if "subscriptions" in node.data: del node.data["subscriptions"]
 
     for parent_node in tree.all_nodes():
-        parent_type = parent_node.data.get("type")
+        parent_class = parent_node.data.get("class")
         children = tree.children(parent_node.identifier)
         
         for child_node in children:
-            child_type = child_node.data.get("type")
+            child_class = child_node.data.get("class")
             
-            if parent_type == "grid":
+            if parent_class == "grid":
                 voltage_topic = f"{child_node.identifier}/voltage"
                 add_pub_sub(parent_node, voltage_topic, "V", "publication")
                 add_pub_sub(child_node, voltage_topic, "V", "subscription")
 
-                if child_type in ["house", "load", "battery", "pv", "grid"]:
+                if child_class in ["house", "load", "battery", "pv", "grid"]:
                     p_topic = f"{child_node.identifier}/active_power"
                     q_topic = f"{child_node.identifier}/reactive_power"
                     add_pub_sub(parent_node, p_topic, "W", "subscription")
@@ -345,13 +344,13 @@ def main():
                     add_pub_sub(child_node, p_topic, "W", "publication")
                     add_pub_sub(child_node, q_topic, "VAr", "publication")
 
-                if child_type == "house":
+                if child_class == "house":
                     control_topic = f"{child_node.identifier}/control"
                     add_pub_sub(parent_node, control_topic, "json", "publication")
                     add_pub_sub(child_node, control_topic, "json", "subscription")
 
-            elif parent_type == "house":
-                if child_type in ["pv", "battery", "hems"]:
+            elif parent_class == "house":
+                if child_class in ["pv", "battery", "hems"]:
                     p_topic = f"{child_node.identifier}/active_power"
                     q_topic = f"{child_node.identifier}/reactive_power"
                     v_topic = f"{child_node.identifier}/voltage"
@@ -383,6 +382,7 @@ def main():
 
     for node in tree.all_nodes():
         data = node.data
+        node_class = data.get("class")
         node_type = data.get("type")
         
         if not node_type or node_type == "empty":
@@ -393,7 +393,7 @@ def main():
         
         federation.add_federate_config(fed)
         
-        mapped = map_params_to_type(node_type)
+        mapped = map_params_to_class(node_class)
         fed.config("image", mapped["image"])
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type) 

@@ -1,7 +1,0 @@
-{
-  "analysis": "gridAnalysis",
-  "federation": "gridFederation",
-  "start_time": "2023-01-01T00:00:00",
-  "stop_time": "2023-01-02T00:00:00",
-  "docker": true
-}

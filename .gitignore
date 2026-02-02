@@ -2,6 +2,7 @@ config/tmp/
 data/output/
 __pycache__/
 .venv/
+meta_store/*/*
 *.pyc
 *.pyo
 *.pyd
