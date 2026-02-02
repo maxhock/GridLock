@@ -5,7 +5,5 @@ requires-python = "==3.12.*"
 dependencies = [
     "infdb",
     "geopandas",
+    "pandapower",
 ]
-
-[tool.uv.sources]
-infdb = { path = "/workspaces/infdb_package", editable = true }

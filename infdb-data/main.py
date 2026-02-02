@@ -5,6 +5,7 @@ Handles InfDB initialization, database connection, logging, and execution.
 
 # Import packages
 import os
+import pandapower as pp
 
 from infdb import InfDB
 from src import infdb_data
@@ -17,7 +18,7 @@ def main():
     """
 
     # Initialize InfDB handler
-    infdb = InfDB(tool_name="infdb-data")
+    infdb = InfDB(tool_name="infdb-data", config_path="configs")
 
     # Start message
     log = infdb.get_logger()
@@ -30,7 +31,8 @@ def main():
         # Start your added python code in folder "src"
         # ===========================================================
         log.info("Start pylovo grid import")
-        infdb_data.get_pylovo_grid(plz=plz)
+        net = infdb_data.get_pylovo_grid(infdb=infdb, plz=plz)
+        pp.to_json(net, f"pylovo_grid_plz_{plz}.json")
 
     except Exception as e:
         log.error(f"Something went wrong: {str(e)}")

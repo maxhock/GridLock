@@ -16,9 +16,9 @@ def get_pylovo_grid(infdb, plz: int) -> gpd.GeoDataFrame:
     Returns:
         GeoDataFrame: Buildings with heat demand data and geometry.
     """
-    engine = infdb.get_db_engine()
-    sql = f"SELECT grid FROM pylovo.grid_results WHERE plz={plz}"
-    gdf_buildings = gpd.read_postgis(sql, engine)
-    gdf_buildings.head()
+    # engine = infdb.get_db_engine()
+    sql = f"SELECT grid FROM pylovo.grid_result WHERE plz={plz}"
+    with infdb.connect() as db:
+        net = db.execute_query(sql)
 
-    return gdf_buildings
+    return net

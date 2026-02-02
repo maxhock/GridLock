@@ -3,8 +3,8 @@ services:
         build:
             context: .
             dockerfile: Dockerfile
-#        volumes:
-            # - ./configs:/workspaces/infdb-data/configs:ro  # for production
+        volumes:
+             - ./configs:/workspaces/infdb-data/configs:ro  # for production
 #            - .:/workspaces/infdb-data # for development only
 #            - ../../src/infdb_package:/workspaces/infdb_package
 #            - /workspaces/infdb-data/.venv # Exclude .venv from volume mount
