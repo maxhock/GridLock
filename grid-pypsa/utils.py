@@ -159,7 +159,7 @@ class PyPSANetworkBuilder:
             return (
                 self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
                 + self.net.loads[self.net.loads.bus ==
-                                 str(self.ext_grid_idx)]["p_set"].iloc[0]
+                                 str(self.ext_grid_idx)]["p_set"].sum()
             )
         else:
             return self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
