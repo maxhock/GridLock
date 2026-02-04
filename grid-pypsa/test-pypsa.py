@@ -4,12 +4,10 @@ It compares the active power at the external grid (slack bus) for several standa
 To use: Place the required Excel grid files in the working directory and run this script.
 """
 
-import pandas as pd
 import numpy as np
 import pandapower as pp
-import pypsa
 
-from utils import PyPSANetwork
+from utils import PyPSANetworkBuilder
 
 # Reference results for reproducibility
 reference_results = {
@@ -27,7 +25,7 @@ paths = list(reference_results.keys())
 results = []
 
 for file_path in paths:
-    pyp_net = PyPSANetwork(file_path)
+    pyp_net = PyPSANetworkBuilder(file_path)
     pp_net = pp.from_excel(file_path)
     pp.runpp(pp_net)
     pp_p = pp_net.res_ext_grid.p_mw.iloc[0]
@@ -46,7 +44,7 @@ for file_path in paths:
 # Print results in a table format
 print("\nPyPSA vs. pandapower Power Flow Comparison")
 print("-" * 90)
-print(f"{'Case':<30} {'PP Power (MW)':>15} {'PyPSA (MW)':>12} {'RefPyPSA (MW)':>15} {'Err vs PP (%)':>13} {'Err vs Ref (%)':>13}")
+print(f"{'Case':<30} {'PP Power (MW)':>15} {'PyPSA (MW)':>12} {'Error (%)':>13}")
 print("-" * 90)
 for res in results:
     print(f"{res['Case']:<30} {res['PandaPower Active Power (MW)']:>15.4f} {res['PyPSA Active Power (MW)']:>12.4f} {res['Error (%)']:>13.2f}")

@@ -57,7 +57,7 @@ class GridFederate(Federate):
         self.ext_grid_idx = self.pypsa_net.ext_grid_idx
 
         # Register dynamic subscriptions for loads
-        self.load_indices = list(self.pypsa_net.load.index.astype(int))
+        self.load_indices = list(self.pypsa_net.loads.index)
         for pyp_idx in self.load_indices:
             sub_key = f"node_{pyp_idx}/P"
             h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
@@ -66,7 +66,8 @@ class GridFederate(Federate):
             self.data_from_federation["inputs"][sub_key] = None
 
         # Register dynamic publications for ext_grids
-        self.ext_grid_indices = list(self.pypsa_net.ext_grid.index)
+        # The external grid indices are actually the bus idx that is acting as a Slack
+        self.ext_grid_indices = list(self.pypsa_net.ext_grid_idx)
         for pyp_idx in self.ext_grid_indices:
             pub_key = f"Grid/transformer_{pyp_idx}_power"
             h.helicsFederateRegisterGlobalPublication(
@@ -90,7 +91,7 @@ class GridFederate(Federate):
             if sub_key in self.data_from_federation["inputs"]:
                 value_w = self.data_from_federation["inputs"][sub_key]
                 if value_w is not None:
-                    self.pypsa_net.load.at[pyp_idx, "p_mw"] = value_w
+                    self.pypsa_net.loads.at[pyp_idx, "p_set"] = value_w
 
         try:
             self.pypsa_net.run_pf()
