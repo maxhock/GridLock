@@ -1,23 +1,24 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-docker-compose
 {
-	"name": "Existing Docker Compose (Extend)",
+	"name": "Federate Testing",
 
 	// Update the 'dockerComposeFile' list if you have more compose files or use different names.
 	// The .devcontainer/docker-compose.yml file contains any overrides you need/want to make.
 	"dockerComposeFile": [
-		"../docker-compose.test.yml",
-		"docker-compose.yml"
+		"docker-compose.devcontainer.yaml"
 	],
 
 	// The 'service' property is the name of the service for the container that VS Code should
 	// use. Update this value and .devcontainer/docker-compose.yml to the real service name.
-	"service": "grid-test",
+	"service": "lv-grid_0",
+
+	"mounts": ["source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind"],
 
 	// The optional 'workspaceFolder' property is the path VS Code should open by default when
 	// connected. This is typically a file mount in .devcontainer/docker-compose.yml
-	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}"
-
+	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 
@@ -38,4 +39,8 @@
 
 	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "devcontainer"
+
+
+
+	"overrideCommand": true
 }
