@@ -11,7 +11,6 @@ services:
     volumes:
       - ../data:/data
       - ../config/tmp:/config/tmp:ro
-      # - ../..:/workspaces:cached
     networks:
       cst_net:
         ipv4_address: 10.5.0.2
@@ -29,14 +28,13 @@ services:
     volumes:
       - ../data:/data
       - ../config/tmp:/config/tmp:ro
-      # - ../..:/workspaces:cached
     networks:
       cst_net:
         ipv4_address: 10.5.0.3
     depends_on:
       - helics
-    command: /bin/bash -c "python main.py --name=grid --broker=broker --grid_file=kerber_landnetz_freileitung_1.xlsx"
-    # command: sleep infinity
+   # command: /bin/bash -c "python main.py --name=grid --broker=broker --grid_file=kerber_landnetz_freileitung_1.xlsx"
+    command: sleep infinity
 
   loadhouse_0:
     build: ../federates/house_player
@@ -50,7 +48,6 @@ services:
     volumes:
       - ../data:/data
       - ../config/tmp:/config/tmp:ro
-      # - ../..:/workspaces:cached
     networks:
       cst_net:
         ipv4_address: 10.5.0.4
