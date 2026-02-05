@@ -40,7 +40,24 @@
 	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "devcontainer"
 
-
-
-	"overrideCommand": true
+	"overrideCommand": true,
+	
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"python.defaultInterpreterPath": "/usr/local/bin/python3",
+				"python.terminal.activateEnvironment": true,
+				"terminal.integrated.cwd": "/workspaces/${localWorkspaceFolderBasename}",
+			},
+			"extensions": [
+				"ms-python.python",
+				"ms-python.debugpy",
+				"ms-toolsai.jupyter",
+        		"ms-toolsai.datawrangler",
+				"ms-ossdata.vscode-pgsql",
+				"github.copilot-chat",
+				"charliermarsh.ruff"
+			]
+		}
+	},
 }
