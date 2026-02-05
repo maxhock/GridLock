@@ -16,7 +16,6 @@ meta_store/*/*
 *.bak
 *.DS_Store
 *.idea/
-*.vscode/
 *.coverage
 *.env
 *.local

@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: lv-grid_0 (grid)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/federates/grid/main.py",
+            "cwd": "${workspaceFolder}/federates/grid",
+            "args": ["--name=grid", "--broker=broker", "--grid_file=kerber_landnetz_freileitung_1.xlsx"]
+        },
+        {
+            "name": "Debug: House Player",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/federates/house_player/main.py",
+            "cwd": "${workspaceFolder}/federates/house_player",
+            "args": ["--input=/data/input/sample_house.csv", "--broker=broker"]
+        }
+    ]
+}
