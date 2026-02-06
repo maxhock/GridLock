@@ -3,6 +3,7 @@ data/output/
 __pycache__/
 .venv/
 meta_store/*/*
+meta_store/*.yaml
 *.pyc
 *.pyo
 *.pyd
