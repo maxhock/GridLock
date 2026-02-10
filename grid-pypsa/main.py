@@ -5,7 +5,7 @@ Loads pandapower network, runs power flow, exchanges data via HELICS.
 
 from cosim_toolbox.sims import Federate
 import helics as h
-import pandapower as pp
+
 import argparse
 import os
 import json

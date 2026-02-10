@@ -18,12 +18,14 @@ class PyPSANetworkBuilder:
     def __init__(self, file_path: str) -> None:
         self.network_file: str = file_path
         self._load_data_from_excel()
-        # Check for required sheets
-        required = ["input_bus", "input_ext_grid", "input_line", "input_load"]
-        for req in required:
-            if not hasattr(self, req):
-                raise ValueError(
-                    f"Required sheet '{req}' not found in {file_path}.")
+        # Check for required sheets using original (user-facing) sheet names
+        required_sheets = ["bus", "ext_grid", "line", "load"]
+        missing_sheets = [sheet for sheet in required_sheets if sheet not in self.data]
+        if missing_sheets:
+            raise ValueError(
+                f"Required sheet(s) {missing_sheets} not found in {file_path}. "
+                f"Expected the following sheets: {required_sheets}."
+            )
         self.net: pypsa.Network = pypsa.Network()
 
     def _load_data_from_excel(self):
