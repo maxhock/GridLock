@@ -1,6 +1,8 @@
 import traceback
+import json
+from pathlib import Path
 from treelib import Tree
-from cosim_toolbox.sims import FederationConfig, FederateConfig, DockerRunner
+from cosim_toolbox.sims import FederationConfig, FederateConfig, DockerRunner, HelicsPubGroup, HelicsSubGroup
 from monkeypatch import apply_monkeypatches
 
 
@@ -40,6 +42,47 @@ def map_params_to_class(federate_class: str) -> dict:
         federate_class,
         {"image": "cosim-cst:latest", "command": "python3 main.py"},
     )
+
+
+def normalize_federation_keys(federation_name: str) -> None:
+    """Post-process federation JSON to replace dots with slashes in all HELICS keys.
+    
+    Args:
+        federation_name: Name of the federation file to process
+    """
+    federation_path = Path("meta_store/federations") / f"{federation_name}.json"
+    
+    if not federation_path.exists():
+        print(f"Warning: Federation file {federation_path} not found for normalization")
+        return
+    
+    # Read the federation config
+    with open(federation_path, "r") as f:
+        config = json.load(f)
+    
+    # Process all federates
+    if "federation" in config:
+        for fed_name, fed_config in config["federation"].items():
+            if "HELICS_config" in fed_config:
+                helics_cfg = fed_config["HELICS_config"]
+                
+                # Normalize publication keys
+                if "publications" in helics_cfg:
+                    for pub in helics_cfg["publications"]:
+                        if "key" in pub:
+                            pub["key"] = pub["key"].replace(".", "/")
+                
+                # Normalize subscription keys
+                if "subscriptions" in helics_cfg:
+                    for sub in helics_cfg["subscriptions"]:
+                        if "key" in sub:
+                            sub["key"] = sub["key"].replace(".", "/")
+    
+    # Write back the normalized config
+    with open(federation_path, "w") as f:
+        json.dump(config, f, indent=2)
+    
+    print(f"Normalized HELICS keys in {federation_path}")
 
 
 def load(tree: Tree, general_cfg: dict) -> None:
@@ -85,25 +128,79 @@ def load(tree: Tree, general_cfg: dict) -> None:
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type)
 
-        # Add pub sub
+    # Build pub/sub using add_group with proper src/des structure
+    # Map topics to their publishers and subscribers
+    topic_map = {}  # topic -> {"publishers": [fed_names], "subscribers": [fed_names], "unit": str, "dtype": str}
+    
+    for node in tree.all_nodes():
+        data = node.data
+        node_type = data.get("type")
+        
+        if not node_type or node_type == "empty":
+            continue
+            
+        # Track publications
         for topic, unit in data.get("publications", {}).items():
             dtype = "string" if unit == "json" else "double"
-            if not hasattr(fed, "publications"):
-                fed.publications = []
-
-            fed.publications.append(
-                {"key": topic, "type": dtype, "unit": unit, "global": True}
-            )
-
+            if topic not in topic_map:
+                topic_map[topic] = {"publishers": [], "subscribers": [], "unit": unit, "dtype": dtype}
+            topic_map[topic]["publishers"].append(node.identifier)
+        
+        # Track subscriptions
         for topic, unit in data.get("subscriptions", {}).items():
             dtype = "string" if unit == "json" else "double"
-            if not hasattr(fed, "subscriptions"):
-                fed.subscriptions = []
-
-            fed.subscriptions.append(
-                {"key": topic, "type": dtype, "unit": unit, "required": True}
-            )
-
+            if topic not in topic_map:
+                topic_map[topic] = {"publishers": [], "subscribers": [], "unit": unit, "dtype": dtype}
+            topic_map[topic]["subscribers"].append(node.identifier)
+    
+    # For each unique topic, create add_group calls
+    for topic, info in topic_map.items():
+        publishers = info["publishers"]
+        subscribers = info["subscribers"]
+        unit = info["unit"]
+        dtype = info["dtype"]
+        
+        if not publishers:
+            continue
+            
+        # For each publisher, create a group with all its subscribers as destinations
+        for pub_fed in publishers:
+            # Build the key_format dict matching the user's example pattern
+            key_format = {
+                "src": {
+                    "from_fed": pub_fed,
+                    "keys": ["", ""],
+                    "indices": []
+                },
+                "des": []
+            }
+            
+            # Add all subscribers as destinations
+            for sub_fed in subscribers:
+                key_format["des"].append({
+                    "from_fed": pub_fed,
+                    "to_fed": sub_fed,
+                    "keys": ["", ""],
+                    "indices": []
+                })
+            
+            # CST will prepend from_fed/ to the group name, so strip it from topic to avoid duplication
+            # Replace all dots with slashes throughout for consistent path separators
+            # First, normalize the topic to use slashes
+            normalized_topic = topic.replace(".", "/")
+            normalized_pub_fed = pub_fed.replace(".", "/")
+            
+            group_name = normalized_topic
+            if normalized_topic.startswith(normalized_pub_fed + "/"):
+                # Strip "normalized_pub_fed/" to avoid duplication
+                group_name = normalized_topic[len(normalized_pub_fed) + 1:]
+            
+            # Call add_group - CST will prepend from_fed/ (which still has dots, but we've normalized the rest)
+            federation.add_group(group_name, dtype, key_format, unit=unit, globl=True)
+    
+    # Define I/O to finalize all group definitions
+    federation.define_io()
+    
     start_str = general_cfg["start_time"]
     end_str = general_cfg["end_time"]
 
@@ -114,6 +211,10 @@ def load(tree: Tree, general_cfg: dict) -> None:
 
     try:
         federation.write_config(start_str, end_str)
+        
+        # Normalize dots to slashes in all HELICS keys
+        normalize_federation_keys(federation.federation_name)
+        
         DockerRunner.define_yaml(federation.scenario_name, use_meta_db="json")
         print("Success: Federation configuration and docker-compose.yml generated.")
     except Exception as e:
