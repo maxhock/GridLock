@@ -24,8 +24,8 @@ def _service(
     if params[0] != "":
         _svc += "    environment:\n"
         _svc += params[0]
-    _svc += "    user: worker\n"
-    _svc += "    working_dir: /home/worker/case\n"
+    # _svc += "    user: worker\n"
+    # _svc += "    working_dir: /home/worker/case\n"
     _svc += "    volumes:\n"
     _svc += "      - ../data:/data\n"
     _svc += "      - ../meta_store:/app/meta_store\n"
@@ -76,7 +76,7 @@ def define_yaml(
 
     cosim_env = (
         '      CST_HOST: "' + env.cst_host + '"\n'
-        '      LOCAL_USER: "' + env.local_user + '"\n'
+        # '      LOCAL_USER: "' + env.local_user + '"\n'
         '      POSTGRES_HOST: "' + env.cst_pg_host + '"\n'
         '      MONGO_HOST: "' + env.cst_mg_host + '"\n'
         '      MONGO_PORT: "' + env.cst_mg_port + '"\n'

@@ -3,13 +3,9 @@ FROM python:3.11-slim AS base
 # Set working directory
 WORKDIR /app
 
-# Create config mount point
-RUN mkdir /config
-VOLUME ["/config"]
-
-# Create data mount point
-RUN mkdir /data
-VOLUME ["/data"]
+# Create mount points and mark them as volumes
+RUN mkdir -p /config /data /app/meta_store
+VOLUME ["/config", "/data", "/app/meta_store"]
 
 # Install dependencies from requirements.txt
 COPY requirements.txt .
