@@ -73,6 +73,14 @@ def load(tree: Tree, general_cfg: dict) -> None:
         federation.add_federate_config(fed)
 
         mapped = map_params_to_class(node_class)
+        if node_class == "grid":
+            layout = data.get("layout")
+            if layout:
+                mapped["command"] += f" --grid_file {layout}"
+            else:
+                print(
+                    f"Warning: No layout specified for grid {node.identifier}"
+                )
         fed.config("image", mapped["image"])
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type)

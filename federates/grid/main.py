@@ -96,9 +96,9 @@ def main():
     args = parse_args()
     grid_path = os.path.join("/data", "input", args.grid_file)
     # Copy meta_store configuration into working directory
-    shutil.copytree("../config/composegen/meta_store", Path.cwd() / "meta_store", dirs_exist_ok=True)
+    # shutil.copytree("../config/composegen/meta_store", Path.cwd() / "meta_store", dirs_exist_ok=True)
     # Initialize federate with entrypoint federate
-    federate = GridFederate("mv-grid_0", grid_path)
+    federate = GridFederate("lv-grid_0", grid_path)
 
     try:
         # Create CST and HELICS federates
