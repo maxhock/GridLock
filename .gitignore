@@ -19,5 +19,6 @@ meta_store/*.yaml
 *.idea/
 *.coverage
 *.env
+*.venv
 *.local
 *.lock
