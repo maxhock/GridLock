@@ -1,2 +1,7 @@
-# Set the default behavior, in case people don't have core.autocrlf set.
-* text=lf
+# Explicitly ensure default LF even on Windows-WSL systems for this docker-based project
+*.sh text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
