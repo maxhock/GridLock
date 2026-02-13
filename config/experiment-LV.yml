@@ -5,12 +5,12 @@ general:
  time_step: 300
  duration: 86400
 federation:
-  id: "lv-grid_0"
+  id: "lv-grid"
   name: "LowVoltageGrid"
   class: "grid"
   config:
-    placement: 3 # [3, 7]
-    layout: "kerber_landnetz_freileitung_1.xlsx"
+    location:
+      - plz: 91301  # all grids for this PLZ
   sub_federates:
     - id: "loadhouse_0"
       name: "Load profile house"
