@@ -85,8 +85,32 @@ def normalize_federation_keys(federation_name: str) -> None:
     print(f"Normalized HELICS keys in {federation_path}")
 
 
+def load_manifest(meta_store_path: str = "meta_store") -> dict | None:
+    """Load the manifest written by infdb-data pre-flight.
+
+    The manifest lists resolved grid federate names so composegen
+    knows exact count/names without needing InfDB access.
+
+    Args:
+        meta_store_path: Path to the meta_store directory.
+
+    Returns:
+        Manifest dict with grid_id and grid_federates list,
+        or None if no manifest exists (layout-only experiment).
+    """
+    manifest_path = Path(meta_store_path) / "manifest.json"
+    if not manifest_path.exists():
+        return None
+    with open(manifest_path) as f:
+        return json.load(f)
+
+
 def load(tree: Tree, general_cfg: dict) -> None:
     """Generate CST federation configuration and docker-compose from the transformed tree.
+
+    For location-based grids (resolved by infdb-data pre-flight), reads
+    manifest.json from meta_store to get the exact federate names and
+    count. Each resolved grid federate gets its own FederateConfig entry.
 
     Args:
         tree: Transformed tree with pub/sub wiring.
@@ -102,6 +126,9 @@ def load(tree: Tree, general_cfg: dict) -> None:
         "csv",
     )
 
+    # Load manifest from infdb-data pre-flight (may be None for layout-only)
+    manifest = load_manifest()
+
     for node in tree.all_nodes():
         data = node.data
         node_class = data.get("class")
@@ -111,19 +138,33 @@ def load(tree: Tree, general_cfg: dict) -> None:
             continue
 
         time_step = general_cfg.get("time_step", 1.0)
-        fed = FederateConfig(node.identifier, period=time_step)
-
-        federation.add_federate_config(fed)
 
         mapped = map_params_to_class(node_class)
         if node_class == "grid":
+            location = data.get("location")
             layout = data.get("layout")
-            if layout:
+            if location and manifest:
+                # Location-based: create one FederateConfig per resolved grid
+                # from the manifest written by infdb-data
+                for fed_name in manifest["grid_federates"]:
+                    fed = FederateConfig(fed_name, period=time_step)
+                    federation.add_federate_config(fed)
+                    cmd = f"{mapped['command']} --scenario {name}Scenario --federate_name {fed_name}"
+                    fed.config("image", mapped["image"])
+                    fed.config("command", cmd)
+                    fed.config("federate_type", node_type)
+                    print(f"Added grid federate from manifest: {fed_name}")
+                # Skip adding the template grid node itself
+                continue
+            elif layout:
                 mapped["command"] += f" --grid_file {layout}"
             else:
                 print(
-                    f"Warning: No layout specified for grid {node.identifier}"
+                    f"Warning: No layout or location specified for grid {node.identifier}"
                 )
+
+        fed = FederateConfig(node.identifier, period=time_step)
+        federation.add_federate_config(fed)
         fed.config("image", mapped["image"])
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type)
