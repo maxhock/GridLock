@@ -4,11 +4,9 @@ services:
             context: .
             dockerfile: Dockerfile
         volumes:
-             - ./configs:/workspaces/infdb-data/configs:ro  # for production
-#            - .:/workspaces/infdb-data # for development only
-#            - ../../src/infdb_package:/workspaces/infdb_package
-#            - /workspaces/infdb-data/.venv # Exclude .venv from volume mount
-#            - .vscode:/workspaces/.vscode:ro
+             - ./configs:/workspaces/infdb-data/configs:ro
+             - ../meta_store:/workspaces/infdb-data/meta_store
+             - ../config:/config:ro
         extra_hosts:
             - "host.docker.internal:host-gateway"
         env_file:
