@@ -11,14 +11,15 @@ VOLUME ["/config", "/data", "/app/meta_store"]
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the grid simulation script into the container
+# Copy application code
 COPY main.py .
+COPY src/ src/
 
 
 # --- Test stage ---
 FROM base AS test
 # Install test dependencies
-RUN pip install --no-cache-dir pytest pytest-mock
+RUN pip install --no-cache-dir pytest pytest-mock pandas
 # Copy test files
 COPY test_main.py .
 # Always run tests in this stage
@@ -26,11 +27,11 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
-# Default command: run via HELICS runner with config from mount
-CMD ["helics", "run", "--path=/config/tmp/grid_runner.json", "--no-log-files"]
+# Entry point - scenario and federate_name args provided by docker-compose command
+CMD ["python", "main.py"]
 
 # --- Usage ---
 # To run tests during build:
-# docker build --target test --build-arg RUN_TESTS=true -t grid-test .
+# docker build --target test -t grid-test .
 # To build production image:
 # docker build --target final -t grid-prod .
