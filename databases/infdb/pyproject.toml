@@ -1,5 +1,5 @@
 [project]
-name = "infdb-data"
+name = "infdb"
 version = "1"
 requires-python = "==3.12.*"
 dependencies = [

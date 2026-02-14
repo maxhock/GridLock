@@ -2,8 +2,8 @@
 
 Each grid federate is launched as its own container/process by
 docker-compose.  It reads its pandapower net from the CST metadata
-store (custom collection "grid_data"), where the infdb-data
-pre-flight container wrote it.
+store (collection "custom_metadata"), where the infdb
+data setup container wrote it.
 
 Usage:
     python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0
@@ -42,8 +42,8 @@ def parse_args() -> argparse.Namespace:
 def load_net_from_metadata(federate_name: str) -> pp.pandapowerNet:
     """Load a pandapower net from the CST metadata store.
 
-    The infdb-data pre-flight container writes each grid's JSON
-    representation into a custom "grid_data" collection, keyed
+    The infdb data setup container writes each grid's JSON
+    representation into the "custom_metadata" collection, keyed
     by the federate name.
 
     Args:
@@ -53,19 +53,19 @@ def load_net_from_metadata(federate_name: str) -> pp.pandapowerNet:
         pandapower network object.
 
     Raises:
-        FileNotFoundError: If no grid_data entry exists for this name.
+        FileNotFoundError: If no custom_metadata entry exists for this name.
     """
     md_mgr = create_metadata_manager(backend="json", location="meta_store")
     md_mgr.connect()
     try:
-        data = md_mgr.read("grid_data", federate_name)
+        data = md_mgr.read("custom_metadata", federate_name)
     finally:
         md_mgr.disconnect()
 
     if not data:
         raise FileNotFoundError(
             f"No grid data found in metadata store for '{federate_name}'. "
-            f"Ensure infdb-data pre-flight has run."
+            f"Ensure infdb data setup has run."
         )
 
     net = pp.from_json_string(data["net_json"])

@@ -56,7 +56,7 @@ def test_load_net_from_metadata(mocker):
 
     mock_create_mm.assert_called_once_with(backend="json", location="meta_store")
     mock_md_mgr.connect.assert_called_once()
-    mock_md_mgr.read.assert_called_once_with("grid_data", "lv-grid_91301_0")
+    mock_md_mgr.read.assert_called_once_with("custom_metadata", "lv-grid_91301_0")
     mock_md_mgr.disconnect.assert_called_once()
     assert result == mock_net
 

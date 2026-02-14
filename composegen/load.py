@@ -86,7 +86,7 @@ def normalize_federation_keys(federation_name: str) -> None:
 
 
 def load_manifest(meta_store_path: str = "meta_store") -> dict | None:
-    """Load the manifest written by infdb-data pre-flight.
+    """Load the manifest written by infdb data setup.
 
     The manifest lists resolved grid federate names so composegen
     knows exact count/names without needing InfDB access.
@@ -108,7 +108,7 @@ def load_manifest(meta_store_path: str = "meta_store") -> dict | None:
 def load(tree: Tree, general_cfg: dict) -> None:
     """Generate CST federation configuration and docker-compose from the transformed tree.
 
-    For location-based grids (resolved by infdb-data pre-flight), reads
+    For location-based grids (resolved by infdb data setup), reads
     manifest.json from meta_store to get the exact federate names and
     count. Each resolved grid federate gets its own FederateConfig entry.
 
@@ -126,7 +126,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
         "csv",
     )
 
-    # Load manifest from infdb-data pre-flight (may be None for layout-only)
+    # Load manifest from infdb data setup (may be None for layout-only)
     manifest = load_manifest()
 
     for node in tree.all_nodes():
@@ -145,7 +145,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
             layout = data.get("layout")
             if location and manifest:
                 # Location-based: create one FederateConfig per resolved grid
-                # from the manifest written by infdb-data
+                # from the manifest written by infdb
                 for fed_name in manifest["grid_federates"]:
                     fed = FederateConfig(fed_name, period=time_step)
                     federation.add_federate_config(fed)

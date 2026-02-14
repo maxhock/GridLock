@@ -1,11 +1,11 @@
 services:
-    infdb-data:
+    infdb:
         build:
             context: .
             dockerfile: Dockerfile
         volumes:
-             - ./configs:/workspaces/infdb-data/configs:ro
-             - ../meta_store:/workspaces/infdb-data/meta_store
+             - ./configs:/workspaces/infdb/configs:ro
+             - ../meta_store:/workspaces/infdb/meta_store
              - ../config:/config:ro
         extra_hosts:
             - "host.docker.internal:host-gateway"

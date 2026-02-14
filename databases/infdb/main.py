@@ -1,10 +1,10 @@
-"""Pre-flight data resolver for GridLock.
+"""data setup data resolver for GridLock.
 
 Reads experiment.yml location queries, fetches data from InfDB,
 and writes resolved data into CST stores so all federates can
 read it at runtime without needing InfDB access themselves.
 
-Grid nets → CST metadata store (custom collection "grid_data")
+Grid nets → CST metadata store (collection "custom_metadata")
 Timeseries → CST timeseries store (preloaded TSRecords)  [future]
 Manifest   → meta_store/manifest.json (federate names for composegen)
 """
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
         Namespace with experiment_path and meta_store_path.
     """
     parser = argparse.ArgumentParser(
-        description="Pre-flight data resolver: InfDB → CST stores"
+        description="data setup data resolver: InfDB → CST stores"
     )
     parser.add_argument(
         "--experiment",
@@ -93,7 +93,7 @@ def write_grid_to_metadata(
 ) -> list[str]:
     """Write resolved pandapower nets to CST metadata store.
 
-    Each net is stored as a JSON string in a custom "grid_data"
+    Each net is stored as a JSON string in the "custom_metadata"
     collection, keyed by its federate name.
 
     Args:
@@ -120,7 +120,7 @@ def write_grid_to_metadata(
                 "load_count": len(net.load),
                 "ext_grid_count": len(net.ext_grid),
             }
-            md_mgr.write("grid_data", federate_name, data, overwrite=True)
+            md_mgr.write("custom_metadata", federate_name, data, overwrite=True)
             federate_names.append(federate_name)
             print(f"  Stored {federate_name} ({len(net.bus)} buses)")
     finally:
@@ -170,7 +170,7 @@ def main(
         experiment_path = args.experiment
         meta_store_path = args.meta_store
 
-    print(f"=== infdb-data pre-flight resolver ===")
+    print(f"=== infdb data setup resolver ===")
     print(f"Experiment: {experiment_path}")
     print(f"Meta store: {meta_store_path}")
 
@@ -181,9 +181,9 @@ def main(
     print(f"Grid '{grid_id}': {len(location)} location query(ies)")
 
     # 2. Connect to InfDB and resolve queries
-    infdb = InfDB(tool_name="infdb-data", config_path="configs")
+    infdb = InfDB(tool_name="infdb", config_path="configs")
     log = infdb.get_logger()
-    log.info("Starting pre-flight data resolution")
+    log.info("Starting data setup data resolution")
 
     try:
         net_list = resolve_grid_queries(
@@ -204,7 +204,7 @@ def main(
     # 4. Write manifest for composegen
     write_manifest(federate_names, grid_id, meta_store_path)
 
-    print(f"=== Pre-flight complete: {len(federate_names)} grid federate(s) resolved ===")
+    print(f"=== data setup complete: {len(federate_names)} grid federate(s) resolved ===")
 
 
 if __name__ == "__main__":

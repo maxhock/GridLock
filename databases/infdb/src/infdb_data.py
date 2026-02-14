@@ -1,4 +1,4 @@
-"""InfDB data access functions for the pre-flight resolver.
+"""InfDB data access functions for the data setup resolver.
 
 Provides query helpers to fetch pandapower grids from the InfDB
 pylovo schema and resolve experiment location queries into named
