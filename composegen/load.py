@@ -360,8 +360,12 @@ def load(tree: Tree, general_cfg: dict) -> None:
         if not node_type or node_type == "empty":
             continue
 
-        mapped = map_params_to_class(node_class)
+        time_step = general_cfg.get("time_step", 1.0)
+        fed = FederateConfig(node.identifier, period=time_step)
 
+        federation.add_federate_config(fed)
+
+        mapped = map_params_to_class(node_class)
         if node_class == "grid":
             layout = data.get("layout")
             if layout:
@@ -370,9 +374,6 @@ def load(tree: Tree, general_cfg: dict) -> None:
                 print(
                     f"Warning: No layout or location for grid {node.identifier}"
                 )
-
-        fed = FederateConfig(node.identifier, period=time_step)
-        federation.add_federate_config(fed)
         fed.config("image", mapped["image"])
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type)
