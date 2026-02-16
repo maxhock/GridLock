@@ -2,8 +2,19 @@ import traceback
 import json
 from pathlib import Path
 from treelib import Tree
-from cosim_toolbox.sims import FederationConfig, FederateConfig, DockerRunner, HelicsPubGroup, HelicsSubGroup
+from cosim_toolbox.sims import (
+    FederationConfig,
+    FederateConfig,
+    DockerRunner,
+    HelicsPubGroup,
+    HelicsSubGroup,
+)
 from monkeypatch import apply_monkeypatches
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def map_params_to_class(federate_class: str) -> dict:
@@ -19,7 +30,7 @@ def map_params_to_class(federate_class: str) -> dict:
         },
         "load": {
             "image": "house_player",
-            "command": "",
+            "command": "python3 main.py",
         },
         "recorder": {
             "image": "recorder",
@@ -45,75 +56,212 @@ def map_params_to_class(federate_class: str) -> dict:
 
 
 def normalize_federation_keys(federation_name: str) -> None:
-    """Post-process federation JSON to replace dots with slashes in all HELICS keys.
-    
+    """Post-process federation JSON to replace dots with slashes in all HELICS keys.        
     Args:
-        federation_name: Name of the federation file to process
+        federation_name: Name of the federation file to process.
     """
-    federation_path = Path("meta_store/federations") / f"{federation_name}.json"
-    
+    federation_path = Path("meta_store/federations") / f"{federation_name}.json"        
     if not federation_path.exists():
         print(f"Warning: Federation file {federation_path} not found for normalization")
-        return
-    
+        return    
     # Read the federation config
     with open(federation_path, "r") as f:
-        config = json.load(f)
-    
+        config = json.load(f)    
     # Process all federates
     if "federation" in config:
-        for fed_name, fed_config in config["federation"].items():
+        for _fed_name, fed_config in config["federation"].items():
             if "HELICS_config" in fed_config:
                 helics_cfg = fed_config["HELICS_config"]
-                
-                # Normalize publication keys
-                if "publications" in helics_cfg:
-                    for pub in helics_cfg["publications"]:
-                        if "key" in pub:
-                            pub["key"] = pub["key"].replace(".", "/")
-                
-                # Normalize subscription keys
-                if "subscriptions" in helics_cfg:
-                    for sub in helics_cfg["subscriptions"]:
-                        if "key" in sub:
-                            sub["key"] = sub["key"].replace(".", "/")
-    
-    # Write back the normalized config
+
+                for pub in helics_cfg.get("publications", []):
+                    if "key" in pub:
+                        pub["key"] = pub["key"].replace(".", "/")
+
+                for sub in helics_cfg.get("subscriptions", []):
+                    if "key" in sub:
+                        sub["key"] = sub["key"].replace(".", "/")
+
     with open(federation_path, "w") as f:
         json.dump(config, f, indent=2)
-    
+
     print(f"Normalized HELICS keys in {federation_path}")
 
 
-def load_manifest(meta_store_path: str = "meta_store") -> dict | None:
-    """Load the manifest written by infdb data setup.
+def discover_grid_federates(
+    grid_id: str,
+    meta_store_path: str = "meta_store",
+) -> list[str]:
+    """Discover resolved grid federate names from the CST metadata store.
 
-    The manifest lists resolved grid federate names so composegen
-    knows exact count/names without needing InfDB access.
+    The infdb data-setup step writes each resolved pandapower net into
+    the ``custom_metadata`` collection, keyed by federate name.  This
+    function scans that collection for entries whose ``grid_id`` matches
+    the experiment's grid identifier.
 
     Args:
+        grid_id: Grid identifier from experiment YAML (``federation.id``).
         meta_store_path: Path to the meta_store directory.
 
     Returns:
-        Manifest dict with grid_id and grid_federates list,
-        or None if no manifest exists (layout-only experiment).
+        Sorted list of federate name strings (e.g. ["lv-grid_91301_0"]).
     """
-    manifest_path = Path(meta_store_path) / "manifest.json"
-    if not manifest_path.exists():
-        return None
-    with open(manifest_path) as f:
-        return json.load(f)
+    custom_dir = Path(meta_store_path) / "custom_metadata"
+    if not custom_dir.exists():
+        return []
+
+    federate_names: list[str] = []
+    for json_file in sorted(custom_dir.glob("*.json")):
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+            if data.get("grid_id") == grid_id:
+                federate_names.append(json_file.stem)
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    return federate_names
+
+
+# ---------------------------------------------------------------------------
+# Pub / sub wiring helpers
+# ---------------------------------------------------------------------------
+
+def _add_group(
+    federation: FederationConfig,
+    group_name: str,
+    pub_fed: str,
+    sub_fed: str,
+    dtype: str = "double",
+    unit: str = "W",
+) -> None:
+    """Register one pub→sub group via CST.
+
+    CST prepends ``pub_fed/`` to *group_name* to form the full
+    HELICS key.  Dots in federate names are later normalised to
+    slashes by :func:`normalize_federation_keys`.
+    """
+    key_format = {
+        "src": {"from_fed": pub_fed, "keys": ["", ""], "indices": []},
+        "des": [
+            {
+                "from_fed": pub_fed,
+                "to_fed": sub_fed,
+                "keys": ["", ""],
+                "indices": [],
+            }
+        ],
+    }
+    federation.add_group(group_name, dtype, key_format, unit=unit, globl=True)
+
+
+def _wire_grid_child(
+    federation: FederationConfig,
+    grid_fed_name: str,
+    child_fed_name: str,
+    child_local_id: str,
+    child_class: str,
+) -> list[str]:
+    """Wire pub/sub between a grid federate and one of its children.
+
+    Returns the list of publication keys owned by the *child*
+    (needed for player file generation).
+    """
+    child_pub_keys: list[str] = []
+
+    # Grid publishes voltage → child subscribes
+    _add_group(
+        federation,
+        f"{child_local_id}/voltage",
+        pub_fed=grid_fed_name,
+        sub_fed=child_fed_name,
+        dtype="double",
+        unit="V",
+    )
+
+    if child_class in ("house", "load", "battery", "pv", "grid"):
+        # Child publishes active_power → grid subscribes
+        _add_group(
+            federation,
+            "active_power",
+            pub_fed=child_fed_name,
+            sub_fed=grid_fed_name,
+            dtype="double",
+            unit="W",
+        )
+        # After dot→slash normalisation the full key becomes
+        # <grid_fed_name>/<child_local_id>/active_power
+        child_pub_keys.append(
+            f"{child_fed_name.replace('.', '/')}/active_power"
+        )
+
+        # Child publishes reactive_power → grid subscribes
+        _add_group(
+            federation,
+            "reactive_power",
+            pub_fed=child_fed_name,
+            sub_fed=grid_fed_name,
+            dtype="double",
+            unit="VAr",
+        )
+        child_pub_keys.append(
+            f"{child_fed_name.replace('.', '/')}/reactive_power"
+        )
+
+    if child_class == "house":
+        # Grid publishes control → house subscribes
+        _add_group(
+            federation,
+            f"{child_local_id}/control",
+            pub_fed=grid_fed_name,
+            sub_fed=child_fed_name,
+            dtype="string",
+            unit="json",
+        )
+
+    return child_pub_keys
+
+
+def _resolve_timeseries_path(child_data: dict) -> str:
+    """Resolve the timeseries file path for a load federate.
+
+    Checks whether ``electrical_load`` in the child config points
+    to a CSV file directly or a standard profile type.  For profile
+    types the infdb step is expected to provide the data; for
+    testing a default CSV is used.
+
+    Args:
+        child_data: Tree node data dict for the child federate.
+
+    Returns:
+        Container-relative path to the timeseries CSV, or empty string.
+    """
+    electrical_load = child_data.get("electrical_load")
+    if not electrical_load:
+        return ""
+
+    # Direct CSV reference – assume it's in the data/input volume
+    if electrical_load.endswith(".csv"):
+        return f"/data/input/{electrical_load}"
+
+    # Standard profile type (H0, H25, …) – use default test file
+    # TODO: Replace with infdb-derived timeseries once available
+    return "/data/input/building_timeseries.csv"
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 
 def load(tree: Tree, general_cfg: dict) -> None:
-    """Generate CST federation configuration and docker-compose from the transformed tree.
+    """Generate CST federation configuration and docker-compose.
 
-    For location-based grids (resolved by infdb data setup), reads
-    manifest.json from meta_store to get the exact federate names and
-    count. Each resolved grid federate gets its own FederateConfig entry.
+    For location-based grids the ``custom_metadata`` entries written by
+    the infdb data-setup step are scanned so that one grid *and* its
+    child federates are instantiated per resolved pandapower net.
 
     Args:
-        tree: Transformed tree with pub/sub wiring.
+        tree: Transformed tree with class/config data.
         general_cfg: Processed general configuration dict.
     """
     name = general_cfg.get("name", "GridLock")
@@ -126,10 +274,85 @@ def load(tree: Tree, general_cfg: dict) -> None:
         "csv",
     )
 
-    # Load manifest from infdb data setup (may be None for layout-only)
-    manifest = load_manifest()
+    # Nodes handled via location expansion – skip in the generic loop
+    handled_nodes: set[str] = set()
 
+    # ---- Phase 1: location-based grid expansion --------------------------
     for node in tree.all_nodes():
+        if node.data.get("class") != "grid":
+            continue
+        if not node.data.get("location"):
+            continue
+
+        grid_tree_id = node.identifier
+        grid_fed_names = discover_grid_federates(grid_tree_id)
+        if not grid_fed_names:
+            print(
+                f"Warning: Grid '{grid_tree_id}' uses location queries but "
+                f"no custom_metadata entries found – was the infdb step executed?"
+            )
+            continue
+
+        children = tree.children(grid_tree_id)
+        handled_nodes.add(grid_tree_id)
+        for child in children:
+            handled_nodes.add(child.identifier)
+
+        grid_mapped = map_params_to_class("grid")
+
+        for fed_name in grid_fed_names:
+            # -- grid federate ------------------------------------------------
+            fed = FederateConfig(fed_name, period=time_step)
+            federation.add_federate_config(fed)
+            cmd = (
+                f"{grid_mapped['command']} "
+                f"--scenario {name}Scenario --federate_name {fed_name}"
+            )
+            fed.config("image", grid_mapped["image"])
+            fed.config("command", cmd)
+            fed.config("federate_type", "value")
+            print(f"Added grid federate: {fed_name}")
+
+            # -- child federates (load, house, …) ----------------------------
+            for child in children:
+                child_data = child.data
+                child_class = child_data.get("class")
+                child_mapped = map_params_to_class(child_class)
+                child_local_id = child.identifier.split(".")[-1]
+                child_fed_name = f"{fed_name}.{child_local_id}"
+
+                child_fed = FederateConfig(child_fed_name, period=time_step)
+                federation.add_federate_config(child_fed)
+                child_fed.config("image", child_mapped["image"])
+                child_fed.config("federate_type", "value")
+
+                # Wire pub/sub between grid and this child
+                _wire_grid_child(
+                    federation, fed_name, child_fed_name,
+                    child_local_id, child_class,
+                )
+
+                # Build command – all child classes are now CST federates
+                child_cmd = (
+                    f"{child_mapped['command']} "
+                    f"--scenario {name}Scenario "
+                    f"--federate_name {child_fed_name}"
+                )
+
+                # For load federates, resolve the timeseries file path
+                if child_class == "load":
+                    ts_path = _resolve_timeseries_path(child_data)
+                    if ts_path:
+                        child_cmd += f" --timeseries {ts_path}"
+
+                child_fed.config("command", child_cmd)
+                print(f"  Added child federate: {child_fed_name} ({child_class})")
+
+    # ---- Phase 2: non-location nodes (layout grids, standalone, …) -------
+    for node in tree.all_nodes():
+        if node.identifier in handled_nodes:
+            continue
+
         data = node.data
         node_class = data.get("class")
         node_type = data.get("type")
@@ -137,30 +360,15 @@ def load(tree: Tree, general_cfg: dict) -> None:
         if not node_type or node_type == "empty":
             continue
 
-        time_step = general_cfg.get("time_step", 1.0)
-
         mapped = map_params_to_class(node_class)
+
         if node_class == "grid":
-            location = data.get("location")
             layout = data.get("layout")
-            if location and manifest:
-                # Location-based: create one FederateConfig per resolved grid
-                # from the manifest written by infdb
-                for fed_name in manifest["grid_federates"]:
-                    fed = FederateConfig(fed_name, period=time_step)
-                    federation.add_federate_config(fed)
-                    cmd = f"{mapped['command']} --scenario {name}Scenario --federate_name {fed_name}"
-                    fed.config("image", mapped["image"])
-                    fed.config("command", cmd)
-                    fed.config("federate_type", node_type)
-                    print(f"Added grid federate from manifest: {fed_name}")
-                # Skip adding the template grid node itself
-                continue
-            elif layout:
+            if layout:
                 mapped["command"] += f" --grid_file {layout}"
             else:
                 print(
-                    f"Warning: No layout or location specified for grid {node.identifier}"
+                    f"Warning: No layout or location for grid {node.identifier}"
                 )
 
         fed = FederateConfig(node.identifier, period=time_step)
@@ -171,7 +379,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
 
     # Build pub/sub using add_group with proper src/des structure
     # Map topics to their publishers and subscribers
-    topic_map = {}  # topic -> {"publishers": [fed_names], "subscribers": [fed_names], "unit": str, "dtype": str}
+    topic_map: dict[str, dict] = {} # topic -> {"publishers": [fed_names], "subscribers": [fed_names], "unit": str, "dtype": str}
     
     for node in tree.all_nodes():
         data = node.data
