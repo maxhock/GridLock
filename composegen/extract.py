@@ -84,7 +84,7 @@ def extract(config_path: Path) -> tuple[dict, Tree, dict]:
     # Extract grid nodes
     grid_ids = [
         node_id
-        for node_id in tree.expand_tree(filter=lambda x: x.data["type"] == "grid")
+        for node_id in tree.expand_tree(filter=lambda x: x.data.get("class") == "grid")
     ]
     grid_nodes = {}
 

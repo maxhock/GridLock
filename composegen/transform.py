@@ -139,19 +139,19 @@ def add_pub_sub(node, topic: str, unit: str, type: str = "publication") -> None:
 
 
 def validate_tree(tree: Tree) -> None:
-    """Validate the configuration tree for required fields per node type."""
+    """Validate the configuration tree for required fields per node class."""
     validation_errors = []
     for node in tree.all_nodes():
         data = node.data
-        node_type = data.get("type")
+        node_class = data.get("class")
 
-        if not node_type:
+        if not node_class:
             validation_errors.append(
-                f"[Structure] Node '{node.tag}' ({node.identifier}) is missing a 'type' definition."
+                f"[Structure] Node '{node.tag}' ({node.identifier}) is missing a 'class' definition."
             )
             continue
 
-        match node_type:
+        match node_class:
             case "grid":
                 layout = data.get("layout")
                 location = data.get("location")
