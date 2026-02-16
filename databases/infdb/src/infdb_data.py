@@ -97,3 +97,48 @@ def resolve_grid_queries(
 
     return net_list
 
+
+def get_demand_timeseries(
+    infdb,
+    log,
+    plz: int,
+    profile_type: str = "H0",
+) -> pd.DataFrame:
+    """Query annual demand timeseries from InfDB for a given location.
+
+    TODO: Implement actual InfDB query once the timeseries table is
+    available.  For now this is a placeholder that returns an empty
+    DataFrame with the expected schema.
+
+    The returned DataFrame has one row per timestep (e.g. 15-min
+    resolution, 35 040 rows for one year).  Columns:
+
+    * ``timestamp`` – UNIX epoch seconds (int)
+    * ``active_power_kw`` – electrical demand in kW (float)
+    * ``reactive_power_kvar`` – reactive demand in kVAr (float)
+
+    Args:
+        infdb: InfDB client instance.
+        log: Logger instance.
+        plz: Postcode to query timeseries for.
+        profile_type: Standard load profile identifier (e.g. "H0", "H25").
+
+    Returns:
+        DataFrame with columns [timestamp, active_power_kw, reactive_power_kvar].
+    """
+    # Placeholder SQL – adapt once the InfDB timeseries table exists
+    # sql = (
+    #     f"SELECT timestamp, active_power_kw, reactive_power_kvar "
+    #     f"FROM demand.timeseries "
+    #     f"WHERE plz={plz} AND profile_type='{profile_type}' "
+    #     f"ORDER BY timestamp"
+    # )
+    # with infdb.connect() as db:
+    #     result = db.execute_query(sql)
+
+    log.warning(
+        f"get_demand_timeseries is a stub – returning empty DataFrame "
+        f"(plz={plz}, profile_type={profile_type})"
+    )
+    return pd.DataFrame(columns=["timestamp", "active_power_kw", "reactive_power_kvar"])
+
