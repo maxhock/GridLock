@@ -1,19 +1,75 @@
-"""Main entry point for the grid federate.
+"""Grid federate entry point.
 
-Each grid federate is launched as its own container/process by
-docker-compose.  It reads its pandapower net from the CST metadata
-store (collection "custom_metadata"), where the infdb
-data setup container wrote it.
+Loads a pandapower net from the CST metadata store and runs a
+HELICS co-simulation loop exchanging load power / bus voltage data.
 
 Usage:
     python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0
 """
 
 import argparse
+import re
 
 import pandapower as pp
+from cosim_toolbox.sims import Federate
 from cosim_toolbox.dbms import create_metadata_manager
-from src.grid import GridFederate
+
+
+# ---------------------------------------------------------------------------
+# GridFederate
+# ---------------------------------------------------------------------------
+
+_LOAD_RE = re.compile(r"/load_(\d+)/")
+
+
+def _parse_load_index(key: str) -> int | None:
+    """Extract pandapower load index from a HELICS key like ``…/load_3/active_power``."""
+    m = _LOAD_RE.search(key)
+    return int(m.group(1)) if m else None
+
+
+class GridFederate(Federate):
+    """Pandapower grid federate. Overrides only ``update_internal_model``."""
+
+    def __init__(self, federate_name: str, net: pp.pandapowerNet) -> None:
+        super().__init__(federate_name)
+        self.net = net
+
+    def update_internal_model(self) -> None:
+        print(f"\n=== Time: {self.granted_time} ===")
+
+        # 1. Apply received load values
+        for key, value in self.data_from_federation.get("inputs", {}).items():
+            idx = _parse_load_index(key)
+            if value is None or idx is None:
+                continue
+            if key.endswith("/active_power"):
+                self.net.load.at[idx, "p_mw"] = float(value)
+            elif key.endswith("/reactive_power"):
+                self.net.load.at[idx, "q_mvar"] = float(value)
+
+        # 2. Run power flow
+        try:
+            pp.runpp(self.net, numba=False)
+            print("Power flow converged.")
+        except Exception as e:
+            print(f"Power flow failed: {e}")
+            return
+
+        # 3. Publish per-load bus voltages
+        for key in self.data_to_federation.get("publications", {}):
+            idx = _parse_load_index(key)
+            if idx is None or not key.endswith("/voltage"):
+                continue
+            bus = int(self.net.load.at[idx, "bus"])
+            v_pu = float(self.net.res_bus.at[bus, "vm_pu"])
+            self.data_to_federation["publications"][key] = v_pu
+            print(f"  Published {key} = {v_pu:.4f} pu")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,8 +136,8 @@ def run_grid_federate(
 ) -> None:
     """Run a single GridFederate lifecycle.
 
-    CST's create_federate() reads the federation/scenario JSONs
-    from meta_store to configure HELICS pub/sub, period, etc.
+    Uses CST's built-in ``run()`` which calls
+    ``create_federate`` → ``run_cosim_loop`` → ``destroy_federate``.
 
     Args:
         federate_name: Unique HELICS federate name.
@@ -89,11 +145,7 @@ def run_grid_federate(
         scenario_name: CST scenario name to look up in meta_store.
     """
     federate = GridFederate(federate_name, net)
-    try:
-        federate.create_federate(scenario_name=scenario_name)
-        federate.run_cosim_loop()
-    finally:
-        federate.destroy_federate()
+    federate.run(scenario_name, use_meta_db="json", use_data_db="csv")
 
 
 def main(

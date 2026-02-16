@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Create mount points and mark them as volumes
 RUN mkdir -p /config /data /app/meta_store
-VOLUME ["/config", "/data", "/app/meta_store"]
+VOLUME ["/data", "/app/meta_store"]
 
 # Install dependencies from requirements.txt
 COPY requirements.txt .
@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY main.py .
-COPY src/ src/
 
 
 # --- Test stage ---

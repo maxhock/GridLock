@@ -59,8 +59,8 @@ class LoadPlayerFederate(Federate):
     def create_federate(
         self,
         scenario_name: str = "",
-        use_meta_db: bool = False,
-        use_data_db: bool = False,
+        use_meta_db: str = "json",
+        use_data_db: str = "csv",
     ) -> None:
         """Create HELICS federate and discover publication keys."""
         super().create_federate(scenario_name, use_meta_db, use_data_db)

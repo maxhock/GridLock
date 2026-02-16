@@ -51,6 +51,9 @@ def run_load_player(
 ) -> None:
     """Run a single LoadPlayerFederate lifecycle.
 
+    Uses CST's built-in ``run()`` which calls
+    ``create_federate`` → ``run_cosim_loop`` → ``destroy_federate``.
+
     Args:
         federate_name: Unique HELICS federate name.
         timeseries_path: Path to the timeseries CSV.
@@ -58,11 +61,7 @@ def run_load_player(
     """
     ts = load_timeseries(timeseries_path)
     federate = LoadPlayerFederate(federate_name, ts)
-    try:
-        federate.create_federate(scenario_name=scenario_name)
-        federate.run_cosim_loop()
-    finally:
-        federate.destroy_federate()
+    federate.run(scenario_name, use_meta_db="json", use_data_db="csv")
 
 
 def main(
