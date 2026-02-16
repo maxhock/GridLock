@@ -123,6 +123,102 @@ def discover_grid_federates(
 
 
 # ---------------------------------------------------------------------------
+# Net introspection helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_load_list(
+    grid_fed_name: str,
+    meta_store_path: str = "meta_store",
+) -> list[tuple[int, str, int]]:
+    """Read pandapower load list from the custom_metadata store.
+
+    Parses the ``net_json`` field written by the infdb step without
+    importing pandapower — the serialised DataFrame is decoded via
+    plain JSON.
+
+    Args:
+        grid_fed_name: Federate name key in custom_metadata
+                       (e.g. ``"lv-grid_91301_0"``).
+        meta_store_path: Path to the meta_store directory.
+
+    Returns:
+        Sorted list of ``(pp_index, load_name, bus)`` tuples.
+        Empty list if the metadata file is missing or has no loads.
+    """
+    custom_path = (
+        Path(meta_store_path) / "custom_metadata" / f"{grid_fed_name}.json"
+    )
+    if not custom_path.exists():
+        print(f"Warning: custom_metadata file {custom_path} not found")
+        return []
+
+    with open(custom_path) as f:
+        meta_data = json.load(f)
+
+    net_json_str = meta_data.get("net_json")
+    if not net_json_str:
+        print(f"Warning: no net_json in {custom_path}")
+        return []
+
+    net_dict = json.loads(net_json_str)
+    load_obj = net_dict.get("_object", {}).get("load", {})
+    load_data_str = load_obj.get("_object")
+    if not load_data_str:
+        return []
+
+    load_df = json.loads(load_data_str)
+    columns: list[str] = load_df["columns"]
+    indices: list[int] = load_df["index"]
+    data: list[list] = load_df["data"]
+
+    name_col = columns.index("name")
+    bus_col = columns.index("bus")
+
+    return [
+        (idx, row[name_col], int(row[bus_col]))
+        for idx, row in zip(indices, data)
+    ]
+
+
+def _resolve_placement(
+    placement,
+    all_loads: list[tuple[int, str, int]],
+) -> list[int]:
+    """Resolve a placement value to a list of pandapower load indices.
+
+    Args:
+        placement: ``"fill"``, a single int, or a list of ints
+                   representing pandapower load indices.
+        all_loads: Full load list from :func:`_read_load_list`.
+
+    Returns:
+        List of valid pandapower load indices.
+
+    Raises:
+        ValueError: If an explicit index does not exist in the net.
+    """
+    valid_indices = {idx for idx, _, _ in all_loads}
+
+    if placement == "fill":
+        return [idx for idx, _, _ in all_loads]
+
+    if isinstance(placement, int):
+        placement = [placement]
+
+    if isinstance(placement, list):
+        for p in placement:
+            if p not in valid_indices:
+                raise ValueError(
+                    f"Placement error: pandapower load index {p} "
+                    f"does not exist in net (valid: {sorted(valid_indices)})"
+                )
+        return list(placement)
+
+    raise ValueError(f"Unsupported placement value: {placement!r}")
+
+
+# ---------------------------------------------------------------------------
 # Pub / sub wiring helpers
 # ---------------------------------------------------------------------------
 
@@ -160,63 +256,47 @@ def _wire_grid_child(
     child_fed_name: str,
     child_local_id: str,
     child_class: str,
+    load_indices: list[int] | None = None,
 ) -> list[str]:
     """Wire pub/sub between a grid federate and one of its children.
 
-    Returns the list of publication keys owned by the *child*
-    (needed for player file generation).
+    When *load_indices* is provided (for ``class: load``), one pub/sub
+    group per pandapower load index is created so that each
+    ``load_{idx}`` appears directly in the HELICS key.  This lets the
+    grid federate map received values to the correct ``net.load`` row
+    without any additional translation table.
+
+    Returns the list of publication keys owned by the *child*.
     """
     child_pub_keys: list[str] = []
 
-    # Grid publishes voltage → child subscribes
-    _add_group(
-        federation,
-        f"{child_local_id}/voltage",
-        pub_fed=grid_fed_name,
-        sub_fed=child_fed_name,
-        dtype="double",
-        unit="V",
-    )
+    if child_class == "load" and load_indices is not None:
+        # ---- Per-load wiring (one group per load per signal) ------------
+        for idx in load_indices:
+            load_id = f"load_{idx}"
 
-    if child_class in ("house", "load", "battery", "pv", "grid"):
-        # Child publishes active_power → grid subscribes
-        _add_group(
-            federation,
-            "active_power",
-            pub_fed=child_fed_name,
-            sub_fed=grid_fed_name,
-            dtype="double",
-            unit="W",
-        )
-        # After dot→slash normalisation the full key becomes
-        # <grid_fed_name>/<child_local_id>/active_power
-        child_pub_keys.append(
-            f"{child_fed_name.replace('.', '/')}/active_power"
-        )
+            _add_group(federation, f"{load_id}/voltage", grid_fed_name, child_fed_name, "double", "V")
+            _add_group(federation, f"{load_id}/active_power", child_fed_name, grid_fed_name, "double", "W")
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/{load_id}/active_power")
+            _add_group(federation, f"{load_id}/reactive_power", child_fed_name, grid_fed_name, "double", "VAr")
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/{load_id}/reactive_power")
 
-        # Child publishes reactive_power → grid subscribes
-        _add_group(
-            federation,
-            "reactive_power",
-            pub_fed=child_fed_name,
-            sub_fed=grid_fed_name,
-            dtype="double",
-            unit="VAr",
+        print(
+            f"    Wired {len(load_indices)} loads: "
+            f"load_{load_indices[0]}..load_{load_indices[-1]}"
         )
-        child_pub_keys.append(
-            f"{child_fed_name.replace('.', '/')}/reactive_power"
-        )
+    else:
+        # ---- Single-group wiring (house, pv, battery, …) ----------------
+        _add_group(federation, f"{child_local_id}/voltage", grid_fed_name, child_fed_name, "double", "V")
 
-    if child_class == "house":
-        # Grid publishes control → house subscribes
-        _add_group(
-            federation,
-            f"{child_local_id}/control",
-            pub_fed=grid_fed_name,
-            sub_fed=child_fed_name,
-            dtype="string",
-            unit="json",
-        )
+        if child_class in ("house", "load", "battery", "pv", "grid"):
+            _add_group(federation, "active_power", child_fed_name, grid_fed_name, "double", "W")
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/active_power")
+            _add_group(federation, "reactive_power", child_fed_name, grid_fed_name, "double", "VAr")
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/reactive_power")
+
+        if child_class == "house":
+            _add_group(federation, f"{child_local_id}/control", grid_fed_name, child_fed_name, "string", "json")
 
     return child_pub_keys
 
@@ -274,6 +354,8 @@ def load(tree: Tree, general_cfg: dict) -> None:
         "csv",
     )
 
+    time_step = general_cfg.get("time_step", 1.0)
+
     # Nodes handled via location expansion – skip in the generic loop
     handled_nodes: set[str] = set()
 
@@ -314,6 +396,9 @@ def load(tree: Tree, general_cfg: dict) -> None:
             print(f"Added grid federate: {fed_name}")
 
             # -- child federates (load, house, …) ----------------------------
+            # Pre-read load list once per grid (needed for placement resolution)
+            all_loads = _read_load_list(fed_name)
+
             for child in children:
                 child_data = child.data
                 child_class = child_data.get("class")
@@ -326,10 +411,21 @@ def load(tree: Tree, general_cfg: dict) -> None:
                 child_fed.config("image", child_mapped["image"])
                 child_fed.config("federate_type", "value")
 
+                # Resolve which pandapower loads this child handles
+                load_indices: list[int] | None = None
+                if child_class == "load" and all_loads:
+                    placement = child_data.get("placement")
+                    load_indices = _resolve_placement(placement, all_loads)
+                    print(
+                        f"  Resolved placement {placement!r} → "
+                        f"{len(load_indices)} load(s)"
+                    )
+
                 # Wire pub/sub between grid and this child
                 _wire_grid_child(
                     federation, fed_name, child_fed_name,
                     child_local_id, child_class,
+                    load_indices=load_indices,
                 )
 
                 # Build command – all child classes are now CST federates
@@ -360,7 +456,6 @@ def load(tree: Tree, general_cfg: dict) -> None:
         if not node_type or node_type == "empty":
             continue
 
-        time_step = general_cfg.get("time_step", 1.0)
         fed = FederateConfig(node.identifier, period=time_step)
 
         federation.add_federate_config(fed)
@@ -383,6 +478,9 @@ def load(tree: Tree, general_cfg: dict) -> None:
     topic_map: dict[str, dict] = {} # topic -> {"publishers": [fed_names], "subscribers": [fed_names], "unit": str, "dtype": str}
     
     for node in tree.all_nodes():
+        if node.identifier in handled_nodes:
+            continue
+
         data = node.data
         node_type = data.get("type")
         
