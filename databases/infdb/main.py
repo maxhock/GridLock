@@ -129,32 +129,6 @@ def write_grid_to_metadata(
     return federate_names
 
 
-def write_manifest(
-    federate_names: list[str],
-    grid_id: str,
-    meta_store_path: str,
-) -> None:
-    """Write manifest.json listing resolved federate names.
-
-    Composegen reads this to know exact federate count and names
-    for generating correct federation JSON and broker -f count.
-
-    Args:
-        federate_names: List of resolved grid federate names.
-        grid_id: Base grid identifier.
-        meta_store_path: Path to meta_store directory.
-    """
-    manifest_path = Path(meta_store_path) / "manifest.json"
-    manifest = {
-        "grid_id": grid_id,
-        "grid_federates": federate_names,
-    }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
-    print(f"Wrote manifest to {manifest_path}")
-
-
 def main(
     experiment_path: str | None = None,
     meta_store_path: str | None = None,
@@ -200,9 +174,6 @@ def main(
     # 3. Write nets to CST metadata store
     print("Writing grids to CST metadata store...")
     federate_names = write_grid_to_metadata(grid_id, net_list, meta_store_path)
-
-    # 4. Write manifest for composegen
-    write_manifest(federate_names, grid_id, meta_store_path)
 
     print(f"=== data setup complete: {len(federate_names)} grid federate(s) resolved ===")
 
