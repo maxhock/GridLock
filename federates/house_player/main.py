@@ -61,7 +61,7 @@ def run_load_player(
     """
     ts = load_timeseries(timeseries_path)
     federate = LoadPlayerFederate(federate_name, ts)
-    federate.run(scenario_name, use_meta_db="json", use_data_db="csv")
+    federate.run(scenario_name, use_meta_db="mongo", use_data_db="postgres")
 
 
 def main(

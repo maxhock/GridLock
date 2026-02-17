@@ -350,8 +350,8 @@ def load(tree: Tree, general_cfg: dict) -> None:
         f"{name}Analysis",
         f"{name}Federation",
         True,
-        "json",
-        "csv",
+        "mongo",
+        "postgres",
     )
 
     time_step = general_cfg.get("time_step", 1.0)

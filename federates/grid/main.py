@@ -145,7 +145,7 @@ def run_grid_federate(
         scenario_name: CST scenario name to look up in meta_store.
     """
     federate = GridFederate(federate_name, net)
-    federate.run(scenario_name, use_meta_db="json", use_data_db="csv")
+    federate.run(scenario_name, use_meta_db="mongo", use_data_db="postgres")
 
 
 def main(
