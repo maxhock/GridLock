@@ -1,6 +1,9 @@
 import cosim_toolbox as env
-from cosim_toolbox.sims import DockerRunner
+from cosim_toolbox.sims import DockerRunner, FederateConfig
 from cosim_toolbox.dbms import create_metadata_manager
+
+# Broker is always the first service at 10.5.0.2 in the Docker network.
+BROKER_IP = "10.5.0.2"
 
 
 def _service(
@@ -127,7 +130,24 @@ def define_yaml(
         op.write(yaml_str)
 
 
+def _federate_docker(self, address: int = 0) -> None:
+    """Override: fix broker_address and set local_interface for Docker networking.
+
+    The upstream CST implementation sets ``broker_address`` to the
+    federate's own container IP.  Per HELICS docs:
+
+    - ``broker_address``: IP a federate should use to contact *its parent broker*
+    - ``local_interface``: IP the rest of the federation should use to contact *this federate*
+
+    CST was writing the federate IP into the wrong field.
+    """
+    if address > 0:
+        self.helics.config("broker_address", BROKER_IP)
+        self.helics.config("local_interface", f"10.5.0.{address}")
+
+
 def apply_monkeypatches() -> None:
-    """Apply monkey patches to CST DockerRunner."""
+    """Apply monkey patches to CST DockerRunner and FederateConfig."""
     DockerRunner._service = staticmethod(_service)
     DockerRunner.define_yaml = staticmethod(define_yaml)
+    FederateConfig.docker = _federate_docker

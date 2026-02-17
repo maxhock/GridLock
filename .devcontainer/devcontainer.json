@@ -23,8 +23,13 @@
 	"features": {
 		"ghcr.io/devcontainers/features/git:1": {
 			"ppa": true
-		}
+		},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
 	},
+
+	// Run preflight (infdb + composegen) on the HOST before building containers.
+	// This populates meta_store/ (federation/scenario JSON + docker-compose YAML) and data/.
+	"initializeCommand": "bash ${localWorkspaceFolder}/preflight.sh",
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
