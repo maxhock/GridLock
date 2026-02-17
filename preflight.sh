@@ -15,7 +15,7 @@ docker run --rm \
   -v "$(pwd)/databases/infdb/configs:/app/configs:ro" \
   -v "$(pwd)/meta_store:/app/meta_store" \
   -v "$(pwd)/config:/config:ro" \
-  ${INFDB_ENV_FILE:+--env-file "$INFDB_ENV_FILE"} \
+  --env-file "$(pwd)/databases/infdb/.env" \
   --add-host=host.docker.internal:host-gateway \
   infdb
 
