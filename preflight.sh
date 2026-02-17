@@ -12,8 +12,8 @@ cd "$SCRIPT_DIR"
 echo "=== Preflight Step 1: infdb data setup ==="
 docker build -f ./databases/infdb/Dockerfile -t infdb databases/infdb
 docker run --rm \
-  -v "$(pwd)/databases/infdb/configs:/workspaces/infdb/configs:ro" \
-  -v "$(pwd)/meta_store:/workspaces/infdb/meta_store" \
+  -v "$(pwd)/databases/infdb/configs:/app/configs:ro" \
+  -v "$(pwd)/meta_store:/app/meta_store" \
   -v "$(pwd)/config:/config:ro" \
   ${INFDB_ENV_FILE:+--env-file "$INFDB_ENV_FILE"} \
   --add-host=host.docker.internal:host-gateway \
