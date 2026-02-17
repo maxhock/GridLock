@@ -4,13 +4,13 @@ infdb:
         path: "infdb.log"
         level: "INFO" # ERROR, WARNING, INFO, DEBUG
     hosts:
-        postgres:
-            user: infdb_user
-            password: infdb
-            db: infdb
-            host: localhost
-            exposed_port: 54329
-            epsg: 25832
+        postgres: # "None" values are resolved from .env (SERVICES_POSTGRES_*)
+            user: "None"
+            password: "None"
+            db: "None"
+            host: "None"
+            exposed_port: "None"
+            epsg: "None"
     data:
         plz: 91301
         kcid: 1 # optional: filter by specific kcid
