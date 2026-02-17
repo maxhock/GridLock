@@ -4,7 +4,7 @@ FROM python:3.11-slim AS base
 WORKDIR /app
 
 # Create mount points and mark them as volumes
-RUN mkdir -p /config /data /app/meta_store
+RUN mkdir -p /data /app/meta_store
 VOLUME ["/data", "/app/meta_store"]
 
 # Install dependencies from requirements.txt
