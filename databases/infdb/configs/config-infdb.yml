@@ -11,8 +11,3 @@ infdb:
             host: "None"
             exposed_port: "None"
             epsg: "None"
-    data:
-        plz: 91301
-        kcid: 1 # optional: filter by specific kcid
-        bcid: 1 # optional: filter by specific bcid
-        output_dir: "data/output"
