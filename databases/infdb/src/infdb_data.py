@@ -56,8 +56,8 @@ def resolve_grid_queries(
     """Resolve location queries into named pandapower nets.
 
     Each query dict must contain 'plz' and may optionally contain
-    'kcid' and 'bcid' for further filtering.  Federate names follow
-    the pattern ``{grid_id}_{plz}_{sequential_index}``.
+    'kcid' and 'bcid' for further filtering. Federate names follow
+    the pattern ``{grid_id}_{plz}_{kcid}_{bcid}``.
 
     Args:
         infdb: InfDB client instance.
@@ -69,7 +69,7 @@ def resolve_grid_queries(
         List of (federate_name, pandapower_net) tuples.
     """
     net_list: list[tuple[str, pp.pandapowerNet]] = []
-    counters: dict[int, int] = {}  # plz -> next index
+    seen_federate_names: set[str] = set()
 
     for query in queries:
         plz = query["plz"]
@@ -85,17 +85,22 @@ def resolve_grid_queries(
             + f" → {len(net_df)} grid(s)"
         )
 
-        if plz not in counters:
-            counters[plz] = 0
-
         for _, row in net_df.iterrows():
             grid_json = json.dumps(row["grid"])
             net = pp.from_json_string(grid_json)
-            idx = counters[plz]
-            federate_name = f"{grid_id}_{plz}_{idx}"
+
+            row_kcid = int(row["kcid"])
+            row_bcid = int(row["bcid"])
+            federate_name = f"{grid_id}_{plz}_{row_kcid}_{row_bcid}"
+            if federate_name in seen_federate_names:
+                raise ValueError(
+                    f"Duplicate resolved federate name '{federate_name}'. "
+                    "Check location query result uniqueness for (plz, kcid, bcid)."
+                )
+            seen_federate_names.add(federate_name)
+
             net_list.append((federate_name, net))
             log.info(f"  Resolved {federate_name} ({len(net.bus)} buses)")
-            counters[plz] = idx + 1
 
     return net_list
 
