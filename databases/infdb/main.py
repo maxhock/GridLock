@@ -12,6 +12,7 @@ Manifest   → meta_store/manifest.json (federate names for composegen)
 import argparse
 import json
 from pathlib import Path
+import pandapower as pp
 
 import yaml
 from infdb import InfDB
@@ -59,7 +60,8 @@ def extract_grid_config(experiment_path: str) -> dict:
         experiment_path: Path to experiment YAML file.
 
     Returns:
-        Dict with grid_id (str) and location (list of query dicts).
+        Dict with grid_id (str), location (list of query dicts),
+        and use_meta_db (str).
 
     Raises:
         FileNotFoundError: If experiment file doesn't exist.
@@ -72,10 +74,12 @@ def extract_grid_config(experiment_path: str) -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
 
+    general = cfg.get("general", {})
     federation = cfg.get("federation", {})
     grid_id = federation.get("id", "grid")
     config = federation.get("config", {})
     location = config.get("location")
+    use_meta_db = general.get("use_meta_db", "json")
 
     if not location:
         raise ValueError(
@@ -83,13 +87,18 @@ def extract_grid_config(experiment_path: str) -> dict:
             f"at federation.config.location"
         )
 
-    return {"grid_id": grid_id, "location": location}
+    return {
+        "grid_id": grid_id,
+        "location": location,
+        "use_meta_db": use_meta_db,
+    }
 
 
 def write_grid_to_metadata(
     grid_id: str,
     net_list: list,
     meta_store_path: str,
+    use_meta_db: str,
 ) -> list[str]:
     """Write resolved pandapower nets to CST metadata store.
 
@@ -100,13 +109,16 @@ def write_grid_to_metadata(
         grid_id: Base grid identifier (e.g. "lv-grid").
         net_list: List of (federate_name, pandapower_net) tuples.
         meta_store_path: Path to meta_store directory.
+        use_meta_db: Metadata backend type from experiment config.
 
     Returns:
         List of federate names that were written.
     """
-    import pandapower as pp
+    md_kwargs = {"backend": use_meta_db}
+    if use_meta_db == "json":
+        md_kwargs["location"] = meta_store_path
 
-    md_mgr = create_metadata_manager(backend="json", location=meta_store_path)
+    md_mgr = create_metadata_manager(**md_kwargs)
     md_mgr.connect()
 
     federate_names: list[str] = []
@@ -152,6 +164,7 @@ def main(
     grid_config = extract_grid_config(experiment_path)
     grid_id = grid_config["grid_id"]
     location = grid_config["location"]
+    use_meta_db = grid_config["use_meta_db"]
     print(f"Grid '{grid_id}': {len(location)} location query(ies)")
 
     # 2. Connect to InfDB and resolve queries
@@ -172,8 +185,13 @@ def main(
     infdb.stop_logger()
 
     # 3. Write nets to CST metadata store
-    print("Writing grids to CST metadata store...")
-    federate_names = write_grid_to_metadata(grid_id, net_list, meta_store_path)
+    print(f"Writing grids to CST metadata store (backend={use_meta_db})...")
+    federate_names = write_grid_to_metadata(
+        grid_id,
+        net_list,
+        meta_store_path,
+        use_meta_db,
+    )
 
     print(f"=== data setup complete: {len(federate_names)} grid federate(s) resolved ===")
 
