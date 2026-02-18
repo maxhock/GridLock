@@ -12,7 +12,9 @@ federation:
   class: "grid"
   config:
     location:
-      - plz: 91301  # all grids for this PLZ
+      - plz: 91301
+        kcid: 1
+        bcid: 10
   sub_federates:
     - id: "loadhouse_0"
       name: "Load profile house"
