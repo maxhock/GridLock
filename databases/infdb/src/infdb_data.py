@@ -5,6 +5,7 @@ pylovo schema and resolve experiment location queries into named
 (federate_name, net) tuples.
 """
 
+import json
 import pandas as pd
 import pandapower as pp
 from typing import Optional
@@ -88,7 +89,8 @@ def resolve_grid_queries(
             counters[plz] = 0
 
         for _, row in net_df.iterrows():
-            net = pp.from_json_string(row["grid"])
+            grid_json = json.dumps(row["grid"])
+            net = pp.from_json_string(grid_json)
             idx = counters[plz]
             federate_name = f"{grid_id}_{plz}_{idx}"
             net_list.append((federate_name, net))
