@@ -7,6 +7,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+INFDB_ENV_FILE="${INFDB_ENV_FILE:-$(pwd)/databases/infdb/.env}"
+
+if [ ! -f "$INFDB_ENV_FILE" ]; then
+  echo "Error: INFDB env file not found: $INFDB_ENV_FILE"
+  exit 1
+fi
 
 # Step 1: Run infdb data setup to resolve grids and write to CST metadata store
 echo "=== Preflight Step 1: infdb data setup ==="
@@ -15,7 +21,7 @@ docker run --rm \
   -v "$(pwd)/databases/infdb/configs:/app/configs:ro" \
   -v "$(pwd)/meta_store:/app/meta_store" \
   -v "$(pwd)/config:/config:ro" \
-  --env-file "$(pwd)/databases/infdb/.env" \
+  --env-file "$INFDB_ENV_FILE" \
   --add-host=host.docker.internal:host-gateway \
   infdb
 

@@ -8,6 +8,6 @@ infdb:
             user: "None"
             password: "None"
             db: "None"
-            host: "None"
-            exposed_port: "None"
+            host: "10.162.28.40"
+            exposed_port: 54323
             epsg: "None"
