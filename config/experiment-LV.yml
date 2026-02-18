@@ -20,7 +20,7 @@ federation:
       name: "Load profile house"
       class: "load"
       config:
-        placement: [1, 2, 3]  # pandapower load indices; use "fill" for all loads
+        placement: "fill"  # pandapower load indices; use "fill" for all loads
         electrical_load: "H0" # "H25", "electricloadcurve.csv"
         heat_load: "" # "heatloadcurve.csv"
     # - id: "house_0"

@@ -18,13 +18,20 @@
 	// The optional 'workspaceFolder' property is the path VS Code should open by default when
 	// connected. This is typically a file mount in .devcontainer/docker-compose.yml
 	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	// Exposed to scripts (preflight.sh) so docker bind sources can be resolved
+	// against host-visible paths when running with docker-outside-of-docker.
+	"remoteEnv": {
+		"HOST_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+	},
 	
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/git:1": {
 			"ppa": true
 		},
-		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"moby": false
+		}
 	},
 
 	// Run preflight (infdb + composegen) on the HOST before building containers.
