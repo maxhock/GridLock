@@ -4,6 +4,8 @@ general:
  end_time: 86400
  time_step: 300
  duration: 86400
+ use_meta_db: "json"
+ use_data_db: "postgres"
 federation:
   id: "lv-grid"
   name: "LowVoltageGrid"

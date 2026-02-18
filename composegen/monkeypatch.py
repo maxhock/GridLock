@@ -83,6 +83,8 @@ def define_yaml(
         '      POSTGRES_HOST: "' + env.cst_pg_host + '"\n'
         '      MONGO_HOST: "' + env.cst_mg_host + '"\n'
         '      MONGO_PORT: "' + env.cst_mg_port + '"\n'
+        '      CST_USE_META_DB: "' + use_meta_db + '"\n'
+        '      CST_USE_DATA_DB: "' + use_data_db + '"\n'
     )
     # Add helics broker federate
     cnt = 2

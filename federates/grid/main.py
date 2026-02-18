@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import os
 import re
 
 import pandapower as pp
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments.
 
     Returns:
-        Namespace with scenario (str) and federate_name (str).
+        Namespace with scenario and federate_name.
     """
     parser = argparse.ArgumentParser(description="Grid federate using CST")
     parser.add_argument(
@@ -95,7 +96,24 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def load_net_from_metadata(federate_name: str) -> pp.pandapowerNet:
+def get_db_backends_from_env() -> tuple[str, str]:
+    """Read DB backends from environment variables set by composegen."""
+    use_meta_db = os.getenv("CST_USE_META_DB")
+    use_data_db = os.getenv("CST_USE_DATA_DB")
+
+    if not use_meta_db or not use_data_db:
+        raise ValueError(
+            "Missing DB backend env vars. Expected CST_USE_META_DB and "
+            "CST_USE_DATA_DB from experiment general config."
+        )
+
+    return use_meta_db, use_data_db
+
+
+def load_net_from_metadata(
+    federate_name: str,
+    use_meta_db: str = "json",
+) -> pp.pandapowerNet:
     """Load a pandapower net from the CST metadata store.
 
     The infdb data setup container writes each grid's JSON
@@ -111,7 +129,11 @@ def load_net_from_metadata(federate_name: str) -> pp.pandapowerNet:
     Raises:
         FileNotFoundError: If no custom_metadata entry exists for this name.
     """
-    md_mgr = create_metadata_manager(backend="json", location="meta_store")
+    md_kwargs = {"backend": use_meta_db}
+    if use_meta_db == "json":
+        md_kwargs["location"] = "meta_store"
+
+    md_mgr = create_metadata_manager(**md_kwargs)
     md_mgr.connect()
     try:
         data = md_mgr.read("custom_metadata", federate_name)
@@ -133,6 +155,8 @@ def run_grid_federate(
     federate_name: str,
     net: pp.pandapowerNet,
     scenario_name: str,
+    use_meta_db: str,
+    use_data_db: str,
 ) -> None:
     """Run a single GridFederate lifecycle.
 
@@ -143,9 +167,15 @@ def run_grid_federate(
         federate_name: Unique HELICS federate name.
         net: pandapower network object for this grid.
         scenario_name: CST scenario name to look up in meta_store.
+        use_meta_db: Metadata backend type.
+        use_data_db: Data backend type.
     """
     federate = GridFederate(federate_name, net)
-    federate.run(scenario_name, use_meta_db="mongo", use_data_db="postgres")
+    federate.run(
+        scenario_name,
+        use_meta_db=use_meta_db,
+        use_data_db=use_data_db,
+    )
 
 
 def main(
@@ -163,8 +193,16 @@ def main(
         scenario_name = args.scenario
         federate_name = args.federate_name
 
-    net = load_net_from_metadata(federate_name)
-    run_grid_federate(federate_name, net, scenario_name)
+    use_meta_db, use_data_db = get_db_backends_from_env()
+
+    net = load_net_from_metadata(federate_name, use_meta_db)
+    run_grid_federate(
+        federate_name,
+        net,
+        scenario_name,
+        use_meta_db,
+        use_data_db,
+    )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import os
 
 from src.load_player import LoadPlayerFederate, load_timeseries
 
@@ -44,10 +45,26 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+def get_db_backends_from_env() -> tuple[str, str]:
+    """Read DB backends from environment variables set by composegen."""
+    use_meta_db = os.getenv("CST_USE_META_DB")
+    use_data_db = os.getenv("CST_USE_DATA_DB")
+
+    if not use_meta_db or not use_data_db:
+        raise ValueError(
+            "Missing DB backend env vars. Expected CST_USE_META_DB and "
+            "CST_USE_DATA_DB from experiment general config."
+        )
+
+    return use_meta_db, use_data_db
+
+
 def run_load_player(
     federate_name: str,
     timeseries_path: str,
     scenario_name: str,
+    use_meta_db: str,
+    use_data_db: str,
 ) -> None:
     """Run a single LoadPlayerFederate lifecycle.
 
@@ -58,10 +75,16 @@ def run_load_player(
         federate_name: Unique HELICS federate name.
         timeseries_path: Path to the timeseries CSV.
         scenario_name: CST scenario name to look up in meta_store.
+        use_meta_db: Metadata backend type.
+        use_data_db: Data backend type.
     """
     ts = load_timeseries(timeseries_path)
     federate = LoadPlayerFederate(federate_name, ts)
-    federate.run(scenario_name, use_meta_db="mongo", use_data_db="postgres")
+    federate.run(
+        scenario_name,
+        use_meta_db=use_meta_db,
+        use_data_db=use_data_db,
+    )
 
 
 def main(
@@ -82,7 +105,15 @@ def main(
         federate_name = args.federate_name
         timeseries_path = args.timeseries
 
-    run_load_player(federate_name, timeseries_path, scenario_name)
+    use_meta_db, use_data_db = get_db_backends_from_env()
+
+    run_load_player(
+        federate_name,
+        timeseries_path,
+        scenario_name,
+        use_meta_db,
+        use_data_db,
+    )
 
 
 if __name__ == "__main__":

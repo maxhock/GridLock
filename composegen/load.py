@@ -345,13 +345,16 @@ def load(tree: Tree, general_cfg: dict) -> None:
         general_cfg: Processed general configuration dict.
     """
     name = general_cfg.get("name", "GridLock")
+    use_meta_db = general_cfg.get("use_meta_db", "json")
+    use_data_db = general_cfg.get("use_data_db", "postgres")
+
     federation = FederationConfig(
         f"{name}Scenario",
         f"{name}Analysis",
         f"{name}Federation",
         True,
-        "mongo",
-        "postgres",
+        use_meta_db,
+        use_data_db,
     )
 
     time_step = general_cfg.get("time_step", 1.0)
@@ -563,7 +566,11 @@ def load(tree: Tree, general_cfg: dict) -> None:
         # Normalize dots to slashes in all HELICS keys
         normalize_federation_keys(federation.federation_name)
         
-        DockerRunner.define_yaml(federation.scenario_name, use_meta_db="json")
+        DockerRunner.define_yaml(
+            federation.scenario_name,
+            use_meta_db=use_meta_db,
+            use_data_db=use_data_db,
+        )
         print("Success: Federation configuration and docker-compose.yml generated.")
     except Exception as e:
         print(f"Error generating config: {e}")
