@@ -2,6 +2,7 @@ import traceback
 import json
 from pathlib import Path
 from treelib import Tree
+from cosim_toolbox.dbms import create_metadata_manager
 from cosim_toolbox.sims import (
     FederationConfig,
     FederateConfig,
@@ -15,6 +16,17 @@ from monkeypatch import apply_monkeypatches
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _create_metadata_manager(
+    use_meta_db: str,
+    meta_store_path: str = "meta_store",
+):
+    """Create CST metadata manager with backend-specific options."""
+    kwargs = {"backend": use_meta_db}
+    if use_meta_db == "json":
+        kwargs["location"] = meta_store_path
+    return create_metadata_manager(**kwargs)
 
 
 def map_params_to_class(federate_class: str) -> dict:
@@ -55,40 +67,45 @@ def map_params_to_class(federate_class: str) -> dict:
     )
 
 
-def normalize_federation_keys(federation_name: str) -> None:
-    """Post-process federation JSON to replace dots with slashes in all HELICS keys.        
-    Args:
-        federation_name: Name of the federation file to process.
-    """
-    federation_path = Path("meta_store/federations") / f"{federation_name}.json"        
-    if not federation_path.exists():
-        print(f"Warning: Federation file {federation_path} not found for normalization")
-        return    
-    # Read the federation config
-    with open(federation_path, "r") as f:
-        config = json.load(f)    
-    # Process all federates
-    if "federation" in config:
-        for _fed_name, fed_config in config["federation"].items():
-            if "HELICS_config" in fed_config:
-                helics_cfg = fed_config["HELICS_config"]
+def normalize_federation_keys(
+    federation_name: str,
+    use_meta_db: str,
+    meta_store_path: str = "meta_store",
+) -> None:
+    """Normalize HELICS keys in federation metadata for json or mongo backend."""
+    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+        config = mgr.read_federation(federation_name)
+        if not config:
+            print(
+                f"Warning: Federation '{federation_name}' not found "
+                f"in metadata backend '{use_meta_db}'"
+            )
+            return
 
-                for pub in helics_cfg.get("publications", []):
-                    if "key" in pub:
-                        pub["key"] = pub["key"].replace(".", "/")
+        if "federation" in config:
+            for _fed_name, fed_config in config["federation"].items():
+                if "HELICS_config" in fed_config:
+                    helics_cfg = fed_config["HELICS_config"]
 
-                for sub in helics_cfg.get("subscriptions", []):
-                    if "key" in sub:
-                        sub["key"] = sub["key"].replace(".", "/")
+                    for pub in helics_cfg.get("publications", []):
+                        if "key" in pub:
+                            pub["key"] = pub["key"].replace(".", "/")
 
-    with open(federation_path, "w") as f:
-        json.dump(config, f, indent=2)
+                    for sub in helics_cfg.get("subscriptions", []):
+                        if "key" in sub:
+                            sub["key"] = sub["key"].replace(".", "/")
 
-    print(f"Normalized HELICS keys in {federation_path}")
+        mgr.write_federation(federation_name, config, overwrite=True)
+
+    print(
+        f"Normalized HELICS keys in federation '{federation_name}' "
+        f"(backend={use_meta_db})"
+    )
 
 
 def discover_grid_federates(
     grid_id: str,
+    use_meta_db: str,
     meta_store_path: str = "meta_store",
 ) -> list[str]:
     """Discover resolved grid federate names from the CST metadata store.
@@ -103,23 +120,17 @@ def discover_grid_federates(
         meta_store_path: Path to the meta_store directory.
 
     Returns:
-        Sorted list of federate name strings (e.g. ["lv-grid_91301_0"]).
+        Sorted list of federate name strings
+        (e.g. ["lv-grid_91301_1_4"]).
     """
-    custom_dir = Path(meta_store_path) / "custom_metadata"
-    if not custom_dir.exists():
-        return []
-
     federate_names: list[str] = []
-    for json_file in sorted(custom_dir.glob("*.json")):
-        try:
-            with open(json_file) as f:
-                data = json.load(f)
-            if data.get("grid_id") == grid_id:
-                federate_names.append(json_file.stem)
-        except (json.JSONDecodeError, KeyError):
-            continue
+    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+        for meta_name in mgr.list_items("custom_metadata"):
+            data = mgr.read("custom_metadata", meta_name)
+            if data and data.get("grid_id") == grid_id:
+                federate_names.append(meta_name)
 
-    return federate_names
+    return sorted(federate_names)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +140,7 @@ def discover_grid_federates(
 
 def _read_load_list(
     grid_fed_name: str,
+    use_meta_db: str,
     meta_store_path: str = "meta_store",
 ) -> list[tuple[int, str, int]]:
     """Read pandapower load list from the custom_metadata store.
@@ -139,26 +151,30 @@ def _read_load_list(
 
     Args:
         grid_fed_name: Federate name key in custom_metadata
-                       (e.g. ``"lv-grid_91301_0"``).
+                       (e.g. ``"lv-grid_91301_1_4"``).
         meta_store_path: Path to the meta_store directory.
 
     Returns:
         Sorted list of ``(pp_index, load_name, bus)`` tuples.
         Empty list if the metadata file is missing or has no loads.
     """
-    custom_path = (
-        Path(meta_store_path) / "custom_metadata" / f"{grid_fed_name}.json"
-    )
-    if not custom_path.exists():
-        print(f"Warning: custom_metadata file {custom_path} not found")
+    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+        meta_data = mgr.read("custom_metadata", grid_fed_name)
+    if not meta_data:
+        print(
+            f"Warning: custom_metadata '{grid_fed_name}' not found "
+            f"in backend '{use_meta_db}'"
+        )
         return []
 
-    with open(custom_path) as f:
-        meta_data = json.load(f)
-
-    net_json_str = meta_data.get("net_json")
+    net_json_raw = meta_data.get("net_json")
+    net_json_str = (
+        json.dumps(net_json_raw)
+        if isinstance(net_json_raw, dict)
+        else net_json_raw
+    )
     if not net_json_str:
-        print(f"Warning: no net_json in {custom_path}")
+        print(f"Warning: no net_json in custom_metadata '{grid_fed_name}'")
         return []
 
     net_dict = json.loads(net_json_str)
@@ -370,7 +386,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
             continue
 
         grid_tree_id = node.identifier
-        grid_fed_names = discover_grid_federates(grid_tree_id)
+        grid_fed_names = discover_grid_federates(grid_tree_id, use_meta_db)
         if not grid_fed_names:
             print(
                 f"Warning: Grid '{grid_tree_id}' uses location queries but "
@@ -400,7 +416,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
 
             # -- child federates (load, house, …) ----------------------------
             # Pre-read load list once per grid (needed for placement resolution)
-            all_loads = _read_load_list(fed_name)
+            all_loads = _read_load_list(fed_name, use_meta_db)
 
             for child in children:
                 child_data = child.data
@@ -564,7 +580,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
         federation.write_config(start_str, end_str)
         
         # Normalize dots to slashes in all HELICS keys
-        normalize_federation_keys(federation.federation_name)
+        normalize_federation_keys(federation.federation_name, use_meta_db)
         
         DockerRunner.define_yaml(
             federation.scenario_name,

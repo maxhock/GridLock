@@ -22,6 +22,8 @@ docker run --rm \
   -v "$(pwd)/meta_store:/app/meta_store" \
   -v "$(pwd)/config:/config:ro" \
   --env-file "$INFDB_ENV_FILE" \
+  -e MONGO_HOST="${MONGO_HOST:-mongodb://host.docker.internal}" \
+  -e MONGO_PORT="${MONGO_PORT:-27017}" \
   --add-host=host.docker.internal:host-gateway \
   infdb
 
@@ -32,6 +34,9 @@ docker run --rm \
   -v "$(pwd)/config:/config" \
   -v "$(pwd)/data:/data" \
   -v "$(pwd)/meta_store:/app/meta_store" \
+  -e MONGO_HOST="${MONGO_HOST:-mongodb://host.docker.internal}" \
+  -e MONGO_PORT="${MONGO_PORT:-27017}" \
+  --add-host=host.docker.internal:host-gateway \
   composegen
 
 echo "=== Preflight complete ==="
