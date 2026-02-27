@@ -11,7 +11,7 @@
 
 	// The 'service' property is the name of the service for the container that VS Code should
 	// use. Update this value and .devcontainer/docker-compose.yml to the real service name.
-	"service": "lv-grid_0",
+	"service": "lv-grid_1_4",
 
 	"mounts": ["source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind"],
 
