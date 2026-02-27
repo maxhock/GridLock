@@ -7,7 +7,6 @@ pylovo schema and resolve experiment location queries into named
 
 import json
 import pandas as pd
-import pandapower as pp
 from typing import Optional
 
 
@@ -47,17 +46,42 @@ def get_pylovo_grid(
     return net_df
 
 
+def _net_table_count(net_json: dict | str, table: str) -> int:
+    """Count rows in a pandapower DataFrame table from its serialised JSON.
+
+    Pandapower serialises each DataFrame as
+    ``{"_object": {"<table>": {"_object": "<json-encoded DataFrame>"}}}``.
+    We read the index length directly without importing pandapower.
+
+    Args:
+        net_json: Pandapower net serialised as a dict or JSON string.
+        table: Table name (e.g. 'bus', 'load', 'ext_grid').
+
+    Returns:
+        Number of rows, or 0 if the table is absent or empty.
+    """
+    d = json.loads(net_json) if isinstance(net_json, str) else net_json
+    inner = d.get("_object", {}).get(table, {}).get("_object", None)
+    if not inner:
+        return 0
+    df = json.loads(inner) if isinstance(inner, str) else inner
+    return len(df.get("index", []))
+
+
 def resolve_grid_queries(
     infdb,
     log,
     grid_id: str,
     queries: list[dict],
-) -> list[tuple[str, pp.pandapowerNet]]:
-    """Resolve location queries into named pandapower nets.
+) -> list[tuple[str, str]]:
+    """Resolve location queries into named pandapower net JSON strings.
 
     Each query dict must contain 'plz' and may optionally contain
     'kcid' and 'bcid' for further filtering. Federate names follow
     the pattern ``{grid_id}_{plz}_{kcid}_{bcid}``.
+
+    The raw grid JSON from InfDB is passed through without deserialising
+    into a pandapower object, avoiding the heavy pandapower dependency.
 
     Args:
         infdb: InfDB client instance.
@@ -66,9 +90,9 @@ def resolve_grid_queries(
         queries: List of query dicts from experiment.yml location.
 
     Returns:
-        List of (federate_name, pandapower_net) tuples.
+        List of (federate_name, net_json_str) tuples.
     """
-    net_list: list[tuple[str, pp.pandapowerNet]] = []
+    net_list: list[tuple[str, str]] = []
     seen_federate_names: set[str] = set()
 
     for query in queries:
@@ -86,8 +110,7 @@ def resolve_grid_queries(
         )
 
         for _, row in net_df.iterrows():
-            grid_json = json.dumps(row["grid"])
-            net = pp.from_json_string(grid_json)
+            net_json_str = json.dumps(row["grid"])
 
             row_kcid = int(row["kcid"])
             row_bcid = int(row["bcid"])
@@ -99,8 +122,9 @@ def resolve_grid_queries(
                 )
             seen_federate_names.add(federate_name)
 
-            net_list.append((federate_name, net))
-            log.info(f"  Resolved {federate_name} ({len(net.bus)} buses)")
+            bus_count = _net_table_count(row["grid"], "bus")
+            net_list.append((federate_name, net_json_str))
+            log.info(f"  Resolved {federate_name} ({bus_count} buses)")
 
     return net_list
 

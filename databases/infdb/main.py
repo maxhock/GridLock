@@ -12,7 +12,6 @@ Manifest   → meta_store/manifest.json (federate names for composegen)
 import argparse
 import json
 from pathlib import Path
-import pandapower as pp
 
 import yaml
 from infdb import InfDB
@@ -96,24 +95,27 @@ def extract_grid_config(experiment_path: str) -> dict:
 
 def write_grid_to_metadata(
     grid_id: str,
-    net_list: list,
+    net_list: list[tuple[str, str]],
     meta_store_path: str,
     use_meta_db: str,
 ) -> list[str]:
-    """Write resolved pandapower nets to CST metadata store.
+    """Write resolved pandapower net JSON strings to CST metadata store.
 
     Each net is stored as a JSON string in the "custom_metadata"
-    collection, keyed by its federate name.
+    collection, keyed by its federate name.  Counts are extracted
+    directly from the raw JSON without importing pandapower.
 
     Args:
         grid_id: Base grid identifier (e.g. "lv-grid").
-        net_list: List of (federate_name, pandapower_net) tuples.
+        net_list: List of (federate_name, net_json_str) tuples.
         meta_store_path: Path to meta_store directory.
         use_meta_db: Metadata backend type from experiment config.
 
     Returns:
         List of federate names that were written.
     """
+    from src.infdb_data import _net_table_count
+
     md_kwargs = {"backend": use_meta_db}
     if use_meta_db == "json":
         md_kwargs["location"] = meta_store_path
@@ -123,18 +125,18 @@ def write_grid_to_metadata(
 
     federate_names: list[str] = []
     try:
-        for federate_name, net in net_list:
-            net_json_str = pp.to_json(net)
+        for federate_name, net_json_str in net_list:
+            bus_count = _net_table_count(net_json_str, "bus")
             data = {
                 "grid_id": grid_id,
                 "net_json": net_json_str,
-                "bus_count": len(net.bus),
-                "load_count": len(net.load),
-                "ext_grid_count": len(net.ext_grid),
+                "bus_count": bus_count,
+                "load_count": _net_table_count(net_json_str, "load"),
+                "ext_grid_count": _net_table_count(net_json_str, "ext_grid"),
             }
             md_mgr.write("custom_metadata", federate_name, data, overwrite=True)
             federate_names.append(federate_name)
-            print(f"  Stored {federate_name} ({len(net.bus)} buses)")
+            print(f"  Stored {federate_name} ({bus_count} buses)")
     finally:
         md_mgr.disconnect()
 
