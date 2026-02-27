@@ -44,9 +44,34 @@ if [ ! -f "$INFDB_ENV_FILE" ]; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Build helpers
+#
+# Images are only (re)built when:
+#   a) the image does not yet exist locally, OR
+#   b) FORCE_REBUILD=1 is set in the environment.
+#
+# This means changes to experiment-LV.yml never trigger a rebuild
+# (the config is always mounted, never baked into the image).
+# Set FORCE_REBUILD=1 when you have changed code inside composegen/
+# or databases/infdb/ and need a fresh image.
+# ---------------------------------------------------------------------------
+
+_build_if_needed() {
+  local tag="$1"
+  local dockerfile="$2"
+  local context="$3"
+  if [ "${FORCE_REBUILD:-0}" = "1" ] || ! docker image inspect "$tag" >/dev/null 2>&1; then
+    echo "  Building image '$tag'..."
+    docker build -f "$dockerfile" -t "$tag" "$context"
+  else
+    echo "  Image '$tag' exists – skipping build (set FORCE_REBUILD=1 to rebuild)."
+  fi
+}
+
 # Step 1: Run infdb data setup to resolve grids and write to CST metadata store
 echo "=== Preflight Step 1: infdb data setup ==="
-docker build -f ./databases/infdb/Dockerfile -t infdb databases/infdb
+_build_if_needed infdb ./databases/infdb/Dockerfile databases/infdb
 docker run --rm \
   -v "$WORKSPACE_BIND_ROOT/databases/infdb/configs:/app/configs:ro" \
   -v "$WORKSPACE_BIND_ROOT/meta_store:/app/meta_store" \
@@ -59,7 +84,7 @@ docker run --rm \
 
 # Step 2: Build and run composegen (reads manifest.json from meta_store)
 echo "=== Preflight Step 2: composegen ==="
-docker build -f ./composegen/Dockerfile -t composegen composegen
+_build_if_needed composegen ./composegen/Dockerfile composegen
 docker run --rm \
   -v "$WORKSPACE_BIND_ROOT/config:/config" \
   -v "$WORKSPACE_BIND_ROOT/data:/data" \
