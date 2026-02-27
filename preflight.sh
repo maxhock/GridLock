@@ -7,6 +7,12 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# Source project environment
+if [ -f "$SCRIPT_DIR/cosim.env" ]; then
+  source "$SCRIPT_DIR/cosim.env"
+fi
+
 INFDB_ENV_FILE="${INFDB_ENV_FILE:-$(pwd)/databases/infdb/.env}"
 
 resolve_workspace_bind_root() {

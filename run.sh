@@ -3,6 +3,12 @@ set -e
 
 # Steps 1-2: Preflight (infdb + composegen)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source project environment
+if [ -f "$SCRIPT_DIR/cosim.env" ]; then
+  source "$SCRIPT_DIR/cosim.env"
+fi
+
 export INFDB_ENV_FILE="${INFDB_ENV_FILE:-databases/infdb/.env}"
 "$SCRIPT_DIR/preflight.sh"
 
