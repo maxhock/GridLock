@@ -98,7 +98,7 @@ def define_yaml(
             if fed_def[name]["prefix"] != "":
                 commandline = f"{fed_def[name]['prefix']} && " + commandline
         params = [cosim_env, commandline]
-        yaml_str += DockerRunner._service(name, image, params, cnt, depends=None)
+        yaml_str += DockerRunner._service(name, image, params, cnt, depends="helics")
         if "logger" in fed_def[name]:
             if fed_def[name]["logger"]:
                 add_logger = True
@@ -112,7 +112,7 @@ def define_yaml(
             f"datalog.main('FederateLogger', '{analysis_name}', '{scenario_name}', '{use_meta_db}', '{use_data_db}')\"",
         ]
         yaml_str += DockerRunner._service(
-            "cst_logger", "cosim-cst:latest", params, cnt, depends=None
+            "cst_logger", "cosim-cst:latest", params, cnt, depends="helics"
         )
 
     yaml_str += DockerRunner._network()
