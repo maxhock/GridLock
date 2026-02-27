@@ -9,5 +9,5 @@ infdb:
             password: "None"
             db: "None"
             host: "10.162.28.40"
-            exposed_port: 54323
+            exposed_port: 54321
             epsg: "None"
