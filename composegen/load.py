@@ -107,30 +107,59 @@ def discover_grid_federates(
     grid_id: str,
     use_meta_db: str,
     meta_store_path: str = "meta_store",
+    location: list[dict] | None = None,
 ) -> list[str]:
-    """Discover resolved grid federate names from the CST metadata store.
+    """Derive grid federate names from the experiment YAML location list.
 
-    The infdb data-setup step writes each resolved pandapower net into
-    the ``custom_metadata`` collection, keyed by federate name.  This
-    function scans that collection for entries whose ``grid_id`` matches
-    the experiment's grid identifier.
+    For fully-specified entries (``plz`` + ``kcid`` + ``bcid``) the name
+    ``{grid_id}_{plz}_{kcid}_{bcid}`` is derived directly without touching
+    the metadata store.
 
     Args:
         grid_id: Grid identifier from experiment YAML (``federation.id``).
+        use_meta_db: Metadata backend type.
         meta_store_path: Path to the meta_store directory.
+        location: Location query list from the experiment YAML node data.
 
     Returns:
-        Sorted list of federate name strings
-        (e.g. ["lv-grid_91301_1_4"]).
+        List of federate name strings (e.g. ["lv-grid_91301_1_4"]).
     """
-    federate_names: list[str] = []
-    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
-        for meta_name in mgr.list_items("custom_metadata"):
-            data = mgr.read("custom_metadata", meta_name)
-            if data and data.get("grid_id") == grid_id:
-                federate_names.append(meta_name)
+    if not location:
+        print(f"Warning: No location list provided for grid '{grid_id}'.")
+        return []
 
-    return sorted(federate_names)
+    names: list[str] = []
+    needs_scan: list[str] = []  # prefixes that require a metadata scan
+
+    for entry in location:
+        plz = entry.get("plz")
+        kcid = entry.get("kcid")
+        bcid = entry.get("bcid")
+        if plz is None:
+            print(
+                f"Warning: Location entry {entry!r} for grid '{grid_id}' is missing "
+                f"'plz' — skipping."
+            )
+            continue
+        if kcid is not None and bcid is not None:
+            names.append(f"{grid_id}_{plz}_{kcid}_{bcid}")
+        else:
+            # Only plz given – collect all matching entries from metadata store
+            needs_scan.append(f"{grid_id}_{plz}_")
+
+    if needs_scan:
+        with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+            all_keys = mgr.list_items("custom_metadata")
+        for prefix in needs_scan:
+            matched = [k for k in all_keys if k.startswith(prefix)]
+            if not matched:
+                print(
+                    f"Warning: No custom_metadata entries found for prefix '{prefix}' "
+                    f"— was the infdb step executed?"
+                )
+            names.extend(matched)
+
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +415,9 @@ def load(tree: Tree, general_cfg: dict) -> None:
             continue
 
         grid_tree_id = node.identifier
-        grid_fed_names = discover_grid_federates(grid_tree_id, use_meta_db)
+        grid_fed_names = discover_grid_federates(
+            grid_tree_id, use_meta_db, location=node.data.get("location")
+        )
         if not grid_fed_names:
             print(
                 f"Warning: Grid '{grid_tree_id}' uses location queries but "
