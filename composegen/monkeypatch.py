@@ -79,8 +79,8 @@ def define_yaml(
 
     cosim_env = (
         '      CST_HOST: "' + env.cst_host + '"\n'
-        # '      LOCAL_USER: "' + env.local_user + '"\n'
-        '      POSTGRES_HOST: "' + env.cst_pg_host + '"\n'
+        '      POSTGRES_HOST: "host.docker.internal"\n'
+        '      POSTGRES_PORT: "5433"\n'
         '      MONGO_HOST: "' + env.cst_mg_host + '"\n'
         '      MONGO_PORT: "' + env.cst_mg_port + '"\n'
         '      CST_USE_META_DB: "' + use_meta_db + '"\n'
@@ -103,16 +103,18 @@ def define_yaml(
             if fed_def[name]["logger"]:
                 add_logger = True
 
+    add_logger = True
+
     # Add data logger federate
     if add_logger:
         cnt += 1
         params = [
             cosim_env,
-            f"python3 -c \"import cosim_toolbox.federateLogger as datalog; "
-            f"datalog.main('FederateLogger', '{analysis_name}', '{scenario_name}', '{use_meta_db}', '{use_data_db}')\"",
+            f"python3 -c 'import cosim_toolbox.sims.federateLogger as datalog; "
+            f"datalog.main(\\\"FederateLogger\\\", \\\"{scenario_name}\\\", \\\"{use_meta_db}\\\", \\\"{use_data_db}\\\")'",
         ]
         yaml_str += DockerRunner._service(
-            "cst_logger", "cosim-cst:latest", params, cnt, depends="helics"
+            "cst_logger", "broker", params, cnt, depends="helics"
         )
 
     yaml_str += DockerRunner._network()
