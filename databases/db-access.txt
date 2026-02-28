@@ -15,3 +15,5 @@ postgres timescale database:
     Maintenance database: postgres
     Username: worker
     Password: worker
+4. Schema: <name>Analysis
+5. Tables: e.g. hdt_double
