@@ -40,14 +40,15 @@ class GridFederate(Federate):
         print(f"\n=== Time: {self.granted_time} ===")
 
         # 1. Apply received load values
+        # House federates publish in W / VAr; pandapower expects MW / MVAr.
         for key, value in self.data_from_federation.get("inputs", {}).items():
             idx = _parse_load_index(key)
             if value is None or idx is None:
                 continue
             if key.endswith("/active_power"):
-                self.net.load.at[idx, "p_mw"] = float(value)
+                self.net.load.at[idx, "p_mw"] = float(value) / 1e6
             elif key.endswith("/reactive_power"):
-                self.net.load.at[idx, "q_mvar"] = float(value)
+                self.net.load.at[idx, "q_mvar"] = float(value) / 1e6
 
         # 2. Run power flow
         try:
