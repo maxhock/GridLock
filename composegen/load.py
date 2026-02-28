@@ -389,8 +389,7 @@ def load(tree: Tree, general_cfg: dict) -> None:
         tree: Transformed tree with class/config data.
         general_cfg: Processed general configuration dict.
     """
-    # Apply patches before FederationConfig is constructed so that
-    # FederateConfig.docker() uses the corrected broker_address.
+    # Apply patches
     apply_monkeypatches()
 
     name = general_cfg.get("name", "GridLock")
