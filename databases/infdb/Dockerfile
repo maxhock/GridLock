@@ -6,9 +6,15 @@ WORKDIR /app
 COPY pyproject.toml pyproject.toml
 COPY uv.lock uv.lock
 
+# Pre-install the dependencies to cache them in a Docker layer
+RUN uv sync --frozen --no-install-project
+
 # Copy the source code into the container
 COPY src src
 COPY main.py main.py
 
-# Run main.py with uv and environment defined in pyproject.toml
+# Install the project itself
+RUN uv sync --frozen
+
+# Run main.py with uv
 CMD ["uv", "run", "python", "main.py"]
