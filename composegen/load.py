@@ -389,6 +389,10 @@ def load(tree: Tree, general_cfg: dict) -> None:
         tree: Transformed tree with class/config data.
         general_cfg: Processed general configuration dict.
     """
+    # Apply patches before FederationConfig is constructed so that
+    # FederateConfig.docker() uses the corrected broker_address.
+    apply_monkeypatches()
+
     name = general_cfg.get("name", "GridLock")
     use_meta_db = general_cfg.get("use_meta_db", "json")
     use_data_db = general_cfg.get("use_data_db", "postgres")
@@ -603,9 +607,6 @@ def load(tree: Tree, general_cfg: dict) -> None:
     end_str = general_cfg["end_time"]
 
     print("Generating configuration definitions...")
-
-    # Apply monkey patches before generating
-    apply_monkeypatches()
 
     try:
         federation.write_config(start_str, end_str)
