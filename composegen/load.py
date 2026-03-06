@@ -320,7 +320,6 @@ def _wire_grid_child(
         for idx in load_indices:
             load_id = f"load_{idx}"
 
-            _add_group(federation, f"{load_id}/voltage", grid_fed_name, child_fed_name, "double", "V")
             _add_group(federation, f"{load_id}/active_power", child_fed_name, grid_fed_name, "double", "W")
             child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/{load_id}/active_power")
             _add_group(federation, f"{load_id}/reactive_power", child_fed_name, grid_fed_name, "double", "VAr")

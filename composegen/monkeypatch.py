@@ -1,3 +1,5 @@
+from typing import Optional
+
 import cosim_toolbox as env
 from cosim_toolbox.sims import DockerRunner, FederateConfig
 from cosim_toolbox.dbms import create_metadata_manager
@@ -7,7 +9,7 @@ BROKER_IP = "10.5.0.2"
 
 
 def _service(
-    name: str, image: str, params: list, cnt: int, depends: str = None
+    name: str, image: str, params: list, cnt: int, depends: Optional[str] = None
 ) -> str:
     """Builds the "service" part of the docker-compose.yaml
 
@@ -32,6 +34,8 @@ def _service(
     _svc += "    volumes:\n"
     _svc += "      - ../data:/data\n"
     _svc += "      - ../meta_store:/app/meta_store\n"
+    _svc += "    extra_hosts:\n"
+    _svc += '      - "host.docker.internal:host-gateway"\n'
     if depends is not None:
         _svc += "    depends_on:\n"
         _svc += "      - " + depends + "\n"
@@ -54,6 +58,12 @@ def define_yaml(
         use_meta_db (str): Metadata backend type.
         use_data_db (str): Data backend type.
     """
+    runtime_cst_host = env.environ.get("RUNTIME_CST_HOST", env.cst_host)
+    runtime_pg_host = env.environ.get("RUNTIME_POSTGRES_HOST", env.cst_pg_host)
+    runtime_pg_port = env.environ.get("RUNTIME_POSTGRES_PORT", env.cst_pg_port)
+    runtime_mg_host = env.environ.get("RUNTIME_MONGO_HOST", env.cst_mg_host)
+    runtime_mg_port = env.environ.get("RUNTIME_MONGO_PORT", env.cst_mg_port)
+
     fed_def = None
     with create_metadata_manager(use_meta_db) as mgr:
         scenario_def = mgr.read_scenario(scenario_name)
@@ -71,18 +81,23 @@ def define_yaml(
             raise ValueError(
                 f"Scenario '{scenario_name}' does not specify a 'federation'."
             )
-        fed_def = mgr.read_federation(federation_name)["federation"]
+        federation_def = mgr.read_federation(federation_name)
+        if not federation_def:
+            raise ValueError(
+                f"Federation '{federation_name}' not found in metadata store."
+            )
+        fed_def = federation_def["federation"]
         if not fed_def:
             raise ValueError(
                 f"Federation '{federation_name}' not found in metadata store."
             )
 
     cosim_env = (
-        '      CST_HOST: "' + env.cst_host + '"\n'
-        '      POSTGRES_HOST: "host.docker.internal"\n'
-        '      POSTGRES_PORT: "5433"\n'
-        '      MONGO_HOST: "' + env.cst_mg_host + '"\n'
-        '      MONGO_PORT: "' + env.cst_mg_port + '"\n'
+        '      CST_HOST: "' + runtime_cst_host + '"\n'
+        '      POSTGRES_HOST: "' + runtime_pg_host + '"\n'
+        '      POSTGRES_PORT: "' + runtime_pg_port + '"\n'
+        '      MONGO_HOST: "' + runtime_mg_host + '"\n'
+        '      MONGO_PORT: "' + runtime_mg_port + '"\n'
         '      CST_USE_META_DB: "' + use_meta_db + '"\n'
         '      CST_USE_DATA_DB: "' + use_data_db + '"\n'
     )
@@ -98,7 +113,7 @@ def define_yaml(
             if fed_def[name]["prefix"] != "":
                 commandline = f"{fed_def[name]['prefix']} && " + commandline
         params = [cosim_env, commandline]
-        yaml_str += DockerRunner._service(name, image, params, cnt, depends="helics")
+        yaml_str += _service(name, image, params, cnt, depends="helics")
         if "logger" in fed_def[name]:
             if fed_def[name]["logger"]:
                 add_logger = True
@@ -113,7 +128,7 @@ def define_yaml(
             f"python3 -c 'import cosim_toolbox.sims.federateLogger as datalog; "
             f"datalog.main(\\\"FederateLogger\\\", \\\"{scenario_name}\\\", \\\"{use_meta_db}\\\", \\\"{use_data_db}\\\")'",
         ]
-        yaml_str += DockerRunner._service(
+        yaml_str += _service(
             "cst_logger", "broker", params, cnt, depends="helics"
         )
 
@@ -126,7 +141,7 @@ def define_yaml(
     ]
     yaml_str = (
         "services:\n"
-        + DockerRunner._service("helics", "broker", params, 2, depends=None)
+        + _service("helics", "broker", params, 2, depends=None)
         + yaml_str
     )
 

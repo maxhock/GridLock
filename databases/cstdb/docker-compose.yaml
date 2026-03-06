@@ -21,9 +21,9 @@ services:
     image: timescale/timescaledb:latest-pg12
     container_name: ${CONTAINER_NAME:-database}
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     expose:
-      - "5433"
+      - "5432"
     environment:
       POSTGRES_HOST: "${POSTGRES_HOST}"
       POSTGRES_PORT: "${POSTGRES_PORT}"

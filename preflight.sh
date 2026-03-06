@@ -97,6 +97,11 @@ docker run --rm \
   -v "$WORKSPACE_BIND_ROOT/meta_store:/app/meta_store" \
   -e MONGO_HOST="$PREFLIGHT_MONGO_HOST" \
   -e MONGO_PORT="$PREFLIGHT_MONGO_PORT" \
+  -e RUNTIME_CST_HOST="${CST_HOST:-localhost}" \
+  -e RUNTIME_POSTGRES_HOST="${POSTGRES_HOST:-${CST_HOST:-localhost}}" \
+  -e RUNTIME_POSTGRES_PORT="${POSTGRES_PORT:-5432}" \
+  -e RUNTIME_MONGO_HOST="${MONGO_HOST:-mongodb://${CST_HOST:-localhost}}" \
+  -e RUNTIME_MONGO_PORT="${MONGO_PORT:-27017}" \
   --add-host=host.docker.internal:host-gateway \
   composegen
 
