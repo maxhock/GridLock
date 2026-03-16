@@ -7,13 +7,18 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+PREFLIGHT_ENV_FILE="${PREFLIGHT_ENV_FILE:-$SCRIPT_DIR/config/preflight.env}"
 
 # Source project environment
-if [ -f "$SCRIPT_DIR/cosim.env" ]; then
+if [ -f "$PREFLIGHT_ENV_FILE" ]; then
+  set -a
+  source "$PREFLIGHT_ENV_FILE"
+  set +a
+elif [ -f "$SCRIPT_DIR/cosim.env" ]; then
   source "$SCRIPT_DIR/cosim.env"
 fi
 
-INFDB_ENV_FILE="${INFDB_ENV_FILE:-$(pwd)/databases/infdb/.env}"
+INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
 
 resolve_workspace_bind_root() {
   # Docker bind mounts are resolved by the Docker daemon host. Resolution order:

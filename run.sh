@@ -3,13 +3,19 @@ set -e
 
 # Steps 1-2: Preflight (infdb + composegen)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREFLIGHT_ENV_FILE="${PREFLIGHT_ENV_FILE:-$SCRIPT_DIR/config/preflight.env}"
 
 # Source project environment
-if [ -f "$SCRIPT_DIR/cosim.env" ]; then
+if [ -f "$PREFLIGHT_ENV_FILE" ]; then
+  set -a
+  source "$PREFLIGHT_ENV_FILE"
+  set +a
+elif [ -f "$SCRIPT_DIR/cosim.env" ]; then
   source "$SCRIPT_DIR/cosim.env"
 fi
 
-export INFDB_ENV_FILE="${INFDB_ENV_FILE:-databases/infdb/.env}"
+export PREFLIGHT_ENV_FILE
+export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
 "$SCRIPT_DIR/preflight.sh"
 
 # Step 3: Launch the experiment with docker compose
