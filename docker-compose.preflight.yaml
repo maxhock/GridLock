@@ -1,0 +1,46 @@
+name: gridlock-preflight
+
+services:
+  infdb:
+    image: infdb
+    build:
+      context: ./databases/infdb
+      dockerfile: Dockerfile
+    env_file:
+      - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
+    environment:
+      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://host.docker.internal}
+      MONGO_PORT: ${PREFLIGHT_MONGO_PORT:-27017}
+    volumes:
+      - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
+      - ${HOST_WORKSPACE_FOLDER:-.}/meta_store:/app/meta_store
+      - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: "no"
+
+  composegen:
+    image: composegen
+    build:
+      context: ./composegen
+      dockerfile: Dockerfile
+    env_file:
+      - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
+    depends_on:
+      infdb:
+        condition: service_completed_successfully
+    environment:
+      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://host.docker.internal}
+      MONGO_PORT: ${PREFLIGHT_MONGO_PORT:-27017}
+      RUNTIME_CST_HOST: ${RUNTIME_CST_HOST:-${CST_HOST:-localhost}}
+      RUNTIME_POSTGRES_HOST: ${RUNTIME_POSTGRES_HOST:-${POSTGRES_HOST:-${CST_HOST:-localhost}}}
+      RUNTIME_POSTGRES_PORT: ${RUNTIME_POSTGRES_PORT:-${POSTGRES_PORT:-5432}}
+      RUNTIME_MONGO_HOST: ${RUNTIME_MONGO_HOST:-${MONGO_HOST:-mongodb://${CST_HOST:-localhost}}}
+      RUNTIME_MONGO_PORT: ${RUNTIME_MONGO_PORT:-${MONGO_PORT:-27017}}
+    volumes:
+      - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
+      - ${HOST_WORKSPACE_FOLDER:-.}/data:/data
+      - ${HOST_WORKSPACE_FOLDER:-.}/meta_store:/app/meta_store
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: "no"

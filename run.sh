@@ -4,6 +4,7 @@ set -e
 # Steps 1-2: Preflight (infdb + composegen)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFLIGHT_ENV_FILE="${PREFLIGHT_ENV_FILE:-$SCRIPT_DIR/config/preflight.env}"
+PREFLIGHT_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.preflight.yaml"
 
 # Source project environment
 if [ -f "$PREFLIGHT_ENV_FILE" ]; then
@@ -16,7 +17,15 @@ fi
 
 export PREFLIGHT_ENV_FILE
 export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
-"$SCRIPT_DIR/preflight.sh"
+
+cleanup_preflight() {
+  docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" down --remove-orphans >/dev/null 2>&1 || true
+}
+
+trap cleanup_preflight EXIT
+docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" up --build --abort-on-container-exit --exit-code-from composegen
+trap - EXIT
+cleanup_preflight
 
 # Step 3: Launch the experiment with docker compose
 echo "=== Step 3: docker compose up ==="
@@ -28,4 +37,4 @@ if [ -f "$COMPOSE_FILE" ]; then
   docker compose -f "$COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
 fi
 
-docker compose -f "$COMPOSE_FILE" up --build --remove-orphans
+docker compose -f "$COMPOSE_FILE" up --build --remove-orphans --abort-on-container-exit
