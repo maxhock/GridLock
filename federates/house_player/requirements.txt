@@ -3,4 +3,5 @@ cosim-toolbox
 
 # HELICS and simulation dependencies
 helics[cli]
-pandapower
+pandas
+numpy

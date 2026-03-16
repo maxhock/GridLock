@@ -1,0 +1,15 @@
+services:
+    infdb:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        volumes:
+            - ./configs:/app/configs:ro
+            - ../../meta_store:/app/meta_store
+            - ../../config:/config:ro
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        env_file:
+            - .env
+        environment:
+            - UV_LINK_MODE=copy

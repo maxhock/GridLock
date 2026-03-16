@@ -2,6 +2,44 @@ import yaml
 import pandas as pd
 from pathlib import Path
 from treelib import Tree
+from typing import Optional
+
+
+def validate_location_queries(location: list, grid_id: str) -> None:
+    """Validate that location entries are well-formed query dicts.
+
+    Each entry must have at least 'plz'. Optionally 'kcid' and 'bcid'.
+    If kcid is given, bcid must also be given and vice versa.
+
+    Args:
+        location: List of query dicts from experiment YAML.
+        grid_id: Grid node identifier for error messages.
+
+    Raises:
+        ValueError: If any entry is invalid.
+    """
+    if not isinstance(location, list):
+        raise ValueError(
+            f"Location for grid '{grid_id}' must be a list of query dicts, "
+            f"got {type(location).__name__}"
+        )
+    for i, entry in enumerate(location):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Location entry {i} for grid '{grid_id}' must be a dict, "
+                f"got {type(entry).__name__}"
+            )
+        if "plz" not in entry:
+            raise ValueError(
+                f"Location entry {i} for grid '{grid_id}' is missing required 'plz' key"
+            )
+        has_kcid = "kcid" in entry
+        has_bcid = "bcid" in entry
+        if has_kcid != has_bcid:
+            raise ValueError(
+                f"Location entry {i} for grid '{grid_id}': "
+                f"'kcid' and 'bcid' must both be specified or both omitted"
+            )
 
 
 def add_to_tree(tree: Tree, node_dict: dict, parent: str = None) -> None:
@@ -46,7 +84,7 @@ def extract(config_path: Path) -> tuple[dict, Tree, dict]:
     # Extract grid nodes
     grid_ids = [
         node_id
-        for node_id in tree.expand_tree(filter=lambda x: x.data["type"] == "grid")
+        for node_id in tree.expand_tree(filter=lambda x: x.data.get("class") == "grid")
     ]
     grid_nodes = {}
 
@@ -61,10 +99,10 @@ def extract(config_path: Path) -> tuple[dict, Tree, dict]:
                     f"No layout or location specified for grid {grid_id}"
                 )
             else:
-                # TODO: infDB.load(location)
+                validate_location_queries(location, grid_id)
                 grid_nodes[grid_id] = None
                 print(
-                    f"Loading layout from infDB for {grid_id} at location {location}"
+                    f"Grid '{grid_id}' uses InfDB location queries: {location}"
                 )
         else:
             if location is not None:

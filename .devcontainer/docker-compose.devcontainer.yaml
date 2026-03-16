@@ -10,7 +10,7 @@ services:
       MONGO_PORT: "27017"
     volumes:
       - ../data:/data
-      - ../config/tmp:/config/tmp:ro
+      - ../meta_store:/app/meta_store:ro
     networks:
       cst_net:
         ipv4_address: 10.5.0.2
@@ -27,13 +27,13 @@ services:
       MONGO_PORT: "27017"
     volumes:
       - ../data:/data
-      - ../config/tmp:/config/tmp:ro
+      - ../meta_store:/app/meta_store:ro
     networks:
       cst_net:
         ipv4_address: 10.5.0.3
     depends_on:
       - helics
-    command: /bin/bash -c "python main.py --name=grid --broker=broker --grid_file=kerber_landnetz_freileitung_1.xlsx"
+    command: /bin/bash -c "python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0"
 
   loadhouse_0:
     build: ../federates/house_player
@@ -46,11 +46,13 @@ services:
       MONGO_PORT: "27017"
     volumes:
       - ../data:/data
-      - ../config/tmp:/config/tmp:ro
+      - ../meta_store:/app/meta_store:ro
     networks:
       cst_net:
         ipv4_address: 10.5.0.4
-    command: /bin/bash -c "helics_player --input=/data/input/sample_house.csv --broker=broker --name=node_12 --local"
+    depends_on:
+      - helics
+    command: /bin/bash -c "python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0.loadhouse_0 --timeseries /data/input/building_timeseries.csv"
 networks:
   cst_net:
     driver: bridge

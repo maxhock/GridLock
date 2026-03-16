@@ -11,20 +11,32 @@
 
 	// The 'service' property is the name of the service for the container that VS Code should
 	// use. Update this value and .devcontainer/docker-compose.yml to the real service name.
-	"service": "lv-grid_0",
+	"service": "lv-grid_1_4",
 
 	"mounts": ["source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind"],
 
 	// The optional 'workspaceFolder' property is the path VS Code should open by default when
 	// connected. This is typically a file mount in .devcontainer/docker-compose.yml
 	"workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+	// Exposed to scripts (preflight.sh) so docker bind sources can be resolved
+	// against host-visible paths when running with docker-outside-of-docker.
+	"remoteEnv": {
+		"HOST_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+	},
 	
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/git:1": {
 			"ppa": true
+		},
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+			"moby": false
 		}
 	},
+
+	// Run preflight (infdb + composegen) on the HOST before building containers.
+	// This populates meta_store/ (federation/scenario JSON + docker-compose YAML) and data/.
+	"initializeCommand": "bash ${localWorkspaceFolder}/preflight.sh",
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],

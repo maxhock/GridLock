@@ -1,18 +1,40 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
+# 1. Python-specific optimizations
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+    
 # Set working directory
 WORKDIR /app
 
-# Create config mount point
-RUN mkdir /config
-VOLUME ["/config"]
+# Create mount points and mark them as volumes
+RUN mkdir -p /data /app/meta_store
 
-# Create data mount point
-RUN mkdir /data
-VOLUME ["/data"]
+# Install dependencies from requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install HELICS CLI
-RUN pip install --no-cache-dir helics[cli]
+# Copy application code
+COPY main.py .
+COPY src/ src/
 
-# Default command: launch all house_player federates using helics run with config from mount
-CMD ["helics", "run", "--path=/config/tmp/house_player_runner.json", "--no-log-files"]
+
+# --- Test stage ---
+FROM base AS test
+# Install test dependencies
+RUN pip install --no-cache-dir pytest pytest-mock
+# Copy test files
+COPY test_main.py .
+# Always run tests in this stage
+RUN pytest --maxfail=1 --disable-warnings -v
+
+# --- Final image ---
+FROM base AS final
+# Entry point - scenario, federate_name and timeseries args provided by docker-compose command
+CMD ["python", "main.py"]
+
+# --- Usage ---
+# To run tests during build:
+# docker build --target test -t house_player-test .
+# To build production image:
+# docker build --target final -t house_player-prod .
