@@ -8,7 +8,7 @@ docker run --rm `
   -v "${PSScriptRoot}/databases/infdb/configs:/workspaces/infdb/configs:ro" `
   -v "${PSScriptRoot}/meta_store:/workspaces/infdb/meta_store" `
   -v "${PSScriptRoot}/config:/config:ro" `
-  --env-file databases/infdb/.env `
+  --env-file config/preflight.env `
   --add-host=host.docker.internal:host-gateway `
   infdb
 

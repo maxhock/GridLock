@@ -11,7 +11,10 @@ Manifest   → meta_store/manifest.json (federate names for composegen)
 
 import argparse
 import json
+import os
 from pathlib import Path
+import shutil
+import tempfile
 
 import yaml
 from infdb import InfDB
@@ -22,6 +25,63 @@ from src.infdb_data import resolve_grid_queries
 
 DEFAULT_EXPERIMENT_PATH = "/config/experiment-LV.yml"
 DEFAULT_META_STORE = "meta_store"
+DEFAULT_INFDB_CONFIG_DIR = "configs"
+
+
+def _coerce_config_value(key: str, value: str) -> str | int:
+    """Convert environment values to the expected config types."""
+    if key == "exposed_port":
+        return int(value)
+    return value
+
+
+def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[str, str | None]:
+    """Create a runtime InfDB config directory with env overrides applied.
+
+    The upstream InfDB package hardcodes ``host.docker.internal`` when
+    ``host`` is set to ``"None"`` in the YAML config, and only reads
+    env values for fields that are explicitly ``"None"``. To keep the
+    host and port configurable from the shared preflight env file, we
+    materialize a temporary config file with the env values written in.
+
+    Args:
+        config_dir: Directory containing ``config-infdb.yml``.
+
+    Returns:
+        Tuple of ``(config_dir_to_use, temp_dir_to_cleanup)``.
+    """
+    config_path = Path(config_dir) / "config-infdb.yml"
+    with open(config_path) as handle:
+        config = yaml.safe_load(handle)
+
+    postgres_config = config.setdefault("infdb", {}).setdefault("hosts", {}).setdefault(
+        "postgres", {}
+    )
+    overrides = {
+        "user": "SERVICES_POSTGRES_USER",
+        "password": "SERVICES_POSTGRES_PASSWORD",
+        "db": "SERVICES_POSTGRES_DB",
+        "host": "SERVICES_POSTGRES_HOST",
+        "exposed_port": "SERVICES_POSTGRES_EXPOSED_PORT",
+        "epsg": "SERVICES_POSTGRES_EPSG",
+    }
+
+    changed = False
+    for key, env_name in overrides.items():
+        env_value = os.getenv(env_name)
+        if env_value:
+            postgres_config[key] = _coerce_config_value(key, env_value)
+            changed = True
+
+    if not changed:
+        return config_dir, None
+
+    temp_dir = tempfile.mkdtemp(prefix="infdb-config-")
+    temp_config_path = Path(temp_dir) / "config-infdb.yml"
+    with open(temp_config_path, "w") as handle:
+        yaml.safe_dump(config, handle, sort_keys=False)
+
+    return temp_dir, temp_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -170,7 +230,8 @@ def main(
     print(f"Grid '{grid_id}': {len(location)} location query(ies)")
 
     # 2. Connect to InfDB and resolve queries
-    infdb = InfDB(tool_name="infdb", config_path="configs")
+    config_path, temp_config_dir = prepare_infdb_config()
+    infdb = InfDB(tool_name="infdb", config_path=config_path)
     log = infdb.get_logger()
     log.info("Starting data setup data resolution")
 
@@ -182,9 +243,13 @@ def main(
     except Exception as e:
         log.error(f"Failed to resolve grid queries: {e}")
         infdb.stop_logger()
+        if temp_config_dir is not None:
+            shutil.rmtree(temp_config_dir)
         raise
 
     infdb.stop_logger()
+    if temp_config_dir is not None:
+        shutil.rmtree(temp_config_dir)
 
     # 3. Write nets to CST metadata store
     print(f"Writing grids to CST metadata store (backend={use_meta_db})...")

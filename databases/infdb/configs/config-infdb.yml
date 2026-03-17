@@ -1,13 +1,13 @@
 infdb:
-    config-infdb: "config-infdb.yml" # only filename - change path in ".env" file "CONFIG_INFDB_PATH"
+    config-infdb: "config-infdb.yml" # only filename - change path in env file "CONFIG_INFDB_PATH"
     logging:
         path: "infdb.log"
         level: "INFO" # ERROR, WARNING, INFO, DEBUG
     hosts:
-        postgres: # "None" values are resolved from .env (SERVICES_POSTGRES_*)
+        postgres: # "None" values are resolved from environment variables (SERVICES_POSTGRES_*)
             user: "None"
             password: "None"
             db: "None"
-            host: "10.162.28.40"
+            host: "None"
             exposed_port: 54321
             epsg: "None"
