@@ -1,8 +1,12 @@
-# controller/main_mpc.py
+# controller/main.py
 import json
 import logging
 import argparse
 import re
+import os
+
+from cosim_toolbox.sims import Federate
+import helics as h
 import jax.numpy as jnp
 import equinox as eqx
 
@@ -10,317 +14,395 @@ from energysim.sim.simulator import JAXSimulator
 from energysim.control.mpc_solver import JAX_MPC_Solver
 from energysim.core.data.dataset import SimulationDataset
 from energysim.core.shared.data_structs import (
-     BatteryConfig, RewardConfig, HeatPumpConfig, AirConditionerConfig,
-     ThermalStorageConfig, SolarConfig,
-     SystemActions,
-     SystemState, ThermalState, BatteryState, ThermalStorageState,
-     HeatPumpState, AirConditionerState,
- )
+    BatteryConfig,
+    RewardConfig,
+    HeatPumpConfig,
+    AirConditionerConfig,
+    ThermalStorageConfig,
+    PVConfig,
+    ThermalConfig,
+    SystemActions,
+    SystemState,
+    ThermalState,
+    BatteryState,
+    ThermalStorageState,
+    HeatPumpState,
+    AirConditionerState,
+)
 import house.sample_data_generator
 from house.common_config import create_common_configs
-
 from house.build_my_house import create_2_room_house
+from house.exogenous_data import prepare_aligned_timeseries
 
-import helics as h
-import os
+from controller.battery_clipping import clip_battery_power_to_soc
 
 logging.basicConfig(
-     level=logging.INFO,
-     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
- )
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
-
 def deserialize_system_state(state_dict: dict) -> SystemState:
-     """Rekonstruiere SystemState aus dem JSON-Dict vom House-Federate."""
-     thermal = ThermalState(
-         T_vector=jnp.array(state_dict["thermal"]["T_vector"])
-     )
-     battery = BatteryState(
-         soc=jnp.array(state_dict["battery"]["soc"]),
-         soh=jnp.array(state_dict["battery"]["soh"]),
-     )
-     storage = ThermalStorageState(
-         temperatures_c=jnp.array(state_dict["storage"]["temperatures_c"])
-     )
-     hp = HeatPumpState(
-         current_electrical_w=jnp.array(
-             state_dict["heat_pump"]["current_electrical_w"]
-         ),
-         current_thermal_w=jnp.array(
-             state_dict["heat_pump"]["current_thermal_w"]
-         ),
-     )
-     ac = AirConditionerState(
-         current_electrical_w=jnp.array(
-             state_dict["air_conditioner"]["current_electrical_w"]
-         ),
-         current_thermal_w=jnp.array(
-             state_dict["air_conditioner"]["current_thermal_w"]
-         ),
-     )
-     return SystemState(
-         thermal=thermal,
-         battery=battery,
-         storage=storage,
-         heat_pump=hp,
-         air_conditioner=ac,
-     )
+    """Reconstruct SystemState from the JSON dict published by the house federate."""
+    thermal = ThermalState(T_vector=jnp.array(state_dict["thermal"]["T_vector"]))
+    battery = BatteryState(
+        soc=jnp.array(state_dict["battery"]["soc"]),
+        soh=jnp.array(state_dict["battery"]["soh"]),
+    )
+    storage = ThermalStorageState(
+        temperatures_c=jnp.array(state_dict["storage"]["temperatures_c"])
+    )
+    hp = HeatPumpState(
+        current_electrical_w=jnp.array(
+            state_dict["heat_pump"]["current_electrical_w"]
+        ),
+        current_thermal_w=jnp.array(state_dict["heat_pump"]["current_thermal_w"]),
+    )
+    ac = AirConditionerState(
+        current_electrical_w=jnp.array(
+            state_dict["air_conditioner"]["current_electrical_w"]
+        ),
+        current_thermal_w=jnp.array(
+            state_dict["air_conditioner"]["current_thermal_w"]
+        ),
+    )
+    return SystemState(
+        thermal=thermal,
+        battery=battery,
+        storage=storage,
+        heat_pump=hp,
+        air_conditioner=ac,
+    )
 
 
- # ------------ HELICS Setup ------------
+def build_simulator_from_state(
+    template: JAXSimulator, state: SystemState
+) -> JAXSimulator:
+    """Return a simulator template with its internal state replaced."""
+    sim = template
 
-def setup_federate(federate_name: str, dt_seconds: int):
-     logger.info(f"Creating HELICS federate: {federate_name}")
-     fed_info = h.helicsCreateFederateInfo()
-     h.helicsFederateInfoSetCoreInitString(
-     fed_info, f"--broker={os.getenv('HELICS_BROKER','broker')}")
+    sim = eqx.tree_at(
+        lambda s: s.battery,
+        sim,
+        eqx.tree_at(
+            lambda b: (b.soc, b.soh),
+            sim.battery,
+            (state.battery.soc, state.battery.soh),
+        ),
+    )
 
-     h.helicsFederateInfoSetCoreTypeFromString(fed_info, "zmq")
-     h.helicsFederateInfoSetIntegerProperty(
-         fed_info,
-         h.helics_property_int_log_level,
-         h.helics_log_level_debug
-     )
-     h.helicsFederateInfoSetTimeProperty(
-         fed_info,
-         h.helics_property_time_delta,
-         dt_seconds
-     )
-     fed = h.helicsCreateValueFederate(federate_name, fed_info)
+    sim = eqx.tree_at(
+        lambda s: s.thermal,
+        sim,
+        eqx.tree_at(
+            lambda t: t.T_vector,
+            sim.thermal,
+            state.thermal.T_vector,
+        ),
+    )
 
-     
-     match = re.search(r"\d+$", federate_name)
-     if not match:
-         raise ValueError(
-             f"Federate name '{federate_name}' must end in an index (e.g., 'controller_0')"
-         )
-     fed_index = match.group(0)
+    sim = eqx.tree_at(
+        lambda s: s.storage,
+        sim,
+        eqx.tree_at(
+            lambda st: st.temperatures_c,
+            sim.storage,
+            state.storage.temperatures_c,
+        ),
+    )
 
-     # 1. Subscribe from House
-     sub_house_result = h.helicsFederateRegisterSubscription(
-         fed, f"house_{fed_index}/timestep_result", "string"
-     )
+    sim = eqx.tree_at(
+        lambda s: s.heat_pump,
+        sim,
+        eqx.tree_at(
+            lambda hp: (hp.current_electrical_w, hp.current_thermal_w),
+            sim.heat_pump,
+            (
+                state.heat_pump.current_electrical_w,
+                state.heat_pump.current_thermal_w,
+            ),
+        ),
+    )
 
-     # 2. Publish: to House
-     pub_house_action = h.helicsFederateRegisterGlobalPublication(
-         fed, f"house_{fed_index}/action", h.HELICS_DATA_TYPE_STRING, ""
-     )
+    sim = eqx.tree_at(
+        lambda s: s.ac,
+        sim,
+        eqx.tree_at(
+            lambda ac: (ac.current_electrical_w, ac.current_thermal_w),
+            sim.ac,
+            (
+                state.air_conditioner.current_electrical_w,
+                state.air_conditioner.current_thermal_w,
+            ),
+        ),
+    )
 
-     # 3. Publish: to Battery
-     pub_battery_action = h.helicsFederateRegisterGlobalPublication(
-         fed, f"battery_{fed_index}/action", h.HELICS_DATA_TYPE_STRING, ""
-     )
-
-     logger.info(f"Federate '{federate_name}' subscribing to:")
-     logger.info(f"  - house_{fed_index}/timestep_result")
-     logger.info(f"Federate '{federate_name}' publishing to:")
-     logger.info(f"  - house_{fed_index}/action")
-     logger.info(f"  - battery_{fed_index}/action")
-
-     return fed, sub_house_result, (pub_house_action, pub_battery_action)
-
+    return sim
 
 
 def setup_mpc_and_data(dt_seconds: int):
-     """
-        Setup MPC solver and SimulationDataset.
-     """
-     dt = dt_seconds
+    """Setup MPC solver and aligned exogenous data."""
+    dataset_info = prepare_aligned_timeseries(
+        house.sample_data_generator.FILE_NAME,
+        dt_seconds,
+    )
+    logger.info(
+        f"Using exogenous dataset {dataset_info.path} "
+        f"(source_dt={dataset_info.source_dt_seconds}s, "
+        f"target_dt={dataset_info.target_dt_seconds}s, "
+        f"rows={dataset_info.source_rows}->{dataset_info.aligned_rows})."
+    )
+    dataset = SimulationDataset(dataset_info.path, dt_seconds)
 
-     # Dataset with sample data (same as House federate)
-     dataset = SimulationDataset(house.sample_data_generator.FILE_NAME, dt)
+    configs = create_common_configs(dt_seconds=dt_seconds)
+    t_config = configs["t_config"]
+    n_rooms = int(len(t_config.room_air_indices))
 
-     # Common Configs (same as House federate)
-     configs = create_common_configs(dt_seconds=dt_seconds)
+    sim_template = JAXSimulator(
+        dt_seconds=dt_seconds,
+        t_config=configs["t_config"],
+        r_config=configs["r_config"],
+        b_config=configs["b_config"],
+        hp_config=configs["hp_config"],
+        ac_config=configs["ac_config"],
+        ts_config=configs["ts_config"],
+        pv_config=configs["pv_config"],
+    )
 
-     # Thermal Config + number of rooms
-     t_config = configs["t_config"]
-     n_rooms = int(len(t_config.room_air_indices))
+    mpc = JAX_MPC_Solver(N_horizon=8, simulator_template=sim_template)
+    split_factors = jnp.array([0.6, 0.4])
+    b_config: BatteryConfig = configs["b_config"]
 
-
-     # MPC with 4h horizon
-     HORIZON = 16
-     mpc = JAX_MPC_Solver(N_horizon=HORIZON, **configs)
-
-     split_factors = jnp.array([0.6, 0.4])
-
-     b_config: BatteryConfig = configs["b_config"]
-
-     return mpc, dataset, t_config, n_rooms, split_factors, b_config
-
+    return mpc, dataset, t_config, n_rooms, split_factors, b_config, sim_template
 
 
-def run_simulation_loop(
-     fed,
-     sub_house_result,
-     pubs,
-     stop_time,
-     dt_seconds,
-     mpc: JAX_MPC_Solver,
-     dataset: SimulationDataset,
-     t_config,
-     n_rooms: int,
-     split_factors,
-     b_config: BatteryConfig,
- ):
-     pub_house_action, pub_battery_action = pubs
+class ControllerFederate(Federate):
+    """Controller federate using CST for lifecycle/time management."""
 
-     h.helicsFederateEnterExecutingMode(fed)
-     logger.info("Controller entering execution mode.")
+    def __init__(self, federate_name: str, stop_time: float, dt_seconds: int):
+        super().__init__(federate_name)
+        self.requested_stop_time = float(stop_time)
+        self.dt_seconds = int(dt_seconds)
+        self.house_result_key = ""
+        self.house_action_key = ""
+        self.battery_action_key = ""
+        self.current_state: SystemState | None = None
+        self.warm_start_actions = None
+        self.mpc: JAX_MPC_Solver | None = None
+        self.dataset: SimulationDataset | None = None
+        self.t_config = None
+        self.n_rooms = 0
+        self.split_factors = None
+        self.b_config: BatteryConfig | None = None
+        self.sim_template: JAXSimulator | None = None
 
-     current_state: SystemState | None = None
+    def create_federate(self):
+        """Create the CST federate and register HELICS interfaces."""
+        if self.dt_seconds <= 0:
+            raise ValueError(f"dt_seconds must be > 0, got {self.dt_seconds}")
 
-     warm_start_actions = mpc.zonal_warm_start
+        self.federate_type = "value"
+        self.period = float(self.dt_seconds)
+        self.stop_time = float(self.requested_stop_time)
+        self.granted_time = 0.0
+        self.config = {
+            "name": self.federate_name,
+            "coreType": "zmq",
+            "broker": os.getenv("HELICS_BROKER", "broker"),
+            "period": float(self.dt_seconds),
+            "terminate_on_error": True,
+        }
 
-     current_time = 0.0
-     while current_time < stop_time:
+        self.pubs = {}
+        self.inputs = {}
+        self.data_from_federation = {"inputs": {}, "endpoints": {}}
+        self.data_to_federation = {"publications": {}, "endpoints": {}}
 
-         current_time = h.helicsFederateRequestNextStep(fed)
-         logger.debug(f"Granted time: {current_time}s")
+        self.create_helics_fed()
 
-         state_str = h.helicsInputGetString(sub_house_result)
-         if state_str:
-             try:
-                 msg = json.loads(state_str)
-                 if "state" in msg:
-                     current_state = deserialize_system_state(msg["state"])
-                 else:
-                     logger.warning(
-                         f"Time {current_time}s | 'state' key missing in house result."
-                     )
-             except json.JSONDecodeError:
-                 logger.warning(
-                     f"Time {current_time}s | Could not decode house result JSON."
-                 )
+        match = re.search(r"\d+$", self.federate_name)
+        if not match:
+            raise ValueError(
+                f"Federate name '{self.federate_name}' must end in an index "
+                "(e.g., 'controller_0')"
+            )
+        fed_index = match.group(0)
 
-         if current_state is None:
-             logger.info(
-                 f"Time {current_time}s | No valid state yet, publishing zero actions."
-             )
-             house_action = {}
-             battery_action = {"normalized_power": 0.0}
-             h.helicsPublicationPublishString(
-                 pub_house_action, json.dumps(house_action)
-             )
-             h.helicsPublicationPublishString(
-                 pub_battery_action, json.dumps(battery_action)
-             )
-             continue
+        self.house_result_key = f"house_{fed_index}/timestep_result"
+        self.house_action_key = f"house_{fed_index}/action"
+        self.battery_action_key = f"battery_{fed_index}/action"
 
-         step_idx = int(current_time // dt_seconds)
+        h.helicsFederateRegisterSubscription(
+            self.hfed, self.house_result_key, "string"
+        )
+        self.inputs[self.house_result_key] = {
+            "type": "string",
+            "key": self.house_result_key,
+        }
+        self.data_from_federation["inputs"][self.house_result_key] = None
 
-         H = mpc.N
-         if step_idx + H >= len(dataset):
-             logger.info(
-                 f"Time {current_time}s | Not enough forecast horizon left, stopping MPC control."
-             )
-             break
+        h.helicsFederateRegisterGlobalPublication(
+            self.hfed, self.house_action_key, h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pubs[self.house_action_key] = {
+            "type": "string",
+            "key": self.house_action_key,
+        }
+        self.data_to_federation["publications"][self.house_action_key] = None
 
-         raw_forecast = dataset.get_forecast(step_idx, H)
+        h.helicsFederateRegisterGlobalPublication(
+            self.hfed, self.battery_action_key, h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pubs[self.battery_action_key] = {
+            "type": "string",
+            "key": self.battery_action_key,
+        }
+        self.data_to_federation["publications"][self.battery_action_key] = None
 
-         exo_forecast = eqx.tree_at(
-             lambda e: (e.solar_gains_w, e.occupancy_gains_w, e.device_gains_w),
-             raw_forecast,
-             (
-                 jnp.outer(raw_forecast.solar_gains_w, split_factors),
-                 jnp.outer(raw_forecast.occupancy_gains_w, split_factors),
-                 jnp.zeros((H, n_rooms)),
-             ),
-         )
+        logger.info(f"Federate '{self.federate_name}' subscribing to:")
+        logger.info(f"  - {self.house_result_key}")
+        logger.info(f"Federate '{self.federate_name}' publishing to:")
+        logger.info(f"  - {self.house_action_key}")
+        logger.info(f"  - {self.battery_action_key}")
 
-         action: SystemActions = mpc.solve(
-             current_state, exo_forecast, warm_start_actions=warm_start_actions
-         )
+        (
+            self.mpc,
+            self.dataset,
+            self.t_config,
+            self.n_rooms,
+            self.split_factors,
+            self.b_config,
+            self.sim_template,
+        ) = setup_mpc_and_data(self.dt_seconds)
+        self.warm_start_actions = self.mpc.norm_warm_start
 
-         warm_start_actions = mpc.zonal_warm_start
+    def update_internal_model(self):
+        """Advance the controller logic by one CST-controlled time step."""
+        state_str = self.data_from_federation["inputs"].get(self.house_result_key)
+        if state_str and not isinstance(state_str, list):
+            try:
+                msg = json.loads(state_str)
+                if isinstance(msg, dict) and "state" in msg:
+                    self.current_state = deserialize_system_state(msg["state"])
+                elif not isinstance(msg, dict):
+                    logger.debug(
+                        f"Time {self.granted_time}s | Ignoring non-dict house result: {msg}"
+                    )
+                else:
+                    logger.warning(
+                        f"Time {self.granted_time}s | 'state' key missing in house result."
+                    )
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"Time {self.granted_time}s | Could not decode house result JSON."
+                )
 
-         house_action = {
-             "battery_power_w": float(action.battery_power_w)*1000.0,
-             "heat_pump_power_w": action.heat_pump_power_w.tolist(),
-             "ac_power_w": action.ac_power_w.tolist(),
-             "storage_discharge_w": action.storage_discharge_w.tolist(),
-         }
+        if self.current_state is None:
+            logger.info(
+                f"Time {self.granted_time}s | No valid state yet, publishing zero actions."
+            )
+            self.data_to_federation["publications"][self.house_action_key] = json.dumps(
+                {}
+            )
+            self.data_to_federation["publications"][
+                self.battery_action_key
+            ] = json.dumps({"normalized_power": 0.0})
+            return
 
-         max_p = b_config.max_power_w
-         if max_p <= 0:
-             norm_power = 0.0
-         else:
-             norm_power = float(jnp.clip((action.battery_power_w*1000) / max_p, -1.0, 1.0))
+        current_sim = build_simulator_from_state(self.sim_template, self.current_state)
 
-         battery_action = {"normalized_power": norm_power}
+        step_idx = int(self.granted_time // self.dt_seconds)
+        horizon = self.mpc.N
+        if step_idx + horizon >= len(self.dataset):
+            logger.info(
+                f"Time {self.granted_time}s | Not enough forecast horizon left, "
+                "stopping MPC control."
+            )
+            self.stop_time = self.granted_time
+            return
 
-         h.helicsPublicationPublishString(
-             pub_house_action, json.dumps(house_action)
-         )
-         h.helicsPublicationPublishString(
-             pub_battery_action, json.dumps(battery_action)
-         )
+        exo_forecast = self.dataset.get_forecast(step_idx, horizon)
+        action: SystemActions = self.mpc.solve(
+            current_sim,
+            exo_forecast,
+            warm_start_norm_actions=self.warm_start_actions,
+        )
+        self.warm_start_actions = self.mpc.norm_warm_start
 
-         logger.info(
-             f"Time {current_time}s | MPC actions: "
-             f"House battery_power_w={house_action['battery_power_w']:.1f}, "
-             f"norm_bat={battery_action['normalized_power']:.3f}"
-         )
+        requested_battery_power_w = float(action.battery_power_w)
+        current_soc = float(self.current_state.battery.soc)
+        max_p = float(self.b_config.max_power_w)
+        clipped_battery_power_w, next_soc = clip_battery_power_to_soc(
+            requested_battery_power_w=requested_battery_power_w,
+            current_soc=current_soc,
+            dt_seconds=float(self.dt_seconds),
+            max_power_w=max_p,
+            capacity_kwh=float(getattr(self.b_config, "capacity_kwh", 0.0)),
+        )
 
-     logger.info("Controller simulation finished. Finalizing federate.")
-     h.helicsFederateFinalize(fed)
-     h.helicsFederateFree(fed)
+        house_action = {
+            "battery_power_w": clipped_battery_power_w,
+            "heat_pump_power_w": action.heat_pump_power_w.tolist(),
+            "ac_power_w": action.ac_power_w.tolist(),
+            "storage_discharge_w": action.storage_discharge_w.tolist(),
+        }
+
+        if max_p <= 0:
+            norm_power = 0.0
+        else:
+            norm_power = float(
+                jnp.clip(clipped_battery_power_w / max_p, -1.0, 1.0)
+            )
+
+        battery_action = {"normalized_power": norm_power}
+
+        self.data_to_federation["publications"][self.house_action_key] = json.dumps(
+            house_action
+        )
+        self.data_to_federation["publications"][self.battery_action_key] = json.dumps(
+            battery_action
+        )
+
+        logger.info(
+            f"Time {self.granted_time}s | MPC actions: "
+            f"raw_bat={requested_battery_power_w:.1f}, "
+            f"House battery_power_w={house_action['battery_power_w']:.1f}, "
+            f"soc={current_soc:.3f}, "
+            f"soc_next={next_soc:.3f}, "
+            f"norm_bat={battery_action['normalized_power']:.3f}"
+        )
 
 
 def main():
-     parser = argparse.ArgumentParser(description="MPC Controller HELICS Federate")
-     parser.add_argument(
-         "--name", type=str, required=True,
-         help="Name of the federate (e.g., controller_0)"
-     )
-     parser.add_argument(
-         "--stop_time", type=float, default=86400,
-         help="Simulation stop time in seconds"
-     )
-     parser.add_argument(
-         "--dt", type=int, default=900,
-         help="Time step in seconds"
-     )
+    parser = argparse.ArgumentParser(description="MPC Controller HELICS Federate")
+    parser.add_argument(
+        "--name",
+        type=str,
+        required=True,
+        help="Name of the federate (e.g., controller_0)",
+    )
+    parser.add_argument(
+        "--stop_time",
+        type=float,
+        default=86400,
+        help="Simulation stop time in seconds",
+    )
+    parser.add_argument("--dt", type=int, default=900, help="Time step in seconds")
 
-     args = parser.parse_args()
-     logger.info(f"Starting MPC federate '{args.name}' with dt={args.dt}s")
+    args = parser.parse_args()
+    logger.info(f"Starting MPC federate '{args.name}' with dt={args.dt}s")
 
-     fed = None
-     try:
-         # HELICS
-         fed, sub_house_result, pubs = setup_federate(
-             federate_name=args.name,
-             dt_seconds=args.dt,
-         )
-
-         # MPC / Dataset
-         mpc, dataset, t_config, n_rooms, split_factors, b_config = \
-             setup_mpc_and_data(args.dt)
-
-         # Loop
-         run_simulation_loop(
-             fed=fed,
-             sub_house_result=sub_house_result,
-             pubs=pubs,
-             stop_time=args.stop_time,
-             dt_seconds=args.dt,
-             mpc=mpc,
-             dataset=dataset,
-             t_config=t_config,
-             n_rooms=n_rooms,
-             split_factors=split_factors,
-             b_config=b_config,
-         )
-
-     except Exception as e:
-         logger.error(f"An error occurred in {args.name}: {e}", exc_info=True)
-         if fed:
-             h.helicsFederateFinalize(fed)
-     finally:
-         h.helicsCloseLibrary()
+    federate = ControllerFederate(args.name, args.stop_time, args.dt)
+    try:
+        federate.create_federate()
+        federate.run_cosim_loop()
+    except Exception as e:
+        logger.error(f"An error occurred in {args.name}: {e}", exc_info=True)
+    finally:
+        if federate.hfed is not None:
+            federate.destroy_federate()
+        h.helicsCloseLibrary()
 
 
 if __name__ == "__main__":
-     main()
+    main()

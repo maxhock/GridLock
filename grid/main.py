@@ -4,11 +4,13 @@ Loads pandapower network, runs power flow, exchanges data via HELICS.
 """
 
 from cosim_toolbox.sims import Federate
-import helics as h
-import pandapower as pp
 import argparse
-import os
+import helics as h
 import json
+import math
+import os
+
+import pandapower as pp
 
 
 class GridFederate(Federate):
@@ -25,14 +27,7 @@ class GridFederate(Federate):
         """Initialize HELICS federate and load pandapower network."""
 
         # Load config from JSON file (bypassing CST's database requirement)
-        config_path = f"/config/tmp/{self.federate_name}_config.json" ###For Docker ###
-
-         ###For Testing without Docker###
-        #repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        #config_path = os.path.join(
-        #repo_root, "config", "tmp", f"{self.federate_name}_config.json"
-        #repo_root, "grid", "config", "tmp", "grid_config.json"
-        #)
+        config_path = f"/config/tmp/{self.federate_name}_config.json"  # For Docker
 
         with open(config_path, "r") as f:
             self.config = json.load(f)
@@ -66,7 +61,6 @@ class GridFederate(Federate):
         for pp_idx in self.load_indices:
             sub_key = f"node_{pp_idx}/P"
             h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
-            # Track in CST's data structures so get_data_from_federation() works
             self.inputs[sub_key] = {"type": "double", "key": sub_key}
             self.data_from_federation["inputs"][sub_key] = None
 
@@ -77,7 +71,6 @@ class GridFederate(Federate):
             h.helicsFederateRegisterGlobalPublication(
                 self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
             )
-            # Track in CST's data structures so send_data_to_federation() works
             self.pubs[pub_key] = {"type": "double", "key": pub_key}
             self.data_to_federation["publications"][pub_key] = None
 
@@ -89,24 +82,18 @@ class GridFederate(Federate):
         """Run power flow simulation for current timestep."""
         print(f"\n=== Time: {self.granted_time} ===")
 
-        ## Read subscriptions from CST's data structure
-        #for pp_idx in self.load_indices:
-        #    sub_key = f"node_{pp_idx}/P"
-        #    if sub_key in self.data_from_federation["inputs"]:
-        #        value_w = self.data_from_federation["inputs"][sub_key]
-        #        if value_w is not None:
-        #            self.net.load.at[pp_idx, "p_mw"] = value_w
         for pp_idx in self.load_indices:
             sub_key = f"node_{pp_idx}/P"
-            try:
-                sub = h.helicsFederateGetSubscription(self.hfed, sub_key)
-                value_w = h.helicsInputGetDouble(sub)
-            except:
-                print(f"ERROR reading key {sub_key}")
+            value_mw = self.data_from_federation["inputs"].get(sub_key)
+            if value_mw is None or isinstance(value_mw, list):
                 continue
-            if value_w is not None:
-                print(f"Grid received: {sub_key} = {value_w} MW")
-                self.net.load.at[pp_idx, "p_mw"] = value_w
+
+            # HELICS can return an invalid default (e.g. -1e49) for not-connected inputs.
+            if (not math.isfinite(value_mw)) or abs(value_mw) > 1e6:
+                continue
+
+            print(f"Grid received: {sub_key} = {value_mw} MW")
+            self.net.load.at[pp_idx, "p_mw"] = value_mw
         try:
             pp.runpp(self.net, numba=False)
             print("Power flow executed.")
@@ -137,8 +124,9 @@ def parse_args():
 
 def main():
     args = parse_args()
-    #For Testing without Docker###
-    grid_path = os.path.join("/data", "input", args.grid_file)##For Docker###
+    # For Docker:
+    grid_path = os.path.join("/data", "input", args.grid_file)
+    # For testing without Docker:
     #repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     #grid_path = os.path.join(repo_root, "data", "input", args.grid_file)
     federate = GridFederate("grid", grid_path)
