@@ -96,6 +96,22 @@ def test_load_timeseries_iso_timestamps(tmp_path) -> None:
     df = load_timeseries(str(path))
     assert df["timestamp"].dtype in (np.int64, np.float64)
     assert df["timestamp"].iloc[1] - df["timestamp"].iloc[0] == 3600
+    assert df["timestamp"].iloc[0] == 0
+
+
+def test_load_timeseries_normalizes_epoch_start(tmp_path) -> None:
+    """Epoch-based CSV timestamps are shifted to simulation-relative seconds."""
+    path = tmp_path / "epoch.csv"
+    pd.DataFrame(
+        {
+            "timestamp": [1672531200, 1672532100, 1672533000],
+            "base_load": [100, 200, 300],
+        }
+    ).to_csv(path, index=False)
+
+    df = load_timeseries(str(path))
+
+    assert list(df["timestamp"]) == [0, 900, 1800]
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +145,24 @@ def test_lookup_after_last(sample_timeseries: pd.DataFrame) -> None:
     p, q = lookup_power(sample_timeseries, 9999)
     assert p == 400.0
     assert q == 40.0
+
+
+def test_lookup_progresses_for_normalized_epoch_series(tmp_path) -> None:
+    """Relative simulation times advance through an epoch-based CSV after normalization."""
+    path = tmp_path / "epoch.csv"
+    pd.DataFrame(
+        {
+            "timestamp": [1672531200, 1672532100, 1672533000],
+            "base_load": [100.0, 200.0, 300.0],
+            "reactive_power": [10.0, 20.0, 30.0],
+        }
+    ).to_csv(path, index=False)
+
+    df = load_timeseries(str(path))
+
+    assert lookup_power(df, 0) == (100.0, 10.0)
+    assert lookup_power(df, 900) == (200.0, 20.0)
+    assert lookup_power(df, 1800) == (300.0, 30.0)
 
 
 # ---------------------------------------------------------------------------

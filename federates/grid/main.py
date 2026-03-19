@@ -10,6 +10,7 @@ Usage:
 import argparse
 import os
 import re
+from typing import Any, cast
 
 import pandapower as pp
 from cosim_toolbox.sims import Federate
@@ -22,11 +23,55 @@ from cosim_toolbox.dbms import create_metadata_manager
 
 _LOAD_RE = re.compile(r"/load_(\d+)/")
 
+_LOAD_COLUMN_DEFAULTS: dict[str, Any] = {
+    "const_z_p_percent": 0.0,
+    "const_i_p_percent": 0.0,
+    "const_z_q_percent": 0.0,
+    "const_i_q_percent": 0.0,
+    "scaling": 1.0,
+    "in_service": True,
+}
+
 
 def _parse_load_index(key: str) -> int | None:
     """Extract pandapower load index from a HELICS key like ``…/load_3/active_power``."""
     m = _LOAD_RE.search(key)
     return int(m.group(1)) if m else None
+
+
+def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
+    """Prepare an imported pandapower net for HELICS-driven co-simulation.
+
+    Older or externally generated pandapower JSON payloads may omit ZIP-load
+    columns that newer pandapower releases expect during ``runpp``. Those
+    columns describe the static load model split and can safely default to zero.
+
+    Grid demand in this project is driven by HELICS load-player federates, so
+    any static load powers imported with the raw grid are cleared here. The
+    federates then write the active/reactive power values for their assigned
+    load indices before every power-flow step.
+    """
+    if not hasattr(net, "load") or net.load is None or net.load.empty:
+        return net
+
+    added_columns: list[str] = []
+    for column_name, default_value in _LOAD_COLUMN_DEFAULTS.items():
+        if column_name in net.load.columns:
+            continue
+        net.load[column_name] = default_value
+        added_columns.append(column_name)
+
+    net.load["p_mw"] = 0.0
+    net.load["q_mvar"] = 0.0
+
+    if added_columns:
+        print(
+            "Sanitized net.load by adding columns: "
+            + ", ".join(added_columns)
+        )
+    print("Reset imported net.load active/reactive powers to zero for co-simulation.")
+
+    return net
 
 
 class GridFederate(Federate):
@@ -147,7 +192,8 @@ def load_net_from_metadata(
             f"Ensure infdb data setup has run."
         )
 
-    net = pp.from_json_string(data["net_json"])
+    net = cast(pp.pandapowerNet, pp.from_json_string(data["net_json"]))
+    sanitize_net_for_power_flow(net)
     print(f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads")
     return net
 
@@ -193,6 +239,9 @@ def main(
         args = parse_args()
         scenario_name = args.scenario
         federate_name = args.federate_name
+
+    if scenario_name is None or federate_name is None:
+        raise ValueError("scenario_name and federate_name are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 

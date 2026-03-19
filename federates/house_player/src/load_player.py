@@ -120,6 +120,17 @@ def load_timeseries(csv_path: str) -> pd.DataFrame:
 
     df = df.sort_values("timestamp").reset_index(drop=True)
 
+    # Simulation time advances relative to scenario start (typically 0..duration).
+    # If the CSV uses Unix epoch timestamps, shift them to start at 0 so lookup
+    # aligns with the CST/HELICS granted time.
+    first_timestamp = float(df["timestamp"].iloc[0])
+    if first_timestamp > 1_000_000:
+        df["timestamp"] = df["timestamp"] - first_timestamp
+        print(
+            "Normalized epoch timestamps to simulation-relative seconds "
+            f"(offset={first_timestamp:.0f})."
+        )
+
     if "reactive_power" not in df.columns:
         df["reactive_power"] = 0.0
 

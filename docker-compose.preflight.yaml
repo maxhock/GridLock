@@ -1,6 +1,114 @@
 name: gridlock-preflight
 
 services:
+  database:
+    image: timescale/timescaledb:latest-pg12
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${CST_DB:-copper}
+      POSTGRES_USER: ${CST_USER:-worker}
+      POSTGRES_PASSWORD: ${CST_PASSWORD:-worker}
+    command: postgres -c 'max_connections=1000'
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "${CST_USER:-worker}",
+          "-d",
+          "${CST_DB:-copper}"
+        ]
+      interval: 5s
+      retries: 5
+    restart: unless-stopped
+    volumes:
+      - cst_postgres:/var/lib/postgresql/data
+      - ./databases/cstdb/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - sim_net
+
+  mongodb:
+    image: mongodb/mongodb-community-server:7.0-ubuntu2204
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    expose:
+      - "27017"
+    environment:
+      MONGO_INITDB_DATABASE: ${CST_DB:-copper}
+      MONGODB_INITDB_ROOT_USERNAME: ${MONGODB_INITDB_ROOT_USERNAME:-admin}
+      MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_INITDB_ROOT_PASSWORD:-SuperSecret}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "echo 'db.adminCommand({ ping: 1 }).ok' | mongosh mongodb://$$MONGODB_INITDB_ROOT_USERNAME:$$MONGODB_INITDB_ROOT_PASSWORD@localhost:27017/admin --quiet"
+        ]
+      interval: 5s
+      retries: 10
+    volumes:
+      - cst_mongo:/data/db
+      - ./databases/cstdb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    restart: unless-stopped
+    networks:
+      - sim_net
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    profiles:
+      - cst-tools
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@gridlock.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    networks:
+      - sim_net
+    depends_on:
+      database:
+        condition: service_healthy
+
+  mongoexpress:
+    image: mongo-express:latest
+    profiles:
+      - cst-tools
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGODB_INITDB_ROOT_USERNAME:-admin}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGODB_INITDB_ROOT_PASSWORD:-SuperSecret}
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      - "8081:8081"
+    networks:
+      - sim_net
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:10.2.4-ubuntu
+    profiles:
+      - cst-tools
+    restart: unless-stopped
+    environment:
+      GF_LOG_LEVEL: info
+      CST_HOST: ${CST_HOST:-localhost}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    ports:
+      - "3000:3000"
+    networks:
+      - sim_net
+    volumes:
+      - ./databases/cstdb/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./databases/cstdb/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+
   infdb:
     image: infdb
     build:
@@ -8,8 +116,13 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
+    depends_on:
+      database:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     environment:
-      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://host.docker.internal}
+      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://mongodb}
       MONGO_PORT: ${PREFLIGHT_MONGO_PORT:-27017}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
@@ -18,6 +131,8 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: "no"
+    networks:
+      - sim_net
 
   composegen:
     image: composegen
@@ -27,10 +142,14 @@ services:
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:
+      database:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
       infdb:
         condition: service_completed_successfully
     environment:
-      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://host.docker.internal}
+      MONGO_HOST: ${PREFLIGHT_MONGO_HOST:-mongodb://mongodb}
       MONGO_PORT: ${PREFLIGHT_MONGO_PORT:-27017}
       RUNTIME_CST_HOST: ${RUNTIME_CST_HOST:-${CST_HOST:-localhost}}
       RUNTIME_POSTGRES_HOST: ${RUNTIME_POSTGRES_HOST:-${POSTGRES_HOST:-${CST_HOST:-localhost}}}
@@ -44,3 +163,12 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: "no"
+    networks:
+      - sim_net
+
+volumes:
+  cst_mongo:
+  cst_postgres:
+
+networks:
+  sim_net:

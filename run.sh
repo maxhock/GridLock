@@ -22,8 +22,53 @@ preflight_compose() {
   docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" "$@"
 }
 
-cleanup_preflight() {
+cleanup_preflight_stack() {
   preflight_compose down --remove-orphans >/dev/null 2>&1 || true
+}
+
+cleanup_preflight_jobs() {
+  preflight_compose rm -fsv infdb composegen >/dev/null 2>&1 || true
+}
+
+wait_for_preflight_service() {
+  local service_name="$1"
+  local timeout_seconds="${2:-60}"
+  local elapsed_seconds=0
+  local container_id
+  local service_state
+
+  container_id=$(preflight_compose ps -q "$service_name" 2>/dev/null || true)
+  if [ -z "$container_id" ]; then
+    echo "Preflight service '$service_name' did not start." >&2
+    return 1
+  fi
+
+  while [ "$elapsed_seconds" -lt "$timeout_seconds" ]; do
+    service_state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)
+
+    case "$service_state" in
+      healthy|running)
+        return 0
+        ;;
+      unhealthy|exited|dead)
+        echo "Preflight service '$service_name' is in unexpected state '$service_state'." >&2
+        return 1
+        ;;
+    esac
+
+    sleep 2
+    elapsed_seconds=$((elapsed_seconds + 2))
+  done
+
+  echo "Timed out waiting for preflight service '$service_name'." >&2
+  return 1
+}
+
+start_preflight_datastores() {
+  echo "=== Step 1: start CST databases ==="
+  preflight_compose up -d database mongodb
+  wait_for_preflight_service database
+  wait_for_preflight_service mongodb
 }
 
 require_preflight_success() {
@@ -31,7 +76,7 @@ require_preflight_success() {
   local container_id
   local exit_code
 
-  container_id=$(preflight_compose ps -q "$service_name" 2>/dev/null || true)
+  container_id=$(preflight_compose ps -a -q "$service_name" 2>/dev/null || true)
   if [ -z "$container_id" ]; then
     echo "Preflight service '$service_name' did not start successfully." >&2
     return 1
@@ -44,9 +89,12 @@ require_preflight_success() {
   fi
 }
 
-trap cleanup_preflight EXIT
+trap cleanup_preflight_stack EXIT
+start_preflight_datastores
+
+echo "=== Step 2: preflight (infdb + composegen) ==="
 set +e
-preflight_compose up --build --abort-on-container-exit --exit-code-from composegen
+preflight_compose up --build --abort-on-container-exit --exit-code-from composegen --no-deps infdb composegen
 PREFLIGHT_EXIT_CODE=$?
 set -e
 
@@ -57,8 +105,7 @@ fi
 require_preflight_success infdb
 require_preflight_success composegen
 
-trap - EXIT
-cleanup_preflight
+cleanup_preflight_jobs
 
 # Step 3: Launch the experiment with docker compose
 echo "=== Step 3: docker compose up ==="

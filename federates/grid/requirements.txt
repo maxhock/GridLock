@@ -3,4 +3,4 @@ cosim-toolbox
 
 # HELICS and simulation dependencies
 helics[cli]
-pandapower
+pandapower==3.3.2
