@@ -369,7 +369,7 @@ def _resolve_timeseries_path(child_data: dict) -> str:
 
     # Standard profile type (H0, H25, …) – use default test file
     # TODO: Replace with infdb-derived timeseries once available
-    return "/data/input/building_timeseries.csv"
+    return "/data/input/sample_house.csv"
 
 
 # ---------------------------------------------------------------------------
