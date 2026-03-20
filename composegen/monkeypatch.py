@@ -59,11 +59,26 @@ def define_yaml(
         use_meta_db (str): Metadata backend type.
         use_data_db (str): Data backend type.
     """
-    runtime_cst_host = env.environ.get("RUNTIME_CST_HOST", env.cst_host)
-    runtime_pg_host = env.environ.get("RUNTIME_POSTGRES_HOST", env.cst_pg_host)
-    runtime_pg_port = env.environ.get("RUNTIME_POSTGRES_PORT", env.cst_pg_port)
-    runtime_mg_host = env.environ.get("RUNTIME_MONGO_HOST", env.cst_mg_host)
-    runtime_mg_port = env.environ.get("RUNTIME_MONGO_PORT", env.cst_mg_port)
+    runtime_cst_host = env.environ.get(
+        "CST_BROKER_HOST",
+        env.cst_host,
+    )
+    runtime_pg_host = env.environ.get(
+        "CST_RUNTIME_POSTGRES_HOST",
+        runtime_cst_host,
+    )
+    runtime_pg_port = env.environ.get(
+        "CST_POSTGRES_PORT",
+        env.cst_pg_port,
+    )
+    runtime_mg_host = env.environ.get(
+        "CST_RUNTIME_MONGO_HOST",
+        f"mongodb://{runtime_cst_host}",
+    )
+    runtime_mg_port = env.environ.get(
+        "CST_MONGO_PORT",
+        env.cst_mg_port,
+    )
 
     fed_def = None
     with create_metadata_manager(use_meta_db) as mgr:

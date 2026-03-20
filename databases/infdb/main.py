@@ -35,6 +35,15 @@ def _coerce_config_value(key: str, value: str) -> str | int:
     return value
 
 
+def _first_env_value(*names: str) -> str | None:
+    """Return the first non-empty environment value from the given names."""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
 def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[str, str | None]:
     """Create a runtime InfDB config directory with env overrides applied.
 
@@ -58,17 +67,17 @@ def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[st
         "postgres", {}
     )
     overrides = {
-        "user": "SERVICES_POSTGRES_USER",
-        "password": "SERVICES_POSTGRES_PASSWORD",
-        "db": "SERVICES_POSTGRES_DB",
-        "host": "SERVICES_POSTGRES_HOST",
-        "exposed_port": "SERVICES_POSTGRES_EXPOSED_PORT",
-        "epsg": "SERVICES_POSTGRES_EPSG",
+        "user": ("INFDB_USER",),
+        "password": ("INFDB_PASSWORD",),
+        "db": ("INFDB_DB",),
+        "host": ("INFDB_HOST",),
+        "exposed_port": ("INFDB_PORT",),
+        "epsg": ("INFDB_EPSG",),
     }
 
     changed = False
-    for key, env_name in overrides.items():
-        env_value = os.getenv(env_name)
+    for key, env_names in overrides.items():
+        env_value = _first_env_value(*env_names)
         if env_value:
             postgres_config[key] = _coerce_config_value(key, env_value)
             changed = True

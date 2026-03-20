@@ -1,16 +1,21 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-echo "Loading environment variables from .env file..."
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+ENV_FILE="$SCRIPT_DIR/../../config/preflight.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+	echo "Missing env file: $ENV_FILE" >&2
+	exit 1
+fi
+
 set -a
-[ -f $(dirname "$0")/../../.env ] && . $(dirname "$0")/../../.env
+. "$ENV_FILE"
 set +a
 
-PARAM="${1:-$AGS}"
+PARAM="${1:-${AGS:-}}"
 OPTIONS="${2:-}"
 
-echo "Starting docker compose..."
 export AGS="$PARAM"
 
-# echo "Starting docker compose..."
-docker compose -f "$(dirname "$0")/compose.yml" up $OPTIONS
+docker compose -f "$SCRIPT_DIR/compose.yml" up $OPTIONS

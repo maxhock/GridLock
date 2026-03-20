@@ -4,7 +4,7 @@ infdb:
         path: "infdb.log"
         level: "INFO" # ERROR, WARNING, INFO, DEBUG
     hosts:
-        postgres: # "None" values are resolved from environment variables (SERVICES_POSTGRES_*)
+        postgres: # "None" values are resolved from environment variables (INFDB_*)
             user: "None"
             password: "None"
             db: "None"
