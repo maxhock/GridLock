@@ -1,32 +1,78 @@
 # PowerShell equivalent of run.sh
 $ErrorActionPreference = "Stop"
 
-# Step 1: Run infdb data setup to resolve grids and write to CST metadata store
-Write-Host "=== Step 1: infdb data setup ==="
-docker build -f databases/infdb/Dockerfile -t infdb databases/infdb
-docker run --rm `
-  -v "${PSScriptRoot}/databases/infdb/configs:/workspaces/infdb/configs:ro" `
-  -v "${PSScriptRoot}/meta_store:/workspaces/infdb/meta_store" `
-  -v "${PSScriptRoot}/config:/config:ro" `
-  --env-file config/preflight.env `
-  --add-host=host.docker.internal:host-gateway `
-  infdb
+$PreflightEnvFile = if ($env:PREFLIGHT_ENV_FILE) { $env:PREFLIGHT_ENV_FILE } else { Join-Path $PSScriptRoot "config/preflight.env" }
+$PreflightComposeFile = Join-Path $PSScriptRoot "docker-compose.preflight.yaml"
+$GeneratedDir = Join-Path $PSScriptRoot "generated"
+$ComposeFile = Join-Path $GeneratedDir "docker-compose.yaml"
 
-# Step 2: Build and run composegen (reads manifest.json from meta_store)
-Write-Host "=== Step 2: composegen ==="
-docker build -f composegen/Dockerfile -t composegen composegen
-docker run --rm `
-  -v "${PSScriptRoot}/config:/config" `
-  -v "${PSScriptRoot}/data:/data" `
-  -v "${PSScriptRoot}/meta_store:/app/meta_store" `
-  composegen
+function Write-Stage {
+  param([string]$Message)
 
-# Step 3: Launch the experiment with docker compose
-Write-Host "=== Step 3: docker compose up ==="
-$metaDir = Join-Path $PSScriptRoot 'meta_store'
-$latest = Get-ChildItem -Path (Join-Path $metaDir '*.yml') -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $latest) {
-	$latest = Get-ChildItem -Path (Join-Path $metaDir '*.yaml') -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  Write-Host "=== $Message ==="
 }
-$composeFile = if ($latest) { $latest.FullName } else { Join-Path $metaDir 'docker-compose.yml' }
-docker compose -f $composeFile up --build --remove-orphans
+
+function Import-EnvFile {
+  if (-not (Test-Path $PreflightEnvFile)) {
+    throw "Missing env file: $PreflightEnvFile"
+  }
+
+  foreach ($line in Get-Content $PreflightEnvFile) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith("#")) {
+      continue
+    }
+
+    $separatorIndex = $trimmed.IndexOf("=")
+    if ($separatorIndex -lt 0) {
+      continue
+    }
+
+    $name = $trimmed.Substring(0, $separatorIndex).Trim()
+    $value = $trimmed.Substring($separatorIndex + 1)
+    Set-Item -Path "Env:$name" -Value $value
+  }
+
+  $env:PREFLIGHT_ENV_FILE = $PreflightEnvFile
+  if (-not $env:INFDB_ENV_FILE) {
+    $env:INFDB_ENV_FILE = $PreflightEnvFile
+  }
+}
+
+function Invoke-PreflightCompose {
+  param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ComposeArgs
+  )
+
+  & docker compose --env-file $PreflightEnvFile -f $PreflightComposeFile @ComposeArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "docker compose failed with exit code $LASTEXITCODE"
+  }
+}
+
+function Cleanup-Preflight {
+  try {
+    & docker compose --env-file $PreflightEnvFile -f $PreflightComposeFile down --remove-orphans | Out-Null
+  }
+  catch {
+  }
+}
+
+Write-Stage "Stage 1: load environment"
+Import-EnvFile
+
+try {
+  Write-Stage "Stage 2: run preflight compose"
+  Invoke-PreflightCompose up -d --wait database mongodb
+  Invoke-PreflightCompose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps infdb composegen
+
+  Write-Stage "Stage 3: run experiment compose"
+  & docker compose -f $ComposeFile up --build --quiet-build --remove-orphans --abort-on-container-exit
+  if ($LASTEXITCODE -ne 0) {
+    throw "docker compose failed with exit code $LASTEXITCODE"
+  }
+}
+finally {
+  Cleanup-Preflight
+}

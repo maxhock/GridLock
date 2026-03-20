@@ -12,15 +12,14 @@ print_stage() {
 }
 
 load_env() {
-  if [ -f "$PREFLIGHT_ENV_FILE" ]; then
-    set -a
-    source "$PREFLIGHT_ENV_FILE"
-    set +a
-  elif [ -f "$SCRIPT_DIR/cosim.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/cosim.env"
-    set +a
+  if [ ! -f "$PREFLIGHT_ENV_FILE" ]; then
+    echo "Missing env file: $PREFLIGHT_ENV_FILE" >&2
+    exit 1
   fi
+
+  set -a
+  source "$PREFLIGHT_ENV_FILE"
+  set +a
 
   export PREFLIGHT_ENV_FILE
   export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
