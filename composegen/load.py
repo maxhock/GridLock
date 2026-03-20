@@ -1,7 +1,7 @@
 import traceback
 import json
 from pathlib import Path
-from treelib import Tree
+from treelib.tree import Tree
 from cosim_toolbox.dbms import create_metadata_manager
 from cosim_toolbox.sims import (
     FederationConfig,
@@ -20,7 +20,7 @@ from monkeypatch import apply_monkeypatches
 
 def _create_metadata_manager(
     use_meta_db: str,
-    meta_store_path: str = "meta_store",
+    meta_store_path: str = "generated",
 ):
     """Create CST metadata manager with backend-specific options."""
     kwargs = {"backend": use_meta_db}
@@ -70,7 +70,7 @@ def map_params_to_class(federate_class: str) -> dict:
 def normalize_federation_keys(
     federation_name: str,
     use_meta_db: str,
-    meta_store_path: str = "meta_store",
+    meta_store_path: str = "generated",
 ) -> None:
     """Normalize HELICS keys in federation metadata for json or mongo backend."""
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
@@ -106,7 +106,7 @@ def normalize_federation_keys(
 def discover_grid_federates(
     grid_id: str,
     use_meta_db: str,
-    meta_store_path: str = "meta_store",
+    meta_store_path: str = "generated",
     location: list[dict] | None = None,
 ) -> list[str]:
     """Derive grid federate names from the experiment YAML location list.
@@ -170,7 +170,7 @@ def discover_grid_federates(
 def _read_load_list(
     grid_fed_name: str,
     use_meta_db: str,
-    meta_store_path: str = "meta_store",
+    meta_store_path: str = "generated",
 ) -> list[tuple[int, str, int]]:
     """Read pandapower load list from the custom_metadata store.
 

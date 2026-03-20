@@ -1,4 +1,5 @@
 from typing import Optional
+from pathlib import Path
 
 import cosim_toolbox as env
 from cosim_toolbox.sims import DockerRunner, FederateConfig
@@ -33,7 +34,7 @@ def _service(
     # _svc += "    working_dir: /home/worker/case\n"
     _svc += "    volumes:\n"
     _svc += "      - ../data:/data\n"
-    _svc += "      - ../meta_store:/app/meta_store\n"
+    _svc += "      - ../generated:/app/meta_store\n"
     _svc += "    extra_hosts:\n"
     _svc += '      - "host.docker.internal:host-gateway"\n'
     if depends is not None:
@@ -145,7 +146,8 @@ def define_yaml(
         + yaml_str
     )
 
-    with open("./meta_store/" + scenario_name + ".yaml", "w") as op:
+    Path("./generated").mkdir(parents=True, exist_ok=True)
+    with open("./generated/docker-compose.yaml", "w") as op:
         op.write(yaml_str)
 
 

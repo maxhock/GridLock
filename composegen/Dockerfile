@@ -4,8 +4,8 @@ FROM python:3.11-slim AS base
 WORKDIR /app
 
 # Create mount points and mark them as volumes
-RUN mkdir -p /config /data /app/meta_store
-VOLUME ["/config", "/data", "/app/meta_store"]
+RUN mkdir -p /config /data /app/generated
+VOLUME ["/config", "/data", "/app/generated"]
 
 # Install omegaconf, pyyaml, pandas, and openpyxl for config parsing and Excel reading
 COPY requirements.txt .

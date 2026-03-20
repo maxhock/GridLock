@@ -126,7 +126,7 @@ services:
       MONGO_PORT: ${PREFLIGHT_MONGO_PORT:-27017}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
-      - ${HOST_WORKSPACE_FOLDER:-.}/meta_store:/app/meta_store
+      - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -159,7 +159,7 @@ services:
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
       - ${HOST_WORKSPACE_FOLDER:-.}/data:/data
-      - ${HOST_WORKSPACE_FOLDER:-.}/meta_store:/app/meta_store
+      - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: "no"

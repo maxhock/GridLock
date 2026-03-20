@@ -6,7 +6,7 @@ read it at runtime without needing InfDB access themselves.
 
 Grid nets → CST metadata store (collection "custom_metadata")
 Timeseries → CST timeseries store (preloaded TSRecords)  [future]
-Manifest   → meta_store/manifest.json (federate names for composegen)
+Manifest   → generated/manifest.json (federate names for composegen)
 """
 
 import argparse
@@ -24,7 +24,7 @@ from src.infdb_data import resolve_grid_queries
 
 
 DEFAULT_EXPERIMENT_PATH = "/config/experiment-LV.yml"
-DEFAULT_META_STORE = "meta_store"
+DEFAULT_META_STORE = "generated"
 DEFAULT_INFDB_CONFIG_DIR = "configs"
 
 

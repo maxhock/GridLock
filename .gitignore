@@ -2,8 +2,11 @@ config/tmp/
 data/output/
 __pycache__/
 .venv/
-meta_store/*/*
-meta_store/*.yaml
+generated/*
+generated/**/*
+!generated/.gitkeep
+meta_store/*
+meta_store/**/*
 *.pyc
 *.pyo
 *.pyd
