@@ -19,7 +19,7 @@ def main():
     if args.config_file:
         config_path = Path(args.config_file)
     else:
-        file_name = "experiment-LV.yml"
+        file_name = "experiment.yaml"
         config_path = Path("/config/" + file_name)
         # Fallback if experiment.yml logic from notebook was specific
         if not config_path.exists():

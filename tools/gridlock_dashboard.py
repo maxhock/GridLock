@@ -203,7 +203,7 @@ def load_db_config() -> DbConfig:
 
 def available_experiment_files() -> list[Path]:
     """Return experiment files in config/, preferring the current default."""
-    files = sorted(CONFIG_DIR.glob("experiment*.yml"))
+    files = sorted(set(CONFIG_DIR.glob("experiment*.yml")) | set(CONFIG_DIR.glob("experiment*.yaml")))
     if DEFAULT_EXPERIMENT in files:
         files.remove(DEFAULT_EXPERIMENT)
         files.insert(0, DEFAULT_EXPERIMENT)
@@ -1127,12 +1127,13 @@ def process_is_running(process: subprocess.Popen[str] | None) -> bool:
     return process is not None and process.poll() is None
 
 
-def start_run() -> None:
+def start_run(experiment_path: Path) -> None:
     """Launch run.sh in the repository root and stream output to a log file."""
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    RUN_LOG.write_text("")
     with RUN_LOG.open("w") as log_file:
         process = subprocess.Popen(
-            ["bash", str(RUN_SCRIPT)],
+            ["bash", str(RUN_SCRIPT), str(experiment_path)],
             cwd=REPO_ROOT,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -1258,7 +1259,7 @@ def main() -> None:
         st.metric("Analysis Schema", experiment_schema(cfg))
     with right:
         if st.button("Start run.sh", disabled=running, type="primary"):
-            start_run()
+            start_run(selected_experiment_path)
             time.sleep(2)
             st.rerun()
         if st.session_state.get("run_started_at"):

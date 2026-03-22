@@ -23,7 +23,7 @@ from cosim_toolbox.dbms import create_metadata_manager
 from src.infdb_data import resolve_grid_queries
 
 
-DEFAULT_EXPERIMENT_PATH = "/config/experiment-LV.yml"
+DEFAULT_EXPERIMENT_PATH = "/config/experiment.yaml"
 DEFAULT_META_STORE = "generated"
 DEFAULT_INFDB_CONFIG_DIR = "configs"
 

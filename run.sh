@@ -6,6 +6,8 @@ PREFLIGHT_ENV_FILE="${PREFLIGHT_ENV_FILE:-$SCRIPT_DIR/config/preflight.env}"
 PREFLIGHT_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.preflight.yaml"
 GENERATED_DIR="$SCRIPT_DIR/generated"
 COMPOSE_FILE="$GENERATED_DIR/docker-compose.yaml"
+DEFAULT_EXPERIMENT_FILE="$SCRIPT_DIR/config/experiment.yaml"
+RUNTIME_EXPERIMENT_FILE="$GENERATED_DIR/selected-experiment.yaml"
 
 print_stage() {
   echo "=== $1 ==="
@@ -29,13 +31,39 @@ preflight_compose() {
   docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" "$@"
 }
 
+resolve_experiment_path() {
+  local requested_path="${1:-$DEFAULT_EXPERIMENT_FILE}"
+
+  if [[ "$requested_path" != /* ]]; then
+    requested_path="$PWD/$requested_path"
+  fi
+
+  if [ ! -f "$requested_path" ]; then
+    echo "Missing experiment config: $requested_path" >&2
+    exit 1
+  fi
+
+  EXPERIMENT_FILE="$(realpath "$requested_path")"
+  export EXPERIMENT_FILE
+}
+
+prepare_runtime_experiment() {
+  mkdir -p "$GENERATED_DIR"
+  cp "$EXPERIMENT_FILE" "$RUNTIME_EXPERIMENT_FILE"
+  export GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER="/app/generated/selected-experiment.yaml"
+}
+
 cleanup() {
   preflight_compose down --remove-orphans >/dev/null 2>&1 || true
 }
 
 main() {
+  resolve_experiment_path "${1:-}"
+
   print_stage "Stage 1: load environment"
   load_env
+  prepare_runtime_experiment
+  echo "Using experiment config: $EXPERIMENT_FILE"
 
   trap cleanup EXIT
 

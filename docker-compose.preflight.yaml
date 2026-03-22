@@ -124,12 +124,18 @@ services:
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017
+      GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER: ${GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER:-/config/experiment.yaml}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
       - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
     extra_hosts:
       - host.docker.internal:host-gateway
+    command:
+      - python
+      - main.py
+      - --experiment
+      - ${GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER:-/config/experiment.yaml}
     restart: "no"
     networks:
       - sim_net
@@ -156,12 +162,15 @@ services:
       CST_RUNTIME_POSTGRES_PORT: ${CST_POSTGRES_PORT}
       CST_RUNTIME_MONGO_HOST: mongodb://${CST_BROKER_HOST}
       CST_RUNTIME_MONGO_PORT: ${CST_MONGO_PORT}
+      GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER: ${GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER:-/config/experiment.yaml}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
       - ${HOST_WORKSPACE_FOLDER:-.}/data:/data
       - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
     extra_hosts:
       - host.docker.internal:host-gateway
+    command:
+      - ${GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER:-/config/experiment.yaml}
     restart: "no"
     networks:
       - sim_net
