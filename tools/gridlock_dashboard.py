@@ -241,6 +241,21 @@ def location_entries(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return location if isinstance(location, list) else []
 
 
+def expected_grid_ids(cfg: dict[str, Any]) -> list[str]:
+    """Derive resolved grid ids directly from the selected experiment config."""
+    grid_id = root_grid_id(cfg)
+    resolved: list[str] = []
+    for entry in location_entries(cfg):
+        plz = entry.get("plz")
+        kcid = entry.get("kcid")
+        bcid = entry.get("bcid")
+        if plz is None:
+            continue
+        if kcid is not None and bcid is not None:
+            resolved.append(f"{grid_id}_{plz}_{kcid}_{bcid}")
+    return resolved
+
+
 def parse_selected_grid_identity(
     selected_grid: str,
     base_grid_id: str,
@@ -950,29 +965,6 @@ def hex_to_rgb(color: str) -> list[int]:
     return [int(color[i : i + 2], 16) for i in (0, 2, 4)]
 
 
-def render_node_legend() -> None:
-    """Render a small legend for topology node kinds."""
-    st.markdown(
-        """
-        <div style="display:flex;gap:0.9rem;flex-wrap:wrap;margin:0.35rem 0 0.8rem 0;">
-            <span style="display:inline-flex;align-items:center;gap:0.45rem;font-size:0.9rem;">
-                <span style="width:10px;height:10px;border-radius:999px;background:#2f855a;display:inline-block;"></span>
-                Slack / ext grid
-            </span>
-            <span style="display:inline-flex;align-items:center;gap:0.45rem;font-size:0.9rem;">
-                <span style="width:10px;height:10px;border-radius:999px;background:#d97706;display:inline-block;"></span>
-                Load bus
-            </span>
-            <span style="display:inline-flex;align-items:center;gap:0.45rem;font-size:0.9rem;">
-                <span style="width:10px;height:10px;border-radius:999px;background:#2563eb;display:inline-block;"></span>
-                Bus
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def format_config_value(value: Any) -> str:
     """Format nested config values compactly for node labels."""
     if isinstance(value, dict):
@@ -1089,6 +1081,8 @@ def map_deck(
         )
     if not map_nodes.empty:
         node_rows = map_nodes.copy()
+        if "color" not in node_rows.columns:
+            node_rows["color"] = "#2563eb"
         node_rows["fill_color"] = node_rows["color"].apply(hex_to_rgb)
         layers.append(
             pdk.Layer(
@@ -1130,6 +1124,8 @@ def process_is_running(process: subprocess.Popen[str] | None) -> bool:
 def start_run(experiment_path: Path) -> None:
     """Launch run.sh in the repository root and stream output to a log file."""
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    st.cache_data.clear()
+    st.session_state.pop("resolved_grid", None)
     RUN_LOG.write_text("")
     with RUN_LOG.open("w") as log_file:
         process = subprocess.Popen(
@@ -1150,6 +1146,13 @@ def read_run_log() -> str:
     if not RUN_LOG.exists():
         return ""
     return RUN_LOG.read_text()
+
+
+def visible_run_log() -> str:
+    """Return only log content relevant to the current dashboard session."""
+    if st.session_state.get("run_started_at") is None:
+        return ""
+    return read_run_log()
 
 
 def dependency_messages() -> list[str]:
@@ -1248,6 +1251,8 @@ def main() -> None:
         st.session_state["run_process"] = None
     if "run_started_at" not in st.session_state:
         st.session_state["run_started_at"] = None
+        if RUN_LOG.exists():
+            RUN_LOG.write_text("")
 
     run_process = st.session_state.get("run_process")
     running = process_is_running(run_process)
@@ -1287,10 +1292,6 @@ def main() -> None:
     else:
         st.warning(status_message)
 
-    with st.expander("Run log", expanded=running):
-        log_content = read_run_log()
-        st.code(log_content[-12000:] if log_content else "No run output yet.", language="text")
-
     topology_grid_ids: list[str] = []
     metadata_df = pd.DataFrame()
     if status == "ready":
@@ -1299,7 +1300,9 @@ def main() -> None:
     elif not expect_connections:
         st.info("Database-backed views stay idle until you start `run.sh` from this dashboard.")
 
-    selected_grid_options = topology_grid_ids
+    selected_grid_options = expected_grid_ids(cfg)
+    if not selected_grid_options:
+        selected_grid_options = topology_grid_ids
     if not selected_grid_options and not metadata_df.empty:
         root_id = root_grid_id(cfg)
         selected_grid_options = sorted(
@@ -1313,7 +1316,7 @@ def main() -> None:
             )
         return
 
-    selected_grid = st.sidebar.selectbox("Resolved grid", selected_grid_options)
+    selected_grid = st.sidebar.selectbox("Resolved grid", selected_grid_options, key="resolved_grid")
     location_entry = match_location_entry(selected_grid, root_grid_id(cfg), cfg)
     marker_df = resolve_marker(location_entry)
     nodes = pd.DataFrame()
@@ -1360,17 +1363,6 @@ def main() -> None:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="gridlock-card">', unsafe_allow_html=True)
-    st.subheader("Topology")
-    render_node_legend()
-    if nodes.empty or edges.empty:
-        st.info("Topology rows are not available in Postgres yet.")
-    elif nx is None:
-        st.dataframe(nodes, width="stretch")
-    else:
-        st.plotly_chart(topology_figure(nodes, edges), width="stretch")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="gridlock-card">', unsafe_allow_html=True)
     st.subheader("Grid On Map")
     if marker_df.empty and map_nodes.empty:
         st.info("No coordinates were resolved from the selected experiment entry.")
@@ -1412,6 +1404,10 @@ def main() -> None:
             st.info("No CST timeseries catalog could be read from Postgres.")
         else:
             st.dataframe(catalog, width="stretch")
+
+    with st.expander("Run log", expanded=running):
+        log_content = visible_run_log()
+        st.code(log_content[-12000:] if log_content else "No run output yet.", language="text")
 
 
 if __name__ == "__main__":

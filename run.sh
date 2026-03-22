@@ -7,7 +7,6 @@ PREFLIGHT_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.preflight.yaml"
 GENERATED_DIR="$SCRIPT_DIR/generated"
 COMPOSE_FILE="$GENERATED_DIR/docker-compose.yaml"
 DEFAULT_EXPERIMENT_FILE="$SCRIPT_DIR/config/experiment.yaml"
-RUNTIME_EXPERIMENT_FILE="$GENERATED_DIR/selected-experiment.yaml"
 
 print_stage() {
   echo "=== $1 ==="
@@ -49,8 +48,11 @@ resolve_experiment_path() {
 
 prepare_runtime_experiment() {
   mkdir -p "$GENERATED_DIR"
+  local experiment_basename
+  experiment_basename="$(basename "$EXPERIMENT_FILE")"
+  RUNTIME_EXPERIMENT_FILE="$GENERATED_DIR/$experiment_basename"
   cp "$EXPERIMENT_FILE" "$RUNTIME_EXPERIMENT_FILE"
-  export GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER="/app/generated/selected-experiment.yaml"
+  export GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER="/app/generated/$experiment_basename"
 }
 
 cleanup() {
