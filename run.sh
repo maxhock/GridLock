@@ -30,6 +30,10 @@ preflight_compose() {
   docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" "$@"
 }
 
+cleanup_non_db_preflight() {
+  preflight_compose rm -sf infdb composegen pgadmin mongoexpress grafana >/dev/null 2>&1 || true
+}
+
 resolve_experiment_path() {
   local requested_path="${1:-$DEFAULT_EXPERIMENT_FILE}"
 
@@ -55,10 +59,6 @@ prepare_runtime_experiment() {
   export GRIDLOCK_EXPERIMENT_PATH_IN_CONTAINER="/app/generated/$experiment_basename"
 }
 
-cleanup() {
-  preflight_compose down --remove-orphans >/dev/null 2>&1 || true
-}
-
 main() {
   resolve_experiment_path "${1:-}"
 
@@ -67,7 +67,7 @@ main() {
   prepare_runtime_experiment
   echo "Using experiment config: $EXPERIMENT_FILE"
 
-  trap cleanup EXIT
+  trap cleanup_non_db_preflight EXIT
 
   print_stage "Stage 2: run preflight compose"
   preflight_compose up -d --wait database mongodb
@@ -75,6 +75,11 @@ main() {
 
   print_stage "Stage 3: run experiment compose"
   docker compose -f "$COMPOSE_FILE" up --build --quiet-build --remove-orphans --abort-on-container-exit
+
+  print_stage "Stage 4: preflight services remain running"
+  echo "CST Postgres and Mongo are still up."
+  echo "Stop them manually with:"
+  echo "  docker compose --env-file \"$PREFLIGHT_ENV_FILE\" -f \"$PREFLIGHT_COMPOSE_FILE\" down"
 }
 
 main "$@"
