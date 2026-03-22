@@ -1,9 +1,9 @@
 general:
  name: "DemoGrid"
  start_time: 
- end_time: 86400
- time_step: 3600
- duration: 86400
+ end_time: 613200
+ time_step: 900
+ duration: 613200
  use_meta_db: "mongo"
  use_data_db: "postgres"
 federation:
@@ -14,14 +14,14 @@ federation:
     location:
       - plz: 91301
         kcid: 1
-        bcid: 3
+        bcid: 4
   sub_federates:
     - id: "loadhouse_0"
       name: "Load profile house"
       class: "load"
       config:
         placement: "fill"  # pandapower load indices; use "fill" for all loads
-        electrical_load: "H0" # "H25", "electricloadcurve.csv"
+        electrical_load: "h0_profile_1999_power.csv" # "H25", "electricloadcurve.csv"
         heat_load: "" # "heatloadcurve.csv"
     # - id: "house_0"
     #   name: "sim house"
