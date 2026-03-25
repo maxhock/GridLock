@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+import signal
 import subprocess
 import time
 from typing import Any
@@ -73,74 +74,6 @@ class DbConfig:
     mongo_db: str
     mongo_user: str | None
     mongo_password: str | None
-
-
-def inject_styles() -> None:
-    """Apply a lightweight visual treatment for the dashboard."""
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(14, 116, 144, 0.14), transparent 24rem),
-                radial-gradient(circle at top right, rgba(180, 83, 9, 0.16), transparent 28rem),
-                linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        .gridlock-hero {
-            background: linear-gradient(135deg, #082f49 0%, #0f766e 52%, #d97706 100%);
-            color: #f8fafc;
-            border-radius: 24px;
-            padding: 1.4rem 1.6rem;
-            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
-            margin-bottom: 1rem;
-        }
-        .gridlock-hero h1 {
-            margin: 0;
-            font-size: 2rem;
-            line-height: 1.1;
-        }
-        .gridlock-hero p {
-            margin: 0.45rem 0 0 0;
-            max-width: 56rem;
-            color: rgba(248, 250, 252, 0.92);
-        }
-        .gridlock-card {
-            background: rgba(255, 255, 255, 0.82);
-            border: 1px solid rgba(148, 163, 184, 0.28);
-            border-radius: 20px;
-            padding: 1rem 1.1rem;
-            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
-            backdrop-filter: blur(8px);
-        }
-        .gridlock-chip-row {
-            display: flex;
-            gap: 0.65rem;
-            flex-wrap: wrap;
-            margin-top: 0.9rem;
-        }
-        .gridlock-chip {
-            background: rgba(255, 255, 255, 0.16);
-            color: #f8fafc;
-            border: 1px solid rgba(255, 255, 255, 0.24);
-            border-radius: 999px;
-            padding: 0.35rem 0.7rem;
-            font-size: 0.85rem;
-        }
-        div[data-testid="stMetric"] {
-            background: rgba(255, 255, 255, 0.78);
-            border: 1px solid rgba(148, 163, 184, 0.24);
-            padding: 0.9rem 1rem;
-            border-radius: 18px;
-            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def render_header(cfg: dict[str, Any]) -> None:
@@ -344,7 +277,7 @@ def resolve_marker(entry: dict[str, Any] | None) -> pd.DataFrame:
     )
 
 
-def mongo_client(db_cfg: DbConfig) -> MongoClient | None:
+def mongo_client(db_cfg: DbConfig) -> Any | None:
     """Create a Mongo client if the dependency is available."""
     if MongoClient is None:
         return None
@@ -1126,6 +1059,7 @@ def start_run(experiment_path: Path) -> None:
     GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     st.cache_data.clear()
     st.session_state.pop("resolved_grid", None)
+    st.session_state["run_cancel_requested_at"] = None
     RUN_LOG.write_text("")
     with RUN_LOG.open("w") as log_file:
         process = subprocess.Popen(
@@ -1139,6 +1073,21 @@ def start_run(experiment_path: Path) -> None:
 
     st.session_state["run_process"] = process
     st.session_state["run_started_at"] = datetime.now().isoformat(timespec="seconds")
+
+
+def cancel_run() -> None:
+    """Request termination of the current experiment run and its process group."""
+    process = st.session_state.get("run_process")
+    if not process_is_running(process):
+        return
+
+    st.session_state["run_cancel_requested_at"] = datetime.now().isoformat(timespec="seconds")
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except OSError:
+        process.terminate()
 
 
 def read_run_log() -> str:
@@ -1231,7 +1180,6 @@ def db_status(db_cfg: DbConfig) -> tuple[str, str]:
 def main() -> None:
     """Render the GridLock experiment dashboard."""
     st.set_page_config(page_title="GridLock Dashboard", layout="wide")
-    inject_styles()
 
     experiment_files = available_experiment_files()
     if not experiment_files:
@@ -1253,9 +1201,12 @@ def main() -> None:
         st.session_state["run_started_at"] = None
         if RUN_LOG.exists():
             RUN_LOG.write_text("")
+    if "run_cancel_requested_at" not in st.session_state:
+        st.session_state["run_cancel_requested_at"] = None
 
     run_process = st.session_state.get("run_process")
     running = process_is_running(run_process)
+    cancel_requested_at = st.session_state.get("run_cancel_requested_at")
 
     left, middle, right = st.columns([1, 1, 2])
     with left:
@@ -1263,20 +1214,35 @@ def main() -> None:
     with middle:
         st.metric("Analysis Schema", experiment_schema(cfg))
     with right:
-        if st.button("Start run.sh", disabled=running, type="primary"):
-            start_run(selected_experiment_path)
-            time.sleep(2)
-            st.rerun()
+        start_col, cancel_col = st.columns(2)
+        with start_col:
+            if st.button("Start run.sh", disabled=running, type="primary", width="stretch"):
+                start_run(selected_experiment_path)
+                time.sleep(2)
+                st.rerun()
+        with cancel_col:
+            if st.button("Cancel run", disabled=not running, width="stretch"):
+                cancel_run()
+                time.sleep(1)
+                st.rerun()
         if st.session_state.get("run_started_at"):
             st.caption(f"Last start: {st.session_state['run_started_at']}")
+        if cancel_requested_at and running:
+            st.caption(f"Cancel requested: {cancel_requested_at}")
         st.caption("Running from repository root with output written to `generated/streamlit-run.log`.")
         st.caption(f"DB config source: `{PREFLIGHT_ENV_PATH.relative_to(REPO_ROOT)}`")
 
     if running:
-        st.info("Experiment run is active.")
+        if cancel_requested_at:
+            st.warning("Cancellation requested. Waiting for `run.sh` to stop.")
+        else:
+            st.info("Experiment run is active.")
     elif st.session_state.get("run_started_at"):
         return_code = run_process.poll() if run_process is not None else "unknown"
-        st.info(f"Last experiment run finished with exit code {return_code}.")
+        if cancel_requested_at:
+            st.info("Last experiment run was cancelled.")
+        else:
+            st.info(f"Last experiment run finished with exit code {return_code}.")
 
     for message in dependency_messages():
         st.warning(message)
@@ -1291,6 +1257,11 @@ def main() -> None:
         st.success(status_message)
     else:
         st.warning(status_message)
+
+    st.markdown('<div class="gridlock-card">', unsafe_allow_html=True)
+    st.subheader("Config Tree")
+    st.graphviz_chart(build_config_tree_dot(cfg))
+    st.markdown("</div>", unsafe_allow_html=True)
 
     topology_grid_ids: list[str] = []
     metadata_df = pd.DataFrame()
@@ -1357,10 +1328,6 @@ def main() -> None:
             map_nodes["kind"] = map_nodes["kind"].fillna("bus")
     if map_nodes.empty and not marker_df.empty:
         map_nodes, map_edges = geographic_layout(nodes, edges, marker_df)
-    st.markdown('<div class="gridlock-card">', unsafe_allow_html=True)
-    st.subheader("Config Tree")
-    st.graphviz_chart(build_config_tree_dot(cfg))
-    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="gridlock-card">', unsafe_allow_html=True)
     st.subheader("Grid On Map")
