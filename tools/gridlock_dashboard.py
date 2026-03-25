@@ -908,29 +908,51 @@ def format_config_value(value: Any) -> str:
     return str(value)
 
 
+def config_node_type_colors(node_type: str) -> tuple[str, str, str, str]:
+    """Return header/body/border colors for a config node type."""
+    palette = {
+        "grid": ("#1d4ed8", "#dbeafe", "#93c5fd", "#0f172a"),
+        "load": ("#d97706", "#ffedd5", "#fdba74", "#0f172a"),
+        "house": ("#059669", "#d1fae5", "#86efac", "#0f172a"),
+        "rl_house": ("#7c3aed", "#ede9fe", "#c4b5fd", "#0f172a"),
+        "csv_house": ("#0f766e", "#ccfbf1", "#5eead4", "#0f172a"),
+        "house_player": ("#0f766e", "#ccfbf1", "#5eead4", "#0f172a"),
+        "broker": ("#374151", "#e5e7eb", "#9ca3af", "#0f172a"),
+        "recorder": ("#b91c1c", "#fee2e2", "#fca5a5", "#0f172a"),
+        "composegen": ("#4338ca", "#e0e7ff", "#a5b4fc", "#0f172a"),
+        "infdb": ("#0369a1", "#e0f2fe", "#7dd3fc", "#0f172a"),
+        "hems": ("#be185d", "#fce7f3", "#f9a8d4", "#0f172a"),
+        "battery": ("#65a30d", "#ecfccb", "#bef264", "#0f172a"),
+        "pv": ("#ca8a04", "#fef9c3", "#fde047", "#0f172a"),
+    }
+    return palette.get(node_type.lower(), ("#082f49", "#f8fafc", "#cbd5e1", "#0f172a"))
+
+
 def config_node_dot_label(node: dict[str, Any]) -> str:
     """Build an HTML-like Graphviz label for one config node."""
+    node_type = str(node.get("class", "unknown"))
+    header_color, body_color, border_color, text_color = config_node_type_colors(node_type)
     rows = [
         (
-            f'<TR><TD BGCOLOR="#082f49"><FONT COLOR="white"><B>{escape(str(node.get("name", node.get("id", "node"))))}</B></FONT></TD></TR>'
+            f'<TR><TD BGCOLOR="{header_color}"><FONT COLOR="white"><B>{escape(str(node.get("name", node.get("id", "node"))))}</B></FONT></TD></TR>'
         ),
         (
-            f'<TR><TD ALIGN="LEFT" BGCOLOR="#ecfeff"><FONT COLOR="#0f172a"><B>type</B>: {escape(str(node.get("class", "unknown")))}</FONT></TD></TR>'
+            f'<TR><TD ALIGN="LEFT" BGCOLOR="{body_color}"><FONT COLOR="{text_color}"><B>type</B>: {escape(node_type)}</FONT></TD></TR>'
         ),
         (
-            f'<TR><TD ALIGN="LEFT"><FONT COLOR="#334155"><B>id</B>: {escape(str(node.get("id", "")))}</FONT></TD></TR>'
+            f'<TR><TD ALIGN="LEFT" BGCOLOR="{body_color}"><FONT COLOR="{text_color}"><B>id</B>: {escape(str(node.get("id", "")))}</FONT></TD></TR>'
         ),
     ]
 
     for key, value in (node.get("config") or {}).items():
         rows.append(
-            "<TR><TD ALIGN=\"LEFT\">"
-            f"<FONT COLOR=\"#334155\"><B>{escape(str(key))}</B>: {escape(format_config_value(value))}</FONT>"
+            f'<TR><TD ALIGN="LEFT" BGCOLOR="{body_color}">' 
+            f"<FONT COLOR=\"{text_color}\"><B>{escape(str(key))}</B>: {escape(format_config_value(value))}</FONT>"
             "</TD></TR>"
         )
 
     return (
-        '<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="8" COLOR="#cbd5e1" BGCOLOR="white">'
+        f'<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="8" COLOR="{border_color}" BGCOLOR="{body_color}">'
         + "".join(rows)
         + "</TABLE>>"
     )
@@ -944,8 +966,10 @@ def append_config_node_lines(
 ) -> None:
     """Recursively append Graphviz nodes and edges for the config tree."""
     dot_id = path.replace(".", "_").replace("-", "_")
+    node_type = str(node.get("class", "unknown"))
+    _, body_color, border_color, _ = config_node_type_colors(node_type)
     lines.append(
-        f'{dot_id} [shape=box style="rounded,filled" fillcolor="white" color="#94a3b8" '
+        f'{dot_id} [shape=box style="rounded,filled" fillcolor="{body_color}" color="{border_color}" '
         f'label={config_node_dot_label(node)}];'
     )
     if parent_dot_id is not None:
