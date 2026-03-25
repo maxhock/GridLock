@@ -1104,6 +1104,49 @@ def visible_run_log() -> str:
     return read_run_log()
 
 
+RUN_STAGE_LABELS = (
+    "Stage 1: load environment",
+    "Stage 2: run preflight compose",
+    "Stage 3: run experiment compose",
+    "Stage 4: finished",
+)
+
+
+def run_stage_progress(log_content: str, running: bool) -> tuple[int, str, list[str]]:
+    """Map the run log to the four dashboard run stages."""
+    if not log_content:
+        return 0, "Waiting to start `run.sh`.", ["pending", "pending", "pending", "pending"]
+
+    runtime_stage_labels = RUN_STAGE_LABELS[:3]
+    detected_stages = [label in log_content for label in runtime_stage_labels]
+    stage_states = ["pending", "pending", "pending", "pending"]
+    detected_count = sum(detected_stages)
+    finished = "Stage 4: preflight services remain running" in log_content
+
+    for index, detected in enumerate(detected_stages):
+        if detected:
+            stage_states[index] = "complete"
+
+    if finished:
+        stage_states[3] = "complete"
+        return 100, "Run finished.", ["complete", "complete", "complete", "complete"]
+
+    if running and detected_count > 0:
+        stage_states[detected_count - 1] = "active"
+        progress_value = max(5, int((detected_count / 4) * 100))
+        status_text = f"In progress: {runtime_stage_labels[detected_count - 1]}"
+        return progress_value, status_text, stage_states
+
+    if detected_count == 3:
+        return 75, "Run reached the final execution stage.", ["complete", "complete", "complete", "pending"]
+
+    if detected_count > 0:
+        status_text = f"Last reached: {runtime_stage_labels[detected_count - 1]}"
+        return int((detected_count / 4) * 100), status_text, stage_states
+
+    return 0, "Waiting to start `run.sh`.", stage_states
+
+
 def dependency_messages() -> list[str]:
     """Collect missing optional Python dependencies for the dashboard."""
     missing: list[str] = []
@@ -1244,6 +1287,22 @@ def main() -> None:
         else:
             st.info(f"Last experiment run finished with exit code {return_code}.")
 
+    log_content = visible_run_log()
+    if st.session_state.get("run_started_at"):
+        progress_value, progress_text, stage_states = run_stage_progress(log_content, running)
+        st.progress(progress_value, text=progress_text)
+        stage_columns = st.columns(4)
+        for index, column in enumerate(stage_columns):
+            state = stage_states[index]
+            if state == "complete":
+                prefix = "✅"
+            elif state == "active":
+                prefix = "⏳"
+            else:
+                prefix = "⚪"
+            with column:
+                st.caption(f"{prefix} {RUN_STAGE_LABELS[index]}")
+
     for message in dependency_messages():
         st.warning(message)
 
@@ -1373,7 +1432,6 @@ def main() -> None:
             st.dataframe(catalog, width="stretch")
 
     with st.expander("Run log", expanded=running):
-        log_content = visible_run_log()
         st.code(log_content[-12000:] if log_content else "No run output yet.", language="text")
 
 
