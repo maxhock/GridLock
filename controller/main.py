@@ -169,7 +169,7 @@ def setup_mpc_and_data(dt_seconds: int):
         pv_config=configs["pv_config"],
     )
 
-    mpc = JAX_MPC_Solver(N_horizon=8, simulator_template=sim_template)
+    mpc = JAX_MPC_Solver(N_horizon=24, simulator_template=sim_template)
     split_factors = jnp.array([0.6, 0.4])
     b_config: BatteryConfig = configs["b_config"]
 

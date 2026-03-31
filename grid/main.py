@@ -13,6 +13,18 @@ import os
 import pandapower as pp
 
 
+def get_valid_input_value(inputs, key):
+    value = inputs.get(key)
+    if value is None or isinstance(value, list):
+        return None
+
+    # HELICS can return an invalid default (e.g. -1e49) for not-connected inputs.
+    if (not math.isfinite(value)) or abs(value) > 1e6:
+        return None
+
+    return value
+
+
 class GridFederate(Federate):
     """Grid federate with pandapower power flow simulation."""
 
@@ -59,10 +71,10 @@ class GridFederate(Federate):
         # Register dynamic subscriptions for loads
         self.load_indices = list(self.net.load.index)
         for pp_idx in self.load_indices:
-            sub_key = f"node_{pp_idx}/P"
-            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
-            self.inputs[sub_key] = {"type": "double", "key": sub_key}
-            self.data_from_federation["inputs"][sub_key] = None
+            for sub_key in (f"node_{pp_idx}/P", f"node_{pp_idx}/base_load_mw"):
+                h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
+                self.inputs[sub_key] = {"type": "double", "key": sub_key}
+                self.data_from_federation["inputs"][sub_key] = None
 
         # Register dynamic publications for ext_grids
         self.ext_grid_indices = list(self.net.ext_grid.index)
@@ -83,16 +95,23 @@ class GridFederate(Federate):
         print(f"\n=== Time: {self.granted_time} ===")
 
         for pp_idx in self.load_indices:
-            sub_key = f"node_{pp_idx}/P"
-            value_mw = self.data_from_federation["inputs"].get(sub_key)
-            if value_mw is None or isinstance(value_mw, list):
+            control_key = f"node_{pp_idx}/P"
+            base_key = f"node_{pp_idx}/base_load_mw"
+            control_mw = get_valid_input_value(
+                self.data_from_federation["inputs"], control_key
+            )
+            base_mw = get_valid_input_value(
+                self.data_from_federation["inputs"], base_key
+            )
+            if control_mw is None and base_mw is None:
                 continue
 
-            # HELICS can return an invalid default (e.g. -1e49) for not-connected inputs.
-            if (not math.isfinite(value_mw)) or abs(value_mw) > 1e6:
-                continue
+            value_mw = float((control_mw or 0.0) + (base_mw or 0.0))
 
-            print(f"Grid received: {sub_key} = {value_mw} MW")
+            print(
+                f"Grid received: {control_key} = {control_mw}, "
+                f"{base_key} = {base_mw}, total = {value_mw} MW"
+            )
             self.net.load.at[pp_idx, "p_mw"] = value_mw
         try:
             pp.runpp(self.net, numba=False)

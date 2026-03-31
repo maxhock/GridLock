@@ -186,6 +186,7 @@ class HouseFederate(Federate):
         self.battery_load_key = ""
         self.result_key = ""
         self.load_key = ""
+        self.base_load_key = ""
 
     def create_federate(self):
         """Create the CST federate and register HELICS interfaces."""
@@ -242,6 +243,7 @@ class HouseFederate(Federate):
         self.battery_load_key = f"battery_{fed_index}/battery_load"
         self.result_key = f"{self.federate_name}/timestep_result"
         self.load_key = f"node_{fed_index}/P"
+        self.base_load_key = f"node_{fed_index}/base_load_mw"
 
         h.helicsFederateRegisterSubscription(self.hfed, self.action_key, "string")
         self.inputs[self.action_key] = {"type": "string", "key": self.action_key}
@@ -266,12 +268,22 @@ class HouseFederate(Federate):
         self.pubs[self.load_key] = {"type": "double", "key": self.load_key}
         self.data_to_federation["publications"][self.load_key] = None
 
+        h.helicsFederateRegisterGlobalPublication(
+            self.hfed, self.base_load_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
+        )
+        self.pubs[self.base_load_key] = {
+            "type": "double",
+            "key": self.base_load_key,
+        }
+        self.data_to_federation["publications"][self.base_load_key] = None
+
         logger.info(f"Federate '{self.federate_name}' subscribing to:")
         logger.info(f"  - {self.action_key}")
         logger.info(f"  - {self.battery_load_key}")
         logger.info(f"Federate '{self.federate_name}' publishing to:")
         logger.info(f"  - {self.result_key}")
         logger.info(f"  - {self.load_key}")
+        logger.info(f"  - {self.base_load_key}")
         logger.info(
             f"[{self.federate_name}] Running {self.max_steps} steps with dt={self.dt_seconds}s "
             f"(stop_time={self.stop_time}s, dataset_len={len(self.dataset)})."
@@ -290,6 +302,7 @@ class HouseFederate(Federate):
             result, cls=NumpyJSONEncoder
         )
         self.data_to_federation["publications"][self.load_key] = 0.0
+        self.data_to_federation["publications"][self.base_load_key] = 0.0
         self.send_data_to_federation(reset=True)
 
     def update_internal_model(self):
@@ -325,12 +338,19 @@ class HouseFederate(Federate):
         base_load_w = float(getattr(exo, "base_load_w", getattr(exo, "load", 0.0)))
         print(f"  Battery Power Action: {bat_p_el} W, Base Load: {base_load_w} W")
 
-        total_net_power_w = float(base_load_w + hp_p_el + ac_p_el + bat_p_el)
-        total_net_power_mw = total_net_power_w / 1e6
+        controllable_load_w = float(hp_p_el + ac_p_el + bat_p_el)
+        controllable_load_mw = controllable_load_w / 1e6
+        base_load_mw = base_load_w / 1e6
 
-        print(f"Time {self.granted_time}s: Net Load = {total_net_power_mw:.6f} MW")
+        print(
+            f"Time {self.granted_time}s: Controllable Load = "
+            f"{controllable_load_mw:.6f} MW, Base Load = {base_load_mw:.6f} MW"
+        )
         self.data_to_federation["publications"][self.load_key] = float(
-            total_net_power_mw
+            controllable_load_mw
+        )
+        self.data_to_federation["publications"][self.base_load_key] = float(
+            base_load_mw
         )
 
 
