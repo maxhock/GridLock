@@ -179,7 +179,7 @@ class HouseFederate(Federate):
         self.dt_seconds = int(dt_seconds)
         self.simulator: JAXSimulator | None = None
         self.dataset: SimulationDataset | None = None
-        self.n_rooms = 0
+        self.n_rooms = 2
         self.t_config: ThermalConfig | None = None
         self.max_steps = 0
         self.action_key = ""
@@ -322,9 +322,10 @@ class HouseFederate(Federate):
         print(f"  Heat Pump Power: {hp_p_el} W, AC Power: {ac_p_el} W")
 
         bat_p_el = jnp.asarray(action.battery_power_w)
-        print(f"  Battery Power Action: {bat_p_el} W")
+        base_load_w = float(getattr(exo, "base_load_w", getattr(exo, "load", 0.0)))
+        print(f"  Battery Power Action: {bat_p_el} W, Base Load: {base_load_w} W")
 
-        total_net_power_w = float(hp_p_el + ac_p_el + bat_p_el)
+        total_net_power_w = float(base_load_w + hp_p_el + ac_p_el + bat_p_el)
         total_net_power_mw = total_net_power_w / 1e6
 
         print(f"Time {self.granted_time}s: Net Load = {total_net_power_mw:.6f} MW")
