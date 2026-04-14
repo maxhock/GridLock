@@ -22,5 +22,6 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
     && pip install --no-cache-dir "helics[cli]"
 
 COPY house/ /app/house/
+COPY tools/ /app/tools/
 
 CMD ["helics", "run", "--path=/config/tmp/house_runner.json", "--no-log-files"]

@@ -22,5 +22,6 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 
 COPY controller/ /app/controller/
 COPY house/ /app/house/
+COPY tools/ /app/tools/
 
 CMD ["helics", "run", "--path=/config/tmp/controller_runner.json", "--no-log-files"]

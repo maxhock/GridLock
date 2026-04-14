@@ -33,7 +33,7 @@ from energysim.core.data.dataset import SimulationDataset
 from house.common_config import create_common_configs
 from house.build_my_house import create_2_room_house
 from house.exogenous_data import prepare_aligned_timeseries
-import house.sample_data_generator
+import tools.sample_data_generator
 import helics as h
 import jax.numpy as jnp
 import os
@@ -198,7 +198,7 @@ class HouseFederate(Federate):
         )
 
         dataset_info = prepare_aligned_timeseries(
-            house.sample_data_generator.FILE_NAME,
+            tools.sample_data_generator.FILE_NAME,
             self.dt_seconds,
         )
         logger.info(

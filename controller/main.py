@@ -29,7 +29,7 @@ from energysim.core.shared.data_structs import (
     HeatPumpState,
     AirConditionerState,
 )
-import house.sample_data_generator
+import tools.sample_data_generator
 from house.common_config import create_common_configs
 from house.build_my_house import create_2_room_house
 from house.exogenous_data import prepare_aligned_timeseries
@@ -143,7 +143,7 @@ def build_simulator_from_state(
 def setup_mpc_and_data(dt_seconds: int):
     """Setup MPC solver and aligned exogenous data."""
     dataset_info = prepare_aligned_timeseries(
-        house.sample_data_generator.FILE_NAME,
+        tools.sample_data_generator.FILE_NAME,
         dt_seconds,
     )
     logger.info(

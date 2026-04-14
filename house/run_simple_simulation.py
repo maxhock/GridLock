@@ -8,7 +8,7 @@ from energysim.core.shared.data_structs import (
     BatteryConfig, RewardConfig, HeatPumpConfig, AirConditionerConfig, 
     ThermalStorageConfig, PVConfig, SystemActions, SystemOutputs
 )
-import sample_data_generator
+import tools.sample_data_generator as sample_data_generator
 from build_my_house import create_2_room_house
 
 def run():
