@@ -1,0 +1,11 @@
+{
+    "name": "recorder",
+    "federates": [
+        {
+            "directory": "/app",
+            "exec": "helics_recorder --name=recorder --capture=grid --output=/data/output/grid.log --broker=broker",
+            "host": "localhost",
+            "name": "recorder"
+        }
+    ]
+}

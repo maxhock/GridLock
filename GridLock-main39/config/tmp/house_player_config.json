@@ -1,0 +1,10 @@
+{
+  "publications": [
+    {
+      "key": "P",
+      "type": "double",
+      "unit": "kW",
+      "global": false
+    }
+  ]
+}

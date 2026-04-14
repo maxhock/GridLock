@@ -1,0 +1,11 @@
+{
+    "name": "heat",
+    "federates": [
+        {
+            "directory": "/app",
+            "exec": "python main.py --name=heat --broker=broker",
+            "host": "localhost",
+            "name": "heat"
+        }
+    ]
+}

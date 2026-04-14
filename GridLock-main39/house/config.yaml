@@ -1,0 +1,53 @@
+# energysim/config/env_config.yaml
+# This configuration is used by all scenarios.
+
+components:
+  battery:
+    type: "battery"
+    sensor:
+      observe_electrical_soc: True
+      soc_noise_std: 0.01
+    model:
+      type: "simple"
+
+thermal_sensor:
+  observe_indoor_temp: True
+  observe_temp_error: True
+  temp_noise_std: 0.1
+
+thermal_model:
+  type: "simple_air"
+  building_volume: 300.0
+  initial_temperature: 21.0
+  temperature_setpoint: 21.5
+  heat_transfer_coefficient: 150.0 # W/°C
+  ambient_temperature: 10.0 # This will be overridden by data
+
+dataset:
+  data_source:
+    type: "file"
+    file_path: "data/input/building_timeseries.csv"
+    time_column: "timestamp"
+  params:
+    feature_columns:
+      price: "electricity_price"
+      pv: "pv_generation"
+      load: "base_load"
+      ambient_temperature: "ambient_temp"
+    dt_seconds: 900
+    use_time_features: True
+    prediction_horizon: 4 # 4 steps of 15 min = 1 hour ahead
+
+reward_manager:
+  energy_weight: 1.0
+  comfort_weight: 0.5
+
+economic:
+  feed_in_tariff_eur_per_j: 0.0000001
+  tax_rate: 0.19
+  demand_charge_threshold_j: 50.0
+  demand_charge_rate_eur_per_j: 0.1
+
+  
+params:
+  random_seed: 123

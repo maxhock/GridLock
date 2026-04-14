@@ -1,0 +1,11 @@
+{
+    "name": "grid",
+    "federates": [
+        {
+            "directory": "/app",
+            "exec": "python main.py --name=grid --broker=broker --grid_file=kerber_landnetz_freileitung_1.xlsx",
+            "host": "localhost",
+            "name": "grid"
+        }
+    ]
+}
