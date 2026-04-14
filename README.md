@@ -26,6 +26,10 @@ This project provides a fully containerized, reproducible, and config-driven HEL
         docker compose -f config/tmp/docker-compose.yaml down
         ```
 
+## Windows Users
+
+Use `run.ps1` instead of `run.sh`. Ensure Docker Desktop has file sharing enabled for your project drive (Settings > Resources > File Sharing).
+
 ## Project Structure
 
 - `broker/`      — Broker Dockerfile

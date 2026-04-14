@@ -2,7 +2,11 @@ import pandas as pd
 import numpy as np
 import os
 
-FILE_NAME = "examples/sample_data.csv"
+FILE_NAME = (
+    "/data/input/sample_data.csv"
+    if os.path.exists("/.dockerenv")
+    else "data/input/sample_data.csv"
+)
 DT_SECONDS = 900 # 15 minutes
 STEPS_PER_DAY = 96
 
@@ -24,7 +28,7 @@ def create_sample_data(n_days: int = 7):
         "wind_speed_m_s": np.abs(2 * np.sin(t))
     })
     
-    os.makedirs("examples", exist_ok=True)
+    os.makedirs(os.path.dirname(FILE_NAME), exist_ok=True)
     df.to_csv(FILE_NAME, index=False)
     return df
 
