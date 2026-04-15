@@ -74,7 +74,7 @@ def expand_grid_nodes(tree: Tree, grid_nodes: dict) -> Tree:
                 template = fill_templates[0]
                 is_fill = True
 
-            new_root_id = f"{grid_id}/bus_{bus}"
+            new_root_id = f"{grid_id}_bus_{bus}"
 
             if template:
                 # We must modify the subtree to have unique IDs before pasting
@@ -202,6 +202,9 @@ def validate_tree(tree: Tree) -> None:
                         f"[HEMS] Node '{node.tag}' ({node.identifier}) requires 'control_strategy' definition."
                     )
 
+            case "heat":
+                pass  # Keine Pflichtfelder, Netzwerk wird intern aufgebaut
+
     if validation_errors:
         print("Configuration Invalid:")
         for error in validation_errors:
@@ -287,6 +290,16 @@ def wire_pub_sub(tree: Tree) -> None:
                     control_topic = f"{child_node.identifier}/control"
                     add_pub_sub(parent_node, control_topic, "json", "publication")
                     add_pub_sub(child_node, control_topic, "json", "subscription")
+
+            elif parent_class == "house":
+                if child_class == "heat":
+                    heat_demand_topic = f"{child_node.identifier}/heat_demand"
+                    add_pub_sub(parent_node, heat_demand_topic, "kW", "publication")
+                    add_pub_sub(child_node, heat_demand_topic, "kW", "subscription")
+
+                    massflow_topic = f"{child_node.identifier}/massflow"
+                    add_pub_sub(child_node, massflow_topic, "kg/s", "publication")
+                    add_pub_sub(parent_node, massflow_topic, "kg/s", "subscription")        
 
 
 def transform(cfg: dict, tree: Tree, grid_nodes: dict) -> tuple[Tree, dict]:

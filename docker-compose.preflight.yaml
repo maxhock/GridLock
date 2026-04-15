@@ -109,30 +109,32 @@ services:
       - ./databases/cstdb/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ./databases/cstdb/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
 
-  infdb:
-    image: infdb
-    build:
-      context: ./databases/infdb
-      dockerfile: Dockerfile
-    env_file:
-      - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
-    depends_on:
-      database:
-        condition: service_healthy
-      mongodb:
-        condition: service_healthy
-    environment:
-      MONGO_HOST: mongodb://mongodb
-      MONGO_PORT: 27017
-    volumes:
-      - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
-      - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
-      - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    restart: "no"
-    networks:
-      - sim_net
+  #infdb:
+  #  image: infdb
+  #  profiles:
+  #    - infdb
+  #  build:
+  #    context: ./databases/infdb
+  #    dockerfile: Dockerfile
+  #  env_file:
+  #    - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
+  #  depends_on:
+  #    database:
+  #      condition: service_healthy
+  #    mongodb:
+  #      condition: service_healthy
+  #  environment:
+  #    MONGO_HOST: mongodb://mongodb
+  #    MONGO_PORT: 27017
+  #  volumes:
+  #    - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
+  #    - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
+  #    - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
+  #  extra_hosts:
+  #    - host.docker.internal:host-gateway
+  #  restart: "no"
+  #  networks:
+  #    - sim_net
 
   composegen:
     image: composegen
@@ -146,8 +148,8 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-      infdb:
-        condition: service_completed_successfully
+      #infdb:
+      #  condition: service_completed_successfully
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017

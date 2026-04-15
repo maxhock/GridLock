@@ -41,10 +41,19 @@ main() {
 
   print_stage "Stage 2: run preflight compose"
   preflight_compose up -d --wait database mongodb
-  preflight_compose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps infdb composegen
+  
+  # Run composegen to generate federation config and docker-compose.yaml
+  preflight_compose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps
+  
+  # Keep databases running - DO NOT CLEANUP YET
+  print_stage "Stage 2b: cleanup generated compose file"
+  python3 "$SCRIPT_DIR/cleanup_compose.py"
 
+  # Now run experiment compose - databases are still running in preflight network
   print_stage "Stage 3: run experiment compose"
-  docker compose -f "$COMPOSE_FILE" up --build --quiet-build --remove-orphans --abort-on-container-exit
+  docker compose -f "$COMPOSE_FILE" --project-name "generated" up --build --quiet-build --remove-orphans --abort-on-container-exit
+  
+  # Cleanup happens on exit via trap
 }
 
 main "$@"

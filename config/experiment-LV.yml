@@ -1,28 +1,35 @@
 general:
- name: "TestGrid"
- start_time: 
- end_time: 86400
- time_step: 3600
- duration: 86400
- use_meta_db: "mongo"
- use_data_db: "postgres"
+  name: "TestGrid"
+  start_time: 
+  end_time: 86400
+  time_step: 3600
+  duration: 86400
+  use_meta_db: "mongo"
+  use_data_db: "postgres"
 federation:
-  id: "lv-grid"
+  id: "lvgrid"
   name: "LowVoltageGrid"
   class: "grid"
   config:
-    location:
-      - plz: 91301
-        kcid: 1
-        bcid: 4
+    layout: "kerber_landnetz_kabel_1.xlsx"
+    #location:
+    #  - plz: 91301
+    #    kcid: 1
+    #    bcid: 4
   sub_federates:
     - id: "loadhouse_0"
       name: "Load profile house"
       class: "load"
       config:
-        placement: "fill"  # pandapower load indices; use "fill" for all loads
-        electrical_load: "H0" # "H25", "electricloadcurve.csv"
-        heat_load: "" # "heatloadcurve.csv"
+        placement: "fill"
+        electrical_load: "H0"
+        heat_load: ""
+    - id: "heat_0"
+      name: "Heat Network"
+      class: "heat"
+      config:
+        period: 3600
+        placement: "fill"
     # - id: "house_0"
     #   name: "sim house"
     #   class: "house"

@@ -60,6 +60,10 @@ def map_params_to_class(federate_class: str) -> dict:
             "image": "house",
             "command": "python3 main.py",
         },
+        "heat": {
+            "image": "heat",
+            "command": "python3 heat_federate.py",
+        },
     }
     return mapping.get(
         federate_class,
@@ -508,19 +512,59 @@ def load(tree: Tree, general_cfg: dict) -> None:
         if not node_type or node_type == "empty":
             continue
 
-        fed = FederateConfig(node.identifier, period=time_step)
-
-        federation.add_federate_config(fed)
-
-        mapped = map_params_to_class(node_class)
-        if node_class == "grid":
+        # Handle layout-based grids (with children)
+        if node_class == "grid" and data.get("layout"):
+            grid_fed_name = node.identifier
+            grid_mapped = map_params_to_class("grid")
+            
+            # Add grid federate
+            fed = FederateConfig(grid_fed_name, period=time_step)
+            federation.add_federate_config(fed)
             layout = data.get("layout")
-            if layout:
-                mapped["command"] += f" --grid_file {layout}"
-            else:
-                print(
-                    f"Warning: No layout or location for grid {node.identifier}"
+                f"{grid_mapped['command']} "
+                f"--scenario {name}Scenario --federate_name {grid_fed_name}"
+            )
+            fed.config("image", grid_mapped["image"])
+            fed.config("command", cmd)
+            fed.config("federate_type", node_type)
+            print(f"Added grid federate: {grid_fed_name}")
+            
+            # Add child federates
+            children = tree.children(node.identifier)
+            for child in children:
+                child_data = child.data
+                child_class = child_data.get("class")
+                child_mapped = map_params_to_class(child_class)
+                child_local_id = child.identifier.split(".")[-1]
+                child_fed_name = f"{grid_fed_name}.{child_local_id}"
+                
+                child_fed = FederateConfig(child_fed_name, period=time_step)
+                federation.add_federate_config(child_fed)
+                child_fed.config("image", child_mapped["image"])
+                child_fed.config("federate_type", "value")
+                
+                # Build command – all child classes are now CST federates
+                child_cmd = (
+                    f"{child_mapped['command']} "
+                    f"--scenario {name}Scenario "
+                    f"--federate_name {child_fed_name}"
                 )
+                
+                # For load federates, resolve the timeseries file path
+                if child_class == "load":
+                    ts_path = _resolve_timeseries_path(child_data)
+                    if ts_path:
+                        child_cmd += f" --timeseries {ts_path}"
+                
+                child_fed.config("command", child_cmd)
+                print(f"  Added child federate: {child_fed_name} ({child_class})")
+            
+            continue
+        
+        # Handle standalone nodes (non-grid or grids without children)
+        fed = FederateConfig(node.identifier, period=time_step)
+        federation.add_federate_config(fed)
+        mapped = map_params_to_class(node_class)
         fed.config("image", mapped["image"])
         fed.config("command", mapped["command"])
         fed.config("federate_type", node_type)
