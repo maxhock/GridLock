@@ -5,8 +5,27 @@ import cosim_toolbox as env
 from cosim_toolbox.sims import DockerRunner, FederateConfig
 from cosim_toolbox.dbms import create_metadata_manager
 
-# Broker is always the first service at 10.5.0.2 in the Docker network.
-BROKER_IP = "10.5.0.2"
+
+def _docker_ip_prefix() -> str:
+    return env.environ.get("CST_DOCKER_IP_PREFIX", "10.5.0")
+
+
+def _broker_ip() -> str:
+    return f"{_docker_ip_prefix()}.2"
+
+
+def _network_definition() -> str:
+    subnet = env.environ.get("CST_DOCKER_SUBNET", "10.5.0.0/16")
+    gateway = env.environ.get("CST_DOCKER_GATEWAY", "10.5.0.1")
+    return (
+        "networks:\n"
+        "  cst_net:\n"
+        "    driver: bridge\n"
+        "    ipam:\n"
+        "      config:\n"
+        f"        - subnet: {subnet}\n"
+        f"          gateway: {gateway}\n"
+    )
 
 
 def _service(
@@ -42,7 +61,7 @@ def _service(
         _svc += "      - " + depends + "\n"
     _svc += "    networks:\n"
     _svc += "      cst_net:\n"
-    _svc += "        ipv4_address: 10.5.0." + str(cnt) + "\n"
+    _svc += f"        ipv4_address: {_docker_ip_prefix()}.{cnt}\n"
     _svc += '    command: /bin/bash -c "' + params[1] + '"\n'
     return _svc
 
@@ -134,8 +153,6 @@ def define_yaml(
             if fed_def[name]["logger"]:
                 add_logger = True
 
-    add_logger = True
-
     # Add data logger federate
     if add_logger:
         cnt += 1
@@ -148,8 +165,6 @@ def define_yaml(
             "cst_logger", "broker", params, cnt, depends="helics"
         )
 
-    yaml_str += DockerRunner._network()
-
     # Add helics broker service
     params = [
         cosim_env,
@@ -159,6 +174,7 @@ def define_yaml(
         "services:\n"
         + _service("helics", "broker", params, 2, depends=None)
         + yaml_str
+        + _network_definition()
     )
 
     Path("./generated").mkdir(parents=True, exist_ok=True)
@@ -178,8 +194,8 @@ def _federate_docker(self, address: int = 0) -> None:
     CST was writing the federate IP into the wrong field.
     """
     if address > 0:
-        self.helics.config("broker_address", BROKER_IP)
-        self.helics.config("local_interface", f"10.5.0.{address}")
+        self.helics.config("broker_address", _broker_ip())
+        self.helics.config("local_interface", f"{_docker_ip_prefix()}.{address}")
 
 
 def apply_monkeypatches() -> None:

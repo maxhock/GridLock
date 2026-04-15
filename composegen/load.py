@@ -1,5 +1,6 @@
 import traceback
 import json
+import os
 from pathlib import Path
 from treelib.tree import Tree
 from cosim_toolbox.dbms import create_metadata_manager
@@ -27,6 +28,21 @@ def _create_metadata_manager(
     if use_meta_db == "json":
         kwargs["location"] = meta_store_path
     return create_metadata_manager(**kwargs)
+
+
+def _resolve_runtime_layout_path(layout: str | None) -> str | None:
+    """Map a configured layout file to the path visible inside runtime containers."""
+    if not layout:
+        return None
+
+    layout_path = Path(layout)
+    if layout_path.is_absolute():
+        return str(layout_path)
+
+    if layout_path.parts[:2] == ("data", "input"):
+        return f"/{layout_path.as_posix()}"
+
+    return f"/data/input/{layout_path.name}"
 
 
 def map_params_to_class(federate_class: str) -> dict:
@@ -77,6 +93,14 @@ def normalize_federation_keys(
     meta_store_path: str = "generated",
 ) -> None:
     """Normalize HELICS keys in federation metadata for json or mongo backend."""
+    configured_prefix = os.environ.get("CST_DOCKER_IP_PREFIX", "10.5.0")
+
+    def _rewrite_ip_prefix(value: str) -> str:
+        if not value.startswith("10.5.0."):
+            return value
+        suffix = value.removeprefix("10.5.0.")
+        return f"{configured_prefix}.{suffix}"
+
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         config = mgr.read_federation(federation_name)
         if not config:
@@ -90,6 +114,18 @@ def normalize_federation_keys(
             for _fed_name, fed_config in config["federation"].items():
                 if "HELICS_config" in fed_config:
                     helics_cfg = fed_config["HELICS_config"]
+
+                    broker_address = helics_cfg.get("broker_address")
+                    if isinstance(broker_address, str):
+                        helics_cfg["broker_address"] = _rewrite_ip_prefix(
+                            broker_address
+                        )
+
+                    local_interface = helics_cfg.get("local_interface")
+                    if isinstance(local_interface, str):
+                        helics_cfg["local_interface"] = _rewrite_ip_prefix(
+                            local_interface
+                        )
 
                     for pub in helics_cfg.get("publications", []):
                         if "key" in pub:
@@ -516,19 +552,22 @@ def load(tree: Tree, general_cfg: dict) -> None:
         if node_class == "grid" and data.get("layout"):
             grid_fed_name = node.identifier
             grid_mapped = map_params_to_class("grid")
-            
+            runtime_layout = _resolve_runtime_layout_path(data.get("layout"))
+
             # Add grid federate
             fed = FederateConfig(grid_fed_name, period=time_step)
             federation.add_federate_config(fed)
-            layout = data.get("layout")
+            cmd = (
                 f"{grid_mapped['command']} "
                 f"--scenario {name}Scenario --federate_name {grid_fed_name}"
             )
+            if runtime_layout:
+                cmd += f" --layout {runtime_layout}"
             fed.config("image", grid_mapped["image"])
             fed.config("command", cmd)
             fed.config("federate_type", node_type)
             print(f"Added grid federate: {grid_fed_name}")
-            
+
             # Add child federates
             children = tree.children(node.identifier)
             for child in children:
@@ -537,25 +576,25 @@ def load(tree: Tree, general_cfg: dict) -> None:
                 child_mapped = map_params_to_class(child_class)
                 child_local_id = child.identifier.split(".")[-1]
                 child_fed_name = f"{grid_fed_name}.{child_local_id}"
-                
+
                 child_fed = FederateConfig(child_fed_name, period=time_step)
                 federation.add_federate_config(child_fed)
                 child_fed.config("image", child_mapped["image"])
                 child_fed.config("federate_type", "value")
-                
+
                 # Build command – all child classes are now CST federates
                 child_cmd = (
                     f"{child_mapped['command']} "
                     f"--scenario {name}Scenario "
                     f"--federate_name {child_fed_name}"
                 )
-                
+
                 # For load federates, resolve the timeseries file path
                 if child_class == "load":
                     ts_path = _resolve_timeseries_path(child_data)
                     if ts_path:
                         child_cmd += f" --timeseries {ts_path}"
-                
+
                 child_fed.config("command", child_cmd)
                 print(f"  Added child federate: {child_fed_name} ({child_class})")
             

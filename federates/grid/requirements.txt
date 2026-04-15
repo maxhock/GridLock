@@ -4,3 +4,4 @@ cosim-toolbox
 # HELICS and simulation dependencies
 helics[cli]
 pandapower==3.3.2
+openpyxl

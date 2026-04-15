@@ -141,6 +141,7 @@ services:
     build:
       context: ./composegen
       dockerfile: Dockerfile
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:
@@ -158,6 +159,9 @@ services:
       CST_RUNTIME_POSTGRES_PORT: ${CST_POSTGRES_PORT}
       CST_RUNTIME_MONGO_HOST: mongodb://${CST_BROKER_HOST}
       CST_RUNTIME_MONGO_PORT: ${CST_MONGO_PORT}
+      CST_DOCKER_SUBNET: ${CST_DOCKER_SUBNET:-10.251.0.0/16}
+      CST_DOCKER_GATEWAY: ${CST_DOCKER_GATEWAY:-10.251.0.1}
+      CST_DOCKER_IP_PREFIX: ${CST_DOCKER_IP_PREFIX:-10.251.0}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
       - ${HOST_WORKSPACE_FOLDER:-.}/data:/data

@@ -23,6 +23,11 @@ load_env() {
 
   export PREFLIGHT_ENV_FILE
   export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
+  export HOST_UID="${HOST_UID:-$(id -u)}"
+  export HOST_GID="${HOST_GID:-$(id -g)}"
+  export CST_DOCKER_SUBNET="${CST_DOCKER_SUBNET:-10.251.0.0/16}"
+  export CST_DOCKER_GATEWAY="${CST_DOCKER_GATEWAY:-10.251.0.1}"
+  export CST_DOCKER_IP_PREFIX="${CST_DOCKER_IP_PREFIX:-10.251.0}"
 }
 
 preflight_compose() {
@@ -43,7 +48,8 @@ main() {
   preflight_compose up -d --wait database mongodb
   
   # Run composegen to generate federation config and docker-compose.yaml
-  preflight_compose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps
+  preflight_compose build --quiet composegen
+  preflight_compose run --rm --no-deps composegen
   
   # Keep databases running - DO NOT CLEANUP YET
   print_stage "Stage 2b: cleanup generated compose file"

@@ -33,7 +33,7 @@ def main():
         
         # If we're in a bad service, skip until we hit the next service
         if skip_service:
-            if re.match(r'^  [a-z]', line):
+            if re.match(r'^(services|networks|volumes|configs|secrets):', line) or re.match(r'^  [A-Za-z0-9_.-]+:', line):
                 skip_service = False
             else:
                 continue
@@ -46,14 +46,10 @@ def main():
     content = content.replace('POSTGRES_HOST: "database"', 'POSTGRES_HOST: "host.docker.internal"')
     content = content.replace('MONGO_HOST: "mongodb://mongodb"', 'MONGO_HOST: "mongodb://host.docker.internal"')
     
-    # Step 3: Remove sim_net from services (not needed on Docker Desktop)
-    pattern = r'      sim_net:\n'
-    content = re.sub(pattern, '', content)
-    
-    # Remove empty network sections that result
-    pattern = r'    networks:\n      cst_net:\n        ipv4_address: 10\.5\.0\.\d+\n\n'
-    replacement = r'    networks:\n      cst_net:\n        ipv4_address: 10.5.0.X\n'
-    # This is a bit complex, let's just clean up any double newlines
+    # Step 3: Remove obsolete sim_net references while keeping cst_net intact
+    content = re.sub(r'^\s{6}sim_net:\n', '', content, flags=re.MULTILINE)
+
+    # Collapse accidental blank runs introduced by removals
     content = re.sub(r'\n\n+', '\n', content)
     
     # Step 4: Ensure networks section is cleaned up

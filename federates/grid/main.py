@@ -10,6 +10,7 @@ Usage:
 import argparse
 import os
 import re
+from pathlib import Path
 from typing import Any, cast
 
 import pandapower as pp
@@ -138,6 +139,11 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Federate name matching meta_store entry (e.g. lv-grid_91301_0)",
     )
+    parser.add_argument(
+        "--layout",
+        type=str,
+        help="Optional pandapower Excel layout path for layout-based runs.",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -198,6 +204,18 @@ def load_net_from_metadata(
     return net
 
 
+def load_net_from_layout(layout_path: str) -> pp.pandapowerNet:
+    """Load a pandapower net directly from an Excel layout file."""
+    resolved_path = Path(layout_path)
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"Layout file not found: {layout_path}")
+
+    net = cast(pp.pandapowerNet, pp.from_excel(str(resolved_path)))
+    sanitize_net_for_power_flow(net)
+    print(f"Loaded net from layout {layout_path}: {len(net.bus)} buses, {len(net.load)} loads")
+    return net
+
+
 def run_grid_federate(
     federate_name: str,
     net: pp.pandapowerNet,
@@ -228,6 +246,7 @@ def run_grid_federate(
 def main(
     scenario_name: str | None = None,
     federate_name: str | None = None,
+    layout_path: str | None = None,
 ) -> None:
     """Load net from CST metadata store and run grid federate.
 
@@ -239,13 +258,22 @@ def main(
         args = parse_args()
         scenario_name = args.scenario
         federate_name = args.federate_name
+        layout_path = args.layout
 
     if scenario_name is None or federate_name is None:
         raise ValueError("scenario_name and federate_name are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 
-    net = load_net_from_metadata(federate_name, use_meta_db)
+    try:
+        net = load_net_from_metadata(federate_name, use_meta_db)
+    except FileNotFoundError:
+        if not layout_path:
+            raise
+        print(
+            f"Falling back to layout file for '{federate_name}' because no grid metadata was found."
+        )
+        net = load_net_from_layout(layout_path)
     run_grid_federate(
         federate_name,
         net,
