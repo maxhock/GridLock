@@ -1,6 +1,6 @@
 # house/main.py
 
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 import logging
 from time import time
 from typing import Any, Dict
@@ -100,6 +100,14 @@ def serialize_system_state(state: SystemState) -> dict:
     }
 
 
+def serialize_exogenous_data(exo: Any) -> dict:
+    if is_dataclass(exo):
+        return asdict(exo)
+    if hasattr(exo, "__dict__"):
+        return dict(exo.__dict__)
+    return {}
+
+
 def setup_simulator(config_path: str, dt_seconds: int) -> tuple:
     t_config = create_2_room_house()
     n_rooms = int(len(t_config.room_air_indices))
@@ -183,10 +191,8 @@ class HouseFederate(Federate):
         self.t_config: ThermalConfig | None = None
         self.max_steps = 0
         self.action_key = ""
-        self.battery_load_key = ""
         self.result_key = ""
         self.load_key = ""
-        self.base_load_key = ""
 
     def create_federate(self):
         """Create the CST federate and register HELICS interfaces."""
@@ -240,21 +246,12 @@ class HouseFederate(Federate):
         fed_index = match.group(0)
 
         self.action_key = f"{self.federate_name}/action"
-        self.battery_load_key = f"battery_{fed_index}/battery_load"
         self.result_key = f"{self.federate_name}/timestep_result"
         self.load_key = f"node_{fed_index}/P"
-        self.base_load_key = f"node_{fed_index}/base_load_mw"
 
         h.helicsFederateRegisterSubscription(self.hfed, self.action_key, "string")
         self.inputs[self.action_key] = {"type": "string", "key": self.action_key}
         self.data_from_federation["inputs"][self.action_key] = None
-
-        h.helicsFederateRegisterSubscription(self.hfed, self.battery_load_key, "W")
-        self.inputs[self.battery_load_key] = {
-            "type": "double",
-            "key": self.battery_load_key,
-        }
-        self.data_from_federation["inputs"][self.battery_load_key] = None
 
         h.helicsFederateRegisterGlobalPublication(
             self.hfed, self.result_key, h.HELICS_DATA_TYPE_STRING, ""
@@ -268,22 +265,11 @@ class HouseFederate(Federate):
         self.pubs[self.load_key] = {"type": "double", "key": self.load_key}
         self.data_to_federation["publications"][self.load_key] = None
 
-        h.helicsFederateRegisterGlobalPublication(
-            self.hfed, self.base_load_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
-        )
-        self.pubs[self.base_load_key] = {
-            "type": "double",
-            "key": self.base_load_key,
-        }
-        self.data_to_federation["publications"][self.base_load_key] = None
-
         logger.info(f"Federate '{self.federate_name}' subscribing to:")
         logger.info(f"  - {self.action_key}")
-        logger.info(f"  - {self.battery_load_key}")
         logger.info(f"Federate '{self.federate_name}' publishing to:")
         logger.info(f"  - {self.result_key}")
         logger.info(f"  - {self.load_key}")
-        logger.info(f"  - {self.base_load_key}")
         logger.info(
             f"[{self.federate_name}] Running {self.max_steps} steps with dt={self.dt_seconds}s "
             f"(stop_time={self.stop_time}s, dataset_len={len(self.dataset)})."
@@ -294,15 +280,33 @@ class HouseFederate(Federate):
         self.simulator.reset()
         state = self.simulator.state
         result = {
+            "schema_version": 1,
+            "federate": self.federate_name,
+            "node": self.load_key.rsplit("/", maxsplit=1)[0],
             "time": 0.0,
+            "dt_s": self.dt_seconds,
             "cost": 0.0,
+            "grid_exchange": {
+                "publication": self.load_key,
+                "total_load_mw": 0.0,
+                "sign_convention": "positive_consumption",
+            },
+            "loads_w": {
+                "base": 0.0,
+                "heat_pump": 0.0,
+                "air_conditioner": 0.0,
+                "battery": 0.0,
+                "controllable_total": 0.0,
+                "grid_total": 0.0,
+            },
+            "action": {},
             "state": serialize_system_state(state),
+            "exogenous": {},
         }
         self.data_to_federation["publications"][self.result_key] = json.dumps(
             result, cls=NumpyJSONEncoder
         )
         self.data_to_federation["publications"][self.load_key] = 0.0
-        self.data_to_federation["publications"][self.base_load_key] = 0.0
         self.send_data_to_federation(reset=True)
 
     def update_internal_model(self):
@@ -321,15 +325,6 @@ class HouseFederate(Federate):
         self.simulator, _outputs = self.simulator.step(action, exo)
         state = self.simulator.state
 
-        result = {
-            "time": float(self.granted_time),
-            "cost": 0.0,
-            "state": serialize_system_state(state),
-        }
-        self.data_to_federation["publications"][self.result_key] = json.dumps(
-            result, cls=NumpyJSONEncoder
-        )
-
         hp_p_el = jnp.sum(state.heat_pump.current_electrical_w)
         ac_p_el = jnp.sum(state.air_conditioner.current_electrical_w)
         print(f"  Heat Pump Power: {hp_p_el} W, AC Power: {ac_p_el} W")
@@ -338,20 +333,54 @@ class HouseFederate(Federate):
         base_load_w = float(getattr(exo, "base_load_w", getattr(exo, "load", 0.0)))
         print(f"  Battery Power Action: {bat_p_el} W, Base Load: {base_load_w} W")
 
-        controllable_load_w = float(hp_p_el + ac_p_el + bat_p_el)
+        heat_pump_w = float(hp_p_el)
+        air_conditioner_w = float(ac_p_el)
+        battery_w = float(bat_p_el)
+        controllable_load_w = heat_pump_w + air_conditioner_w + battery_w
         controllable_load_mw = controllable_load_w / 1e6
-        base_load_mw = base_load_w / 1e6
+        total_load_w = base_load_w + controllable_load_w
+        total_load_mw = total_load_w / 1e6
 
         print(
             f"Time {self.granted_time}s: Controllable Load = "
-            f"{controllable_load_mw:.6f} MW, Base Load = {base_load_mw:.6f} MW"
+            f"{controllable_load_mw:.6f} MW, Total Load = {total_load_mw:.6f} MW"
         )
-        self.data_to_federation["publications"][self.load_key] = float(
-            controllable_load_mw
+
+        result = {
+            "schema_version": 1,
+            "federate": self.federate_name,
+            "node": self.load_key.rsplit("/", maxsplit=1)[0],
+            "time": float(self.granted_time),
+            "dt_s": self.dt_seconds,
+            "cost": 0.0,
+            "grid_exchange": {
+                "publication": self.load_key,
+                "total_load_mw": total_load_mw,
+                "sign_convention": "positive_consumption",
+            },
+            "loads_w": {
+                "base": base_load_w,
+                "heat_pump": heat_pump_w,
+                "air_conditioner": air_conditioner_w,
+                "battery": battery_w,
+                "controllable_total": controllable_load_w,
+                "grid_total": total_load_w,
+            },
+            "action": {
+                "battery_power_w": battery_w,
+                "heat_pump_power_w": np.array(action.heat_pump_power_w).tolist(),
+                "ac_power_w": np.array(action.ac_power_w).tolist(),
+                "storage_discharge_w": np.array(
+                    action.storage_discharge_w
+                ).tolist(),
+            },
+            "state": serialize_system_state(state),
+            "exogenous": serialize_exogenous_data(exo),
+        }
+        self.data_to_federation["publications"][self.result_key] = json.dumps(
+            result, cls=NumpyJSONEncoder
         )
-        self.data_to_federation["publications"][self.base_load_key] = float(
-            base_load_mw
-        )
+        self.data_to_federation["publications"][self.load_key] = float(total_load_mw)
 
 
 def main():

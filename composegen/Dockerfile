@@ -9,14 +9,14 @@ VOLUME ["/config"]
 
 # Create data mount point
 RUN mkdir /data
-VOLUME ["/data"]
+
 
 # Install omegaconf, pyyaml, pandas, and openpyxl for config parsing and Excel reading
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the main generator script
-COPY main.py .
+COPY main.py extract.py transform.py load.py ./
 
 # --- Test stage ---
 FROM base AS test

@@ -71,10 +71,10 @@ class GridFederate(Federate):
         # Register dynamic subscriptions for loads
         self.load_indices = list(self.net.load.index)
         for pp_idx in self.load_indices:
-            for sub_key in (f"node_{pp_idx}/P", f"node_{pp_idx}/base_load_mw"):
-                h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
-                self.inputs[sub_key] = {"type": "double", "key": sub_key}
-                self.data_from_federation["inputs"][sub_key] = None
+            sub_key = f"node_{pp_idx}/P"
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
+            self.inputs[sub_key] = {"type": "double", "key": sub_key}
+            self.data_from_federation["inputs"][sub_key] = None
 
         # Register dynamic publications for ext_grids
         self.ext_grid_indices = list(self.net.ext_grid.index)
@@ -95,24 +95,15 @@ class GridFederate(Federate):
         print(f"\n=== Time: {self.granted_time} ===")
 
         for pp_idx in self.load_indices:
-            control_key = f"node_{pp_idx}/P"
-            base_key = f"node_{pp_idx}/base_load_mw"
-            control_mw = get_valid_input_value(
-                self.data_from_federation["inputs"], control_key
+            load_key = f"node_{pp_idx}/P"
+            load_mw = get_valid_input_value(
+                self.data_from_federation["inputs"], load_key
             )
-            base_mw = get_valid_input_value(
-                self.data_from_federation["inputs"], base_key
-            )
-            if control_mw is None and base_mw is None:
+            if load_mw is None:
                 continue
 
-            value_mw = float((control_mw or 0.0) + (base_mw or 0.0))
-
-            print(
-                f"Grid received: {control_key} = {control_mw}, "
-                f"{base_key} = {base_mw}, total = {value_mw} MW"
-            )
-            self.net.load.at[pp_idx, "p_mw"] = value_mw
+            print(f"Grid received: {load_key} = {load_mw} MW")
+            self.net.load.at[pp_idx, "p_mw"] = float(load_mw)
         try:
             pp.runpp(self.net, numba=False)
             print("Power flow executed.")

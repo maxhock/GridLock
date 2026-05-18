@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN mkdir -p /config /config/tmp /data
-VOLUME ["/config", "/data"]
+
 
 # Needed because requirements.txt installs git+https://...
 RUN apt-get update && apt-get install -y --no-install-recommends \

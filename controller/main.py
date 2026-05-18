@@ -34,8 +34,6 @@ from house.common_config import create_common_configs
 from house.build_my_house import create_2_room_house
 from house.exogenous_data import prepare_aligned_timeseries
 
-from controller.battery_clipping import clip_battery_power_to_soc
-
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -187,7 +185,6 @@ class ControllerFederate(Federate):
         self.house_action_key = ""
         self.battery_action_key = ""
         self.current_state: SystemState | None = None
-        self.warm_start_actions = None
         self.mpc: JAX_MPC_Solver | None = None
         self.dataset: SimulationDataset | None = None
         self.t_config = None
@@ -274,7 +271,6 @@ class ControllerFederate(Federate):
             self.b_config,
             self.sim_template,
         ) = setup_mpc_and_data(self.dt_seconds)
-        self.warm_start_actions = self.mpc.norm_warm_start
 
     def update_internal_model(self):
         """Advance the controller logic by one CST-controlled time step."""
@@ -307,6 +303,7 @@ class ControllerFederate(Federate):
             self.data_to_federation["publications"][
                 self.battery_action_key
             ] = json.dumps({"normalized_power": 0.0})
+
             return
 
         current_sim = build_simulator_from_state(self.sim_template, self.current_state)
@@ -325,23 +322,14 @@ class ControllerFederate(Federate):
         action: SystemActions = self.mpc.solve(
             current_sim,
             exo_forecast,
-            warm_start_norm_actions=self.warm_start_actions,
         )
-        self.warm_start_actions = self.mpc.norm_warm_start
 
         requested_battery_power_w = float(action.battery_power_w)
         current_soc = float(self.current_state.battery.soc)
         max_p = float(self.b_config.max_power_w)
-        clipped_battery_power_w, next_soc = clip_battery_power_to_soc(
-            requested_battery_power_w=requested_battery_power_w,
-            current_soc=current_soc,
-            dt_seconds=float(self.dt_seconds),
-            max_power_w=max_p,
-            capacity_kwh=float(getattr(self.b_config, "capacity_kwh", 0.0)),
-        )
 
         house_action = {
-            "battery_power_w": clipped_battery_power_w,
+            "battery_power_w": requested_battery_power_w,
             "heat_pump_power_w": action.heat_pump_power_w.tolist(),
             "ac_power_w": action.ac_power_w.tolist(),
             "storage_discharge_w": action.storage_discharge_w.tolist(),
@@ -350,9 +338,7 @@ class ControllerFederate(Federate):
         if max_p <= 0:
             norm_power = 0.0
         else:
-            norm_power = float(
-                jnp.clip(clipped_battery_power_w / max_p, -1.0, 1.0)
-            )
+            norm_power = requested_battery_power_w / max_p
 
         battery_action = {"normalized_power": norm_power}
 
@@ -368,7 +354,6 @@ class ControllerFederate(Federate):
             f"raw_bat={requested_battery_power_w:.1f}, "
             f"House battery_power_w={house_action['battery_power_w']:.1f}, "
             f"soc={current_soc:.3f}, "
-            f"soc_next={next_soc:.3f}, "
             f"norm_bat={battery_action['normalized_power']:.3f}"
         )
 

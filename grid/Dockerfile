@@ -4,7 +4,7 @@ FROM python:3.11-slim AS base
 WORKDIR /app
 
 RUN mkdir -p /config /config/tmp /data
-VOLUME ["/config", "/data"]
+
 
 # Install dependencies from grid/requirements.txt (root context!)
 COPY grid/requirements.txt /tmp/requirements.txt
