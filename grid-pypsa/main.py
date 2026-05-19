@@ -146,7 +146,7 @@ class GridFederate(Federate):
             # print(
             #     f"Published ext_grid {self.ext_grid_idx} q_mvar: {q_mvar}")
 
-            # Publish voltage at the load nodes
+        # Publish voltage for each load node
         for pyp_idx in self.load_indices:
             v_mag = getattr(self.pypsa_net.net.buses_t, 'v_mag_pu', None)
             if v_mag is not None and not v_mag.empty:
