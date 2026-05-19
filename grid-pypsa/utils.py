@@ -48,6 +48,7 @@ class PyPSANetworkBuilder:
         self.net.add("Generator", name="Slack", bus=bus, control="Slack")
         self.net.buses.loc[bus, "v_mag_pu_set"] = self.input_ext_grid.vm_pu[0]
         self.ext_grid_idx = bus
+    # TODO: Need to fix this
 
     def _add_trafos(self):
         for row in self.input_trafo.itertuples():
@@ -124,12 +125,12 @@ class PyPSANetworkBuilder:
     def buses(self) -> pd.DataFrame:
         """Access PyPSA bus objects and their properties."""
         return self.net.buses
-    
+
     @property
     def buses_t(self) -> pd.DataFrame:
         """Access time-varying bus results after power flow."""
         return self.net.buses_t
-    
+
     @property
     def lines(self) -> pd.DataFrame:
         """Access PyPSA transmission line objects."""
@@ -157,7 +158,7 @@ class PyPSANetworkBuilder:
     def run_pf(self):
         self.net.pf()
 
-    def res_ext_grid(self) -> float:
+    def res_ext_grid(self) -> tuple:
         """
         Returns the power at the external grid bus after power flow calculation.
         If there are loads at the ext_grid bus, their setpoint is added to the bus power.

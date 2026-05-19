@@ -54,7 +54,8 @@ class GridFederate(Federate):
         # Load pypsa network
         self.pypsa_net = PyPSANetworkBuilder(self.grid_path)
         self.pypsa_net.create_network()
-        self.ext_grid_idx = self.pypsa_net.ext_grid_idx
+        self.ext_grid_idx = self.pypsa_net.ext_grid_idx.split(
+            ",")[0]  # Assuming single ext_grid for now
 
         # Register dynamic subscriptions for loads and publications for voltages at each load bus
         self.load_indices = list(self.pypsa_net.loads.index)
@@ -112,7 +113,6 @@ class GridFederate(Federate):
             if sub_key_p in self.data_from_federation["inputs"]:
                 value_w = self.data_from_federation["inputs"][sub_key_p]
                 if value_w is not None:
-                    print(f"Updating load {pyp_idx} p_set to {value_w} MW")
                     self.pypsa_net.loads.loc[pyp_idx, "p_set"] = value_w
             # The following code should be uncommented when there is a published reactive power available
             # if sub_key_q in self.data_from_federation["inputs"]:
@@ -146,15 +146,17 @@ class GridFederate(Federate):
             # print(
             #     f"Published ext_grid {self.ext_grid_idx} q_mvar: {q_mvar}")
 
-            # Publish voltage at the ext_grid bus
+            # Publish voltage at the load nodes
         for pyp_idx in self.load_indices:
-            if self.pypsa_net.buses_t:
+            v_mag = getattr(self.pypsa_net.net.buses_t, 'v_mag_pu', None)
+            if v_mag is not None and not v_mag.empty:
                 # Get voltage for current timestep
-                v_pu = self.pypsa_net.buses_t.v_mag_pu[pyp_idx].iloc[0]
+                bus_idx = self.pypsa_net.loads.loc[pyp_idx, "bus"]
+                v_pu = self.pypsa_net.buses_t.v_mag_pu[bus_idx].iloc[0]
                 self.data_to_federation["publications"][
                     f"node_{pyp_idx}/V"
                 ] = float(v_pu)
-                print(f"Published node {pyp_idx} v_pu: {v_pu}")
+                # print(f"Published node {pyp_idx} voltage: {v_pu} pu")
             else:
                 print(
                     f"Warning: buses_t is empty, cannot publish voltage for node {pyp_idx}")
