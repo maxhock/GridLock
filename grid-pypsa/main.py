@@ -146,7 +146,7 @@ class GridFederate(Federate):
             # print(
             #     f"Published ext_grid {self.ext_grid_idx} q_mvar: {q_mvar}")
 
-            # Publish voltage at the ext_grid bus
+        # Publish voltage for each load node
         for pyp_idx in self.load_indices:
             if self.pypsa_net.buses_t:
                 # Get voltage for current timestep
