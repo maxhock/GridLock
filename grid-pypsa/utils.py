@@ -20,13 +20,18 @@ class PyPSANetworkBuilder:
         self._load_data_from_excel()
         # Check for required sheets using original (user-facing) sheet names
         required_sheets = ["bus", "ext_grid", "line", "load"]
-        missing_sheets = [sheet for sheet in required_sheets if sheet not in self.data]
+        missing_sheets = [
+            sheet for sheet in required_sheets if sheet not in self.data]
         if missing_sheets:
             raise ValueError(
                 f"Required sheet(s) {missing_sheets} not found in {file_path}. "
                 f"Expected the following sheets: {required_sheets}."
             )
         self.net: pypsa.Network = pypsa.Network()
+        # Default to 50 Hz if not specified
+        self.frequency: float = float(
+            self.input_parameters.f_hz[0]) if "parameters" in self.data else 50.0
+        self.sn = self.input_parameters.sn_mva[0] if "parameters" in self.data else None
 
     def _load_data_from_excel(self):
         self.data = pd.read_excel(self.network_file, sheet_name=None)
@@ -50,14 +55,14 @@ class PyPSANetworkBuilder:
             bus_to = str(row.lv_bus)
             r_pu = row.vkr_percent/100
             x_pu = np.sqrt(row.vk_percent**2 -
-                           row.vkr_percent**2)/100
+                           row.vkr_percent**2)
             self.net.add(
                 "Transformer", name=str(row.Index),
                 bus0=bus_from, bus1=bus_to,
                 s_nom=row.sn_mva,
-                r=r_pu, x=x_pu,
+                r=r_pu, x=row.vk_percent/(row.sn_mva*100),
                 model="t",
-            )
+                tap_ratio=1+(row.tap_step_percent*row.tap_pos/100) if row.tap_step_percent != 0 else 1)
 
     def _add_lines(self):
         for row in self.input_line.itertuples():
@@ -68,6 +73,7 @@ class PyPSANetworkBuilder:
                 length=row.length_km,
                 r=row.length_km * row.r_ohm_per_km,
                 x=row.length_km * row.x_ohm_per_km,
+                b=2 * np.pi * self.frequency * row.length_km * row.c_nf_per_km * 1e-9,
             )
 
     def _add_loads(self):
@@ -75,7 +81,7 @@ class PyPSANetworkBuilder:
             self.net.add(
                 "Load", name=str(row.Index),
                 bus=str(row.bus),
-                p_set=row.p_mw,  q_set=-row.q_mvar
+                p_set=row.p_mw,  q_set=row.q_mvar
             )
 
     def _add_gens(self):
@@ -103,7 +109,7 @@ class PyPSANetworkBuilder:
                 "ShuntImpedance", name=str(row.Index),
                 bus=str(row.bus),
                 g=row.p_mw/row.vn_kv**2,
-                b=-row.q_mvar/row.vn_kv**2
+                b=-row.q_mvar/row.vn_kv**2,
             )
 
     # Properties for convenient access to PyPSA network components.
@@ -118,7 +124,12 @@ class PyPSANetworkBuilder:
     def buses(self) -> pd.DataFrame:
         """Access PyPSA bus objects and their properties."""
         return self.net.buses
-
+    
+    @property
+    def buses_t(self) -> pd.DataFrame:
+        """Access time-varying bus results after power flow."""
+        return self.net.buses_t
+    
     @property
     def lines(self) -> pd.DataFrame:
         """Access PyPSA transmission line objects."""
@@ -152,16 +163,18 @@ class PyPSANetworkBuilder:
         If there are loads at the ext_grid bus, their setpoint is added to the bus power.
         Returns:
             float: Power at the external grid bus (MW)
+            float: Reactive power at the external grid bus (MVar)
         """
         if self.net.buses_t.p.empty:
             raise RuntimeError(
                 "Power flow must be run before accessing results.")
-
         if not self.net.loads[self.net.loads.bus == str(self.ext_grid_idx)].empty:
-            return (
-                self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
-                + self.net.loads[self.net.loads.bus ==
-                                 str(self.ext_grid_idx)]["p_set"].sum()
-            )
+            p = self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0] + \
+                self.net.loads[self.net.loads.bus == str(
+                    self.ext_grid_idx)]["p_set"].sum()
+            q = self.net.buses_t.q[str(self.ext_grid_idx)].iloc[0] + \
+                self.net.loads[self.net.loads.bus == str(
+                    self.ext_grid_idx)]["q_set"].sum()
+            return (p, q)
         else:
-            return self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
+            return (self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0], self.net.buses_t.q[str(self.ext_grid_idx)].iloc[0])
