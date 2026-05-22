@@ -54,28 +54,49 @@ class GridFederate(Federate):
         # Load pypsa network
         self.pypsa_net = PyPSANetworkBuilder(self.grid_path)
         self.pypsa_net.create_network()
-        self.ext_grid_idx = self.pypsa_net.ext_grid_idx
+        self.ext_grid_idx = self.pypsa_net.ext_grid_idx.split(
+            ",")[0]  # Assuming single ext_grid for now
 
-        # Register dynamic subscriptions for loads
+        # Register dynamic subscriptions for loads and publications for voltages at each load bus
         self.load_indices = list(self.pypsa_net.loads.index)
         for pyp_idx in self.load_indices:
-            sub_key = f"node_{pyp_idx}/P"
-            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
+            sub_key_p = f"node_{pyp_idx}/P"
+            sub_key_q = f"node_{pyp_idx}/Q"
+            pub_key_v = f"node_{pyp_idx}/V"
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key_p, "MW")
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key_q, "MVAR")
+            h.helicsFederateRegisterGlobalPublication(
+                self.hfed, pub_key_v, h.HELICS_DATA_TYPE_DOUBLE, "pu"
+            )
             # Track in CST's data structures so get_data_from_federation() works
-            self.inputs[sub_key] = {"type": "double", "key": sub_key}
-            self.data_from_federation["inputs"][sub_key] = None
+            self.inputs[sub_key_p] = {"type": "double", "key": sub_key_p}
+            self.data_from_federation["inputs"][sub_key_p] = None
+            self.inputs[sub_key_q] = {"type": "double", "key": sub_key_q}
+            self.data_from_federation["inputs"][sub_key_q] = None
+            self.pubs[pub_key_v] = {"type": "double", "key": pub_key_v}
+            self.data_to_federation["publications"][pub_key_v] = None
 
         # Register dynamic publications for ext_grids
         # The external grid indices are actually the bus idx that is acting as a Slack
         self.ext_grid_indices = list(self.pypsa_net.ext_grid_idx)
         for pyp_idx in self.ext_grid_indices:
-            pub_key = f"Grid/transformer_{pyp_idx}_power"
+            pub_key_p = f"Grid/transformer_{pyp_idx}_active_power"
+            pub_key_q = f"Grid/transformer_{pyp_idx}_reactive_power"
+            sub_key_v = f"Grid/transformer_{pyp_idx}_voltage"
             h.helicsFederateRegisterGlobalPublication(
-                self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
+                self.hfed, pub_key_p, h.HELICS_DATA_TYPE_DOUBLE, "MW"
             )
+            h.helicsFederateRegisterGlobalPublication(
+                self.hfed, pub_key_q, h.HELICS_DATA_TYPE_DOUBLE, "MVAR"
+            )
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key_v, "pu")
             # Track in CST's data structures so send_data_to_federation() works
-            self.pubs[pub_key] = {"type": "double", "key": pub_key}
-            self.data_to_federation["publications"][pub_key] = None
+            self.pubs[pub_key_p] = {"type": "double", "key": pub_key_p}
+            self.data_to_federation["publications"][pub_key_p] = None
+            self.pubs[pub_key_q] = {"type": "double", "key": pub_key_q}
+            self.data_to_federation["publications"][pub_key_q] = None
+            self.inputs[sub_key_v] = {"type": "double", "key": sub_key_v}
+            self.data_from_federation["inputs"][sub_key_v] = None
 
         print(
             f"Grid federate initialized: {len(self.load_indices)} loads, {len(self.ext_grid_indices)} ext_grids"
@@ -87,12 +108,25 @@ class GridFederate(Federate):
 
         # Read subscriptions from CST's data structure
         for pyp_idx in self.load_indices:
-            sub_key = f"node_{pyp_idx}/P"
-            if sub_key in self.data_from_federation["inputs"]:
-                value_w = self.data_from_federation["inputs"][sub_key]
+            sub_key_p = f"node_{pyp_idx}/P"
+            sub_key_q = f"node_{pyp_idx}/Q"
+            if sub_key_p in self.data_from_federation["inputs"]:
+                value_w = self.data_from_federation["inputs"][sub_key_p]
                 if value_w is not None:
-                    self.pypsa_net.loads.at[pyp_idx, "p_set"] = value_w
-
+                    self.pypsa_net.loads.loc[pyp_idx, "p_set"] = value_w
+            # The following code should be uncommented when there is a published reactive power available
+            # if sub_key_q in self.data_from_federation["inputs"]:
+            #     value_var = self.data_from_federation["inputs"][sub_key_q]
+            #     print(f"Received load {pyp_idx} q_set: {value_var} MVAR")
+                # if value_var is not None:
+                #     print(f"Updating load {pyp_idx} q_set to {value_var} MVAR")
+                #     self.pypsa_net.loads.loc[pyp_idx, "q_set"] = value_var
+        for pyp_idx in self.ext_grid_indices:
+            sub_key_v = f"Grid/transformer_{pyp_idx}_voltage"
+            if sub_key_v in self.data_from_federation["inputs"]:
+                value_v = self.data_from_federation["inputs"][sub_key_v]
+                if value_v is not None:
+                    self.pypsa_net.buses.loc[pyp_idx, "v_nom"] = value_v
         try:
             self.pypsa_net.run_pf()
             print("Power flow executed.")
@@ -100,12 +134,32 @@ class GridFederate(Federate):
             print(f"Power flow failed: {e}")
             return
         for pyp_idx in self.ext_grid_indices:
-            p_mw = self.pypsa_net.res_ext_grid()
+            p_mw, q_mvar = self.pypsa_net.res_ext_grid()
             self.data_to_federation["publications"][
-                f"Grid/transformer_{self.ext_grid_idx}_power"
+                f"Grid/transformer_{self.ext_grid_idx}_active_power"
             ] = float(p_mw)
             print(
                 f"Published ext_grid {self.ext_grid_idx} p_mw: {p_mw}")
+            self.data_to_federation["publications"][
+                f"Grid/transformer_{self.ext_grid_idx}_reactive_power"
+            ] = float(q_mvar)
+            # print(
+            #     f"Published ext_grid {self.ext_grid_idx} q_mvar: {q_mvar}")
+
+        # Publish voltage for each load node
+        for pyp_idx in self.load_indices:
+            v_mag = getattr(self.pypsa_net.net.buses_t, 'v_mag_pu', None)
+            if v_mag is not None and not v_mag.empty:
+                # Get voltage for current timestep
+                bus_idx = self.pypsa_net.loads.loc[pyp_idx, "bus"]
+                v_pu = self.pypsa_net.buses_t.v_mag_pu[bus_idx].iloc[0]
+                self.data_to_federation["publications"][
+                    f"node_{pyp_idx}/V"
+                ] = float(v_pu)
+                # print(f"Published node {pyp_idx} voltage: {v_pu} pu")
+            else:
+                print(
+                    f"Warning: buses_t is empty, cannot publish voltage for node {pyp_idx}")
 
 
 def parse_args():
