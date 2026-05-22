@@ -126,7 +126,7 @@ class GridFederate(Federate):
             if sub_key_v in self.data_from_federation["inputs"]:
                 value_v = self.data_from_federation["inputs"][sub_key_v]
                 if value_v is not None:
-                    self.pypsa_net.buses.loc[pyp_idx, "v_mag_pu"] = value_v
+                    self.pypsa_net.buses.loc[pyp_idx, "v_nom"] = value_v
         try:
             self.pypsa_net.run_pf()
             print("Power flow executed.")
