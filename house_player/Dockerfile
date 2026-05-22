@@ -5,11 +5,11 @@ WORKDIR /app
 
 # Create config mount point
 RUN mkdir /config
-VOLUME ["/config"]
+
 
 # Create data mount point
 RUN mkdir /data
-VOLUME ["/data"]
+
 
 # Install HELICS CLI
 RUN pip install --no-cache-dir helics[cli]

@@ -6,30 +6,31 @@ federates:
     name: grid
     build_folder: ${.name}
     grid_file: kerber_landnetz_freileitung_1.xlsx
-  # grid:
-  #   name: grid-pypsa
-  #   build_folder: ${.name}
-  #   grid_file: kerber_landnetz_freileitung_1.xlsx
-  forecasting:
-    name: forecasting
-    build_folder: ${.name}    
-    grid_file: kerber_landnetz_freileitung_1.xlsx
-    api_host: fastapi_server
-    api_port: 8000
-  house_player:
-    name: house_player
+  #forecasting:
+  #  name: forecasting
+  #  build_folder: ${.name}    
+  #  grid_file: kerber_landnetz_freileitung_1.xlsx
+  #  api_host: fastapi_server
+  #  api_port: 8000
+  #house_player:
+  #  name: house_player
+  #  build_folder: ${.name}
+  #  input_file: /data/input/sample_house.csv
+  #  fill_remaining: true
+  house:
+     name: house
+     build_folder: ${.name}
+     placement: [0, 2, 5, 8]
+  controller:
+    name: controller
     build_folder: ${.name}
-    input_file: /data/input/sample_house.csv
-    fill_remaining: true
-  # house:
-  #   name: house
-  #   build_folder: ${.name}
-  #   placement: [0, 2, 5, 8]
+    placement: ${..house.placement}
   recorder:
     name: recorder
     build_folder: ${.name}
     target: grid
     output_file: /data/output/${.target}.log
+    command: helics_recorder --name=${.name} --capture=${.target} --output=${.output_file} --broker=${..broker.name}
 general:
     start_time: 0
     end_time: 82800  # You can adjust this as needed
