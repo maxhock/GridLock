@@ -2,6 +2,11 @@ config/tmp/
 data/output/
 __pycache__/
 .venv/
+generated/*
+generated/**/*
+!generated/.gitkeep
+meta_store/*
+meta_store/**/*
 *.pyc
 *.pyo
 *.pyd
@@ -15,8 +20,9 @@ __pycache__/
 *.bak
 *.DS_Store
 *.idea/
-*.vscode/
 *.coverage
 *.env
+config/preflight.env
+*.venv
 *.local
 *.lock

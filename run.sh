@@ -1,13 +1,50 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Build the compose generator image
-docker build -f composegen/Dockerfile -t composegen composegen
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREFLIGHT_ENV_FILE="${PREFLIGHT_ENV_FILE:-$SCRIPT_DIR/config/preflight.env}"
+PREFLIGHT_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.preflight.yaml"
+GENERATED_DIR="$SCRIPT_DIR/generated"
+COMPOSE_FILE="$GENERATED_DIR/docker-compose.yaml"
 
-# Run the generator
-docker run --rm -v "$(pwd)/config:/config" -v "$(pwd)/data:/data" composegen
+print_stage() {
+  echo "=== $1 ==="
+}
 
-# Now launch the experiment with docker compose, pointing at the generated file
-docker compose -f config/tmp/docker-compose.yml up --build --remove-orphans
+load_env() {
+  if [ ! -f "$PREFLIGHT_ENV_FILE" ]; then
+    echo "Missing env file: $PREFLIGHT_ENV_FILE" >&2
+    exit 1
+  fi
 
-# docker compose -f config/tmp/docker-compose.yml down --remove-orphans
+  set -a
+  source "$PREFLIGHT_ENV_FILE"
+  set +a
+
+  export PREFLIGHT_ENV_FILE
+  export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
+}
+
+preflight_compose() {
+  docker compose --env-file "$PREFLIGHT_ENV_FILE" -f "$PREFLIGHT_COMPOSE_FILE" "$@"
+}
+
+cleanup() {
+  preflight_compose down --remove-orphans >/dev/null 2>&1 || true
+}
+
+main() {
+  print_stage "Stage 1: load environment"
+  load_env
+
+  trap cleanup EXIT
+
+  print_stage "Stage 2: run preflight compose"
+  preflight_compose up -d --wait database mongodb
+  preflight_compose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps infdb composegen
+
+  print_stage "Stage 3: run experiment compose"
+  docker compose -f "$COMPOSE_FILE" up --build --quiet-build --remove-orphans --abort-on-container-exit
+}
+
+main "$@"

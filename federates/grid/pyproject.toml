@@ -1,0 +1,9 @@
+[project]
+name = "grid-federate"
+version = "1"
+requires-python = "==3.12.*"
+dependencies = [
+    "cosim-toolbox",
+    "helics[cli]",
+    "pandapower==3.3.2",
+]

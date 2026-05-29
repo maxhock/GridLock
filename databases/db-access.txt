@@ -1,0 +1,19 @@
+mongo-db:
+1. browser: http://localhost:8081
+2. navigate to copper
+
+postgres timescale database:
+1. browser: http://localhost:5050
+2. enter pgadmin credentials: 
+  username: user@domain.com
+  password: SuperSecret
+3. Create Server:
+  Name: GridLock
+  Connection (from wsl):
+    Host: database
+    Port: 5432
+    Maintenance database: postgres
+    Username: worker
+    Password: worker
+4. Schema: <name>Analysis
+5. Tables: e.g. hdt_double

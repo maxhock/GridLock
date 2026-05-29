@@ -31,6 +31,7 @@ SUPPORTED_TREE_CLASSES = {
     "house",
     "load",
     "pv",
+    "battery",
     "hems",
     "controller",
     "recorder",
@@ -68,7 +69,7 @@ def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
             fed_cfg.name = fed_key
 
         if "build_folder" not in fed_cfg or not fed_cfg.build_folder:
-            fed_cfg.build_folder = fed_cfg.name
+            fed_cfg.build_folder = f"federates/{fed_cfg.name}"
 
     conf.federates.grid.num_nodes = num_nodes
 
@@ -303,6 +304,17 @@ def validate_tree(tree: Tree) -> None:
                     f"[PV] Node '{node.tag}' ({node.identifier}) requires 'capacity'."
                 )
 
+        elif node_class == "battery":
+            if not data.get("capacity"):
+                validation_errors.append(
+                    f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'capacity'."
+                )
+
+            if not data.get("power"):
+                validation_errors.append(
+                    f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'power'."
+                )
+
         elif node_class == "hems":
             if not data.get("control_strategy"):
                 validation_errors.append(
@@ -369,7 +381,7 @@ def wire_pub_sub(tree: Tree) -> None:
                 add_pub_sub(parent_node, voltage_topic, "V", "publication")
                 add_pub_sub(child_node, voltage_topic, "V", "subscription")
 
-                if child_class in ["house", "load", "pv", "grid"]:
+                if child_class in ["house", "load", "battery", "pv", "grid"]:
                     p_topic = f"{child_node.identifier}/active_power"
                     q_topic = f"{child_node.identifier}/reactive_power"
 
@@ -386,7 +398,7 @@ def wire_pub_sub(tree: Tree) -> None:
                     add_pub_sub(child_node, control_topic, "json", "subscription")
 
             elif parent_class == "house":
-                if child_class in ["pv", "hems", "controller"]:
+                if child_class in ["pv", "battery", "hems", "controller"]:
                     p_topic = f"{child_node.identifier}/active_power"
                     q_topic = f"{child_node.identifier}/reactive_power"
                     v_topic = f"{child_node.identifier}/voltage"

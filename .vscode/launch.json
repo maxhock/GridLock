@@ -1,0 +1,43 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug: Grid (metadata)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/federates/grid/main.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--scenario",
+                "TestGridScenario",
+                "--federate_name",
+                "lv-grid_91301_1_4"
+            ],
+            "env": {
+                "CST_USE_META_DB": "json",
+                "CST_USE_DATA_DB": "csv",
+                "CST_HOST": "localhost"
+            }
+        },
+        {
+            "name": "Debug: House Player (metadata)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/federates/house_player/main.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--scenario",
+                "TestGridScenario",
+                "--federate_name",
+                "lv-grid_91301_1_4.loadhouse_0",
+                "--timeseries",
+                "${workspaceFolder}/data/input/building_timeseries.csv"
+            ],
+            "env": {
+                "CST_USE_META_DB": "json",
+                "CST_USE_DATA_DB": "csv",
+                "CST_HOST": "localhost"
+            }
+        }
+    ]
+}

@@ -1,0 +1,119 @@
+# CST persistent data stores for GridLock
+# Provides:
+#   - TimescaleDB/PostgreSQL (timeseries)  → port 5432
+#   - MongoDB (metadata)                   → port 27017
+#   - pgAdmin (PostgreSQL frontend)        → port 5050
+#   - Mongo Express (MongoDB frontend)     → port 8081
+#   - Grafana (visualization)              → port 3000
+#
+# Usage:
+#   docker compose -f docker-compose.yaml up -d
+#   docker compose -f docker-compose.yaml down
+#
+# Environment values are normally read from config/preflight.env.
+
+services:
+  database:
+    image: timescale/timescaledb:latest-pg12
+    container_name: ${CONTAINER_NAME:-database}
+    ports:
+      - "${CST_POSTGRES_PORT}:5432"
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_HOST: "${CST_POSTGRES_HOST}"
+      POSTGRES_PORT: "${CST_POSTGRES_PORT}"
+      POSTGRES_DB: "${CST_POSTGRES_DB}"
+      POSTGRES_USER: "${CST_POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${CST_POSTGRES_PASSWORD}"
+    command: postgres -c 'max_connections=1000'
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "${CST_POSTGRES_USER}",
+          "-d",
+          "${CST_POSTGRES_DB}"
+        ]
+      interval: 5s
+      retries: 5
+    restart: always
+    volumes:
+      - cst_postgres:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - sim_net
+
+  mongodb:
+    image: mongodb/mongodb-community-server:7.0-ubuntu2204
+    container_name: ${CONTAINER_NAME:-mongodb}
+    ports:
+      - "${CST_MONGO_PORT}:27017"
+    expose:
+      - "27017"
+    environment:
+      MONGO_INITDB_DATABASE: "${CST_MONGO_DB}"
+      MONGODB_INITDB_ROOT_USERNAME: "${CST_MONGO_ROOT_USERNAME}"
+      MONGODB_INITDB_ROOT_PASSWORD: "${CST_MONGO_ROOT_PASSWORD}"
+    volumes:
+      - cst_mongo:/data/db
+      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    restart: unless-stopped
+    networks:
+      - sim_net
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ${CONTAINER_NAME:-pgadmin}
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "${CST_POSTGRES_ADMIN_EMAIL}"
+      PGADMIN_DEFAULT_PASSWORD: "${CST_POSTGRES_ADMIN_PASSWORD}"
+    ports:
+      - "5050:80"
+    networks:
+      - sim_net
+    depends_on:
+      database:
+        condition: service_healthy
+
+  mongoexpress:
+    image: mongo-express:latest
+    container_name: ${CONTAINER_NAME:-mongoexpress}
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_ADMINUSERNAME: "${CST_MONGO_ROOT_USERNAME}"
+      ME_CONFIG_MONGODB_ADMINPASSWORD: "${CST_MONGO_ROOT_PASSWORD}"
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      - "8081:8081"
+    networks:
+      - sim_net
+    depends_on:
+      - mongodb
+
+  grafana:
+    image: grafana/grafana:10.2.4-ubuntu
+    container_name: ${CONTAINER_NAME:-grafana}
+    restart: unless-stopped
+    environment:
+      - GF_LOG_LEVEL=info
+      - CST_HOST=${CST_POSTGRES_HOST}
+      - POSTGRES_PORT=${CST_POSTGRES_PORT}
+    ports:
+      - "3000:3000"
+    networks:
+      - sim_net
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+
+volumes:
+  cst_mongo: null
+  cst_postgres: null
+
+networks:
+  sim_net: null

@@ -373,6 +373,10 @@ def map_params_to_class(federate_class: str) -> dict:
             "image": "house",
             "command": "python3 main.py",
         },
+        "battery": {
+            "image": "house",
+            "command": "python3 main.py",
+        },
         "hems": {
             "image": "controller",
             "command": "python3 main.py",
@@ -642,7 +646,7 @@ def _wire_grid_child(
             "V",
         )
 
-        if child_class in ("house", "load", "pv", "grid"):
+        if child_class in ("house", "load", "battery", "pv", "grid"):
             _add_group(
                 federation,
                 "active_power",
@@ -948,13 +952,10 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             mapped = map_params_to_class(node_class)
             command = mapped["command"]
 
-            if node_class == "grid":
-                layout = data.get("layout")
-
-                if layout:
-                    command += f" --grid_file {layout}"
-                else:
-                    print(f"Warning: No layout or location for grid {node.identifier}")
+            if mapped["image"] in ["grid", "house_player"]:
+                command += f" --scenario {federation.scenario_name} --federate_name {node.identifier}"
+            elif mapped["image"] in ["house", "controller"]:
+                command += f" --name {node.identifier}"
 
             fed.config("image", mapped["image"])
             fed.config("command", command)
