@@ -1,0 +1,31 @@
+federates:
+  broker:
+    name: broker
+  grid:
+    name: grid
+    grid_file: kerber_landnetz_freileitung_1.xlsx
+  #forecasting:
+  #  name: forecasting
+  #  grid_file: kerber_landnetz_freileitung_1.xlsx
+  #  api_host: fastapi_server
+  #  api_port: 8000
+  #house_player:
+  #  name: house_player
+  #  input_file: /data/input/sample_house.csv
+  #  fill_remaining: true
+  house:
+     name: house
+     placement: [0, 2, 5, 8]
+  controller:
+    name: controller
+    placement: ${..house.placement}
+  recorder:
+    name: recorder
+    target: grid
+    output_file: /data/output/${.target}.log
+    command: helics_recorder --name=${.name} --capture=${.target} --output=${.output_file} --broker=${..broker.name}
+general:
+    start_time: 0
+    end_time: 82800  # You can adjust this as needed
+    time_step: 3600
+    loglevel: warning

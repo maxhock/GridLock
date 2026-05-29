@@ -26,7 +26,13 @@ def _service(
     """
     _svc = "  " + name + ":\n"
     _svc += '    image: "' + image + '"\n'
-    _svc += '    build: "../federates/' + image + '"\n'
+    _svc += "    build:\n"
+    if image in ["house", "controller"]:
+        _svc += "      context: ..\n"
+        _svc += '      dockerfile: federates/' + image + '/Dockerfile\n'
+    else:
+        _svc += '      context: ../federates/' + image + '\n'
+        _svc += '      dockerfile: Dockerfile\n'
     if params[0] != "":
         _svc += "    environment:\n"
         _svc += params[0]

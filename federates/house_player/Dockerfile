@@ -1,3 +1,4 @@
+# grid/Dockerfile
 FROM python:3.11-slim AS base
 
 # 1. Python-specific optimizations
@@ -10,9 +11,9 @@ WORKDIR /app
 # Create mount points and mark them as volumes
 RUN mkdir -p /data /app/meta_store
 
-# Install dependencies from requirements.txt
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies from grid/requirements.txt (root context!)
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Copy application code
 COPY main.py .
@@ -21,11 +22,8 @@ COPY src/ src/
 
 # --- Test stage ---
 FROM base AS test
-# Install test dependencies
 RUN pip install --no-cache-dir pytest pytest-mock
-# Copy test files
-COPY test_main.py .
-# Always run tests in this stage
+COPY test_main.py /app/test_main.py
 RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---

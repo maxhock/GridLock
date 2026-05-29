@@ -1,48 +1,43 @@
 import argparse
+import os
 from pathlib import Path
 
 from extract import extract
 from transform import transform
 from load import load
 
-
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Generate federation configuration.")
     parser.add_argument(
-        "config_file",
-        nargs="?",
+        "--config", "-c", type=str,
         help="Path to the experiment configuration YAML file",
+    )
+    parser.add_argument(
+        "--output", "-o", type=str,
+        help="Directory for output files",
+    )
+    parser.add_argument(
+        "--data-input", "-d", type=str,
+        help="Path to the data input directory",
     )
     args = parser.parse_args()
 
-    # Resolve config path
-    if args.config_file:
-        config_path = Path(args.config_file)
-    else:
-        file_name = "experiment-LV.yml"
-        config_path = Path("/config/" + file_name)
-        # Fallback if experiment.yml logic from notebook was specific
-        if not config_path.exists():
-            config_path = Path(
-                "../config/" + file_name
-            )  # revert to default path for generic script
-            if not config_path.exists():
-                config_path = Path(
-                    "./config/" + file_name
-                )  # revert to default path for generic script
+    config_path = Path(args.config if args.config else os.environ.get("CONFIG_PATH", "/config/experiment-LV.yml"))
+    output_dir = Path(args.output if args.output else os.environ.get("OUTPUT_DIR", "/config/tmp"))
+    data_input_dir = Path(args.data_input if args.data_input else os.environ.get("DATA_INPUT_DIR", "/data/input"))
 
-    # --- ETL: EXTRACT ---
-    print("--- Extracting Configuration ---")
-    cfg, tree, grid_nodes = extract(config_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- ETL: TRANSFORM ---
-    print("--- Transforming Configuration ---")
-    tree, general_cfg = transform(cfg, tree, grid_nodes)
+    extracted = extract(
+        config_path=config_path,
+        data_input_path=data_input_dir,
+        output_path=output_dir,
+    )
 
-    # --- ETL: LOAD / GENERATE ---
-    print("--- Generating CST Configuration ---")
-    load(tree, general_cfg)
+    transformed = transform(extracted)
+    load(transformed)
 
+    print("composegen ETL finished successfully.")
 
 if __name__ == "__main__":
     main()

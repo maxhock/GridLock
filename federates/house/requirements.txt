@@ -1,4 +1,8 @@
 helics
+cosim-toolbox
 gymnasium
 pyyaml
-git+https://github.com/phierhager/EnergySim.git
+dacite
+pandas~=2.3.1
+packaging~=25.0
+git+https://github.com/Hosseini97/EnergySim.git@main

@@ -1,0 +1,137 @@
+"""
+Grid federate using CoSim Toolbox (CST).
+Loads pandapower network, runs power flow, exchanges data via HELICS.
+"""
+
+from cosim_toolbox.sims import Federate
+import helics as h
+
+import argparse
+import os
+import json
+from utils import PyPSANetworkBuilder
+
+
+class GridFederate(Federate):
+    """Grid federate with pandapower power flow simulation."""
+
+    def __init__(self, federate_name, grid_path):
+        super().__init__(federate_name)
+        self.net = None
+        self.pypsa_net = None  # PyPSANetworkBuilder instance
+        self.ext_grid_idx = None  # Index of ext_grid in PyPSA
+        self.grid_path = grid_path
+
+    def create_federate(self):
+        """Initialize HELICS federate and load pandapower network."""
+
+        # Load config from JSON file (bypassing CST's database requirement)
+        config_path = f"/config/tmp/{self.federate_name}_config.json"
+        with open(config_path, "r") as f:
+            self.config = json.load(f)
+
+        # Initialize CST's required attributes
+        self.scenario_name = "grid"
+        self.federate_type = "value"
+        self.period = self.config.get("period", 3600.0)
+        self.stop_time = self.config.get("max_cosim_duration", 82800.0)
+        self.granted_time = 0.0
+
+        self.scenario = {}
+        self.scenario["start_time"] = "2025-01-01T00:00:00"
+        self.scenario["stop_time"] = "2025-01-02T00:00:00"
+        self.set_metadata()
+
+        # Initialize CST's data exchange dictionaries
+        self.pubs = {}
+        self.inputs = {}
+        self.data_from_federation = {"inputs": {}, "endpoints": {}}
+        self.data_to_federation = {"publications": {}, "endpoints": {}}
+
+        # Use CST's create_helics_fed() method - it reads from self.config
+        self.create_helics_fed()
+
+        # Load pypsa network
+        self.pypsa_net = PyPSANetworkBuilder(self.grid_path)
+        self.pypsa_net.create_network()
+        self.ext_grid_idx = self.pypsa_net.ext_grid_idx
+
+        # Register dynamic subscriptions for loads
+        self.load_indices = list(self.pypsa_net.loads.index)
+        for pyp_idx in self.load_indices:
+            sub_key = f"node_{pyp_idx}/P"
+            h.helicsFederateRegisterSubscription(self.hfed, sub_key, "MW")
+            # Track in CST's data structures so get_data_from_federation() works
+            self.inputs[sub_key] = {"type": "double", "key": sub_key}
+            self.data_from_federation["inputs"][sub_key] = None
+
+        # Register dynamic publications for ext_grids
+        # The external grid indices are actually the bus idx that is acting as a Slack
+        self.ext_grid_indices = list(self.pypsa_net.ext_grid_idx)
+        for pyp_idx in self.ext_grid_indices:
+            pub_key = f"Grid/transformer_{pyp_idx}_power"
+            h.helicsFederateRegisterGlobalPublication(
+                self.hfed, pub_key, h.HELICS_DATA_TYPE_DOUBLE, "MW"
+            )
+            # Track in CST's data structures so send_data_to_federation() works
+            self.pubs[pub_key] = {"type": "double", "key": pub_key}
+            self.data_to_federation["publications"][pub_key] = None
+
+        print(
+            f"Grid federate initialized: {len(self.load_indices)} loads, {len(self.ext_grid_indices)} ext_grids"
+        )
+
+    def update_internal_model(self):
+        """Run power flow simulation for current timestep."""
+        print(f"\n=== Time: {self.granted_time} ===")
+
+        # Read subscriptions from CST's data structure
+        for pyp_idx in self.load_indices:
+            sub_key = f"node_{pyp_idx}/P"
+            if sub_key in self.data_from_federation["inputs"]:
+                value_w = self.data_from_federation["inputs"][sub_key]
+                if value_w is not None:
+                    self.pypsa_net.loads.at[pyp_idx, "p_set"] = value_w
+
+        try:
+            self.pypsa_net.run_pf()
+            print("Power flow executed.")
+        except Exception as e:
+            print(f"Power flow failed: {e}")
+            return
+        for pyp_idx in self.ext_grid_indices:
+            p_mw = self.pypsa_net.res_ext_grid()
+            self.data_to_federation["publications"][
+                f"Grid/transformer_{self.ext_grid_idx}_power"
+            ] = float(p_mw)
+            print(
+                f"Published ext_grid {self.ext_grid_idx} p_mw: {p_mw}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Grid federate using CST")
+    parser.add_argument(
+        "--grid_file",
+        type=str,
+        required=True,
+        help="Path to Excel file (relative to /data/input)",
+    )
+    args, _ = parser.parse_known_args()
+    return args
+
+
+def main():
+    args = parse_args()
+    grid_path = os.path.join("/data", "input", args.grid_file)
+    federate = GridFederate(
+        "grid", grid_path)
+
+    try:
+        federate.create_federate()
+        federate.run_cosim_loop()
+    finally:
+        federate.destroy_federate()
+
+
+if __name__ == "__main__":
+    main()
