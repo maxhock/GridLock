@@ -249,6 +249,12 @@ def main(
             infdb=infdb, log=log, grid_id=grid_id, queries=location
         )
         print(f"Resolved {len(net_list)} grid(s) from InfDB")
+        if not net_list:
+            query_summary = ", ".join([f"PLZ {q['plz']}" for q in location])
+            raise ValueError(
+                f"InfDB returned no grids for location queries: {query_summary}. "
+                f"Check that PLZ codes exist in pylovo.grid_result table."
+            )
     except Exception as e:
         log.error(f"Failed to resolve grid queries: {e}")
         infdb.stop_logger()
