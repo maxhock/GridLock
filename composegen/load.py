@@ -12,6 +12,7 @@ from omegaconf import DictConfig
 from treelib import Tree
 
 from transform import TransformedConfig
+from cosim_toolbox.dbms import create_metadata_manager
 
 
 RUNNER_FEDERATES = {
@@ -310,6 +311,68 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
     if conf is None:
         raise ValueError("Legacy load expected transformed.conf, got None.")
 
+    # Generate and store run metadata for legacy mode
+    from transform import generate_run_metadata
+    
+    general_cfg = {
+        "name": conf.federates.grid.get("name", "GridLock"),
+        "start_time": str(conf.general.get("start_time", "0")),
+        "end_time": str(conf.general.get("end_time", "0")),
+        "use_meta_db": "json",
+        "use_data_db": "postgres",
+    }
+    
+    run_metadata = generate_run_metadata(
+        experiment_path=transformed.config_path,
+        general_cfg=general_cfg
+    )
+    
+    scenario_name = run_metadata["scenario_name"]
+    
+    # CST expects ISO 8601 format for start_time and stop_time (wall-clock time, not simulation time)
+    # Simulation times (e.g., 0, 86400) need to be converted to ISO 8601
+    start_time_val = general_cfg.get("start_time", 0)
+    end_time_val = general_cfg.get("end_time", 0)
+    
+    # Use a base date and add simulation seconds to get wall-clock ISO 8601
+    from datetime import datetime, timedelta, timezone
+    base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    
+    if isinstance(start_time_val, (int, float)):
+        start_time_iso = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
+    else:
+        start_time_iso = str(start_time_val)
+        
+    if isinstance(end_time_val, (int, float)):
+        end_time_iso = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
+    else:
+        end_time_iso = str(end_time_val)
+    
+    scenario_metadata = {
+        "analysis": run_metadata["analysis"],
+        "federation": f"{run_metadata['analysis']}Federation",
+        "start_time": start_time_iso,
+        "stop_time": end_time_iso,
+        "docker": True,
+        "cst_007": scenario_name,
+        "run_timestamp": run_metadata["timestamp_iso"],
+        "run_timestamp_unix": run_metadata["timestamp_unix"],
+        "git_commit": run_metadata["git_commit"],
+        "experiment_path": run_metadata["experiment_path"],
+        "experiment_yaml_raw": run_metadata["experiment_yaml_raw"],
+    }
+    
+    # Write to metadata store (JSON backend for legacy mode)
+    md_mgr = create_metadata_manager(backend="json", location=str(output_dir))
+    md_mgr.connect()
+    try:
+        md_mgr.writer.write_scenario(scenario_name, scenario_metadata)
+        print(f"Stored run metadata for scenario: {scenario_name}")
+    except Exception as e:
+        md_mgr.disconnect()
+        raise RuntimeError(f"Failed to store run metadata: {e}")
+    md_mgr.disconnect()
+    
     output_dir.mkdir(parents=True, exist_ok=True)
 
     create_docker_compose(conf, output_dir / "docker-compose.yml")
@@ -811,10 +874,66 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         if tree is None:
             raise ValueError("Tree load expected transformed.tree, got None.")
 
-        name = general_cfg.get("name", "GridLock")
+        # Generate and store run metadata
+        from transform import generate_run_metadata
+        
+        run_metadata = generate_run_metadata(
+            experiment_path=transformed.config_path,
+            general_cfg=general_cfg
+        )
+        
+        scenario_name = run_metadata["scenario_name"]
+        
+        # Create scenario metadata for CST
+        # CST expects ISO 8601 format for start_time and stop_time (wall-clock time, not simulation time)
+        # Simulation times (e.g., 0, 86400) need to be converted to ISO 8601
+        start_time_val = general_cfg.get("start_time", 0)
+        end_time_val = general_cfg.get("end_time", 0)
+        
+        # Use a base date and add simulation seconds to get wall-clock ISO 8601
+        from datetime import datetime, timedelta, timezone
+        base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        
+        if isinstance(start_time_val, (int, float)):
+            start_time_iso = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
+        else:
+            start_time_iso = str(start_time_val)
+            
+        if isinstance(end_time_val, (int, float)):
+            end_time_iso = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
+        else:
+            end_time_iso = str(end_time_val)
+        
+        scenario_metadata = {
+            "analysis": run_metadata["analysis"],
+            "federation": f"{run_metadata['analysis']}Federation",
+            "start_time": start_time_iso,
+            "stop_time": end_time_iso,
+            "docker": True,
+            "cst_007": scenario_name,
+            "run_timestamp": run_metadata["timestamp_iso"],
+            "run_timestamp_unix": run_metadata["timestamp_unix"],
+            "git_commit": run_metadata["git_commit"],
+            "experiment_path": run_metadata["experiment_path"],
+            "experiment_yaml_raw": run_metadata["experiment_yaml_raw"],
+        }
+        
+        # Write to metadata store
         use_meta_db = general_cfg.get("use_meta_db", "json")
-        use_data_db = general_cfg.get("use_data_db", "postgres")
         meta_store_path = general_cfg.get("meta_store_path", "generated")
+        
+        md_mgr = create_metadata_manager(backend=use_meta_db, location=meta_store_path)
+        md_mgr.connect()
+        try:
+            md_mgr.writer.write_scenario(scenario_name, scenario_metadata)
+            print(f"Stored run metadata for scenario: {scenario_name}")
+        except Exception as e:
+            md_mgr.disconnect()
+            raise RuntimeError(f"Failed to store run metadata: {e}")
+        md_mgr.disconnect()
+        
+        name = general_cfg.get("name", "GridLock")
+        use_data_db = general_cfg.get("use_data_db", "postgres")
 
         federation = FederationConfig(
             f"{name}Scenario",
@@ -965,8 +1084,22 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
         federation.define_io()
 
-        start_str = general_cfg["start_time"]
-        end_str = general_cfg["end_time"]
+        # Convert simulation times to ISO 8601 wall-clock times for CST
+        from datetime import datetime, timedelta, timezone
+        base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        
+        start_time_val = general_cfg.get("start_time", 0)
+        end_time_val = general_cfg.get("end_time", 0)
+        
+        if isinstance(start_time_val, (int, float)):
+            start_str = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
+        else:
+            start_str = str(start_time_val)
+            
+        if isinstance(end_time_val, (int, float)):
+            end_str = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
+        else:
+            end_str = str(end_time_val)
 
         print("Generating CST federation configuration...")
 

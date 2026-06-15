@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import copy
+import os
+import yaml
 import pandas as pd
+from datetime import datetime
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from omegaconf import DictConfig, OmegaConf
@@ -24,6 +28,7 @@ class TransformedConfig:
     general_cfg: dict[str, Any] | None = None
     output_path: Any = None
     data_input_path: Any = None
+    config_path: str | None = None
 
 
 SUPPORTED_TREE_CLASSES = {
@@ -102,6 +107,7 @@ def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
         conf=conf,
         output_path=extracted.output_path,
         data_input_path=extracted.data_input_path,
+        config_path=str(extracted.config_path),
     )
 
 
@@ -437,7 +443,41 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
         general_cfg=general_cfg,
         output_path=extracted.output_path,
         data_input_path=extracted.data_input_path,
+        config_path=str(extracted.config_path),
     )
+
+
+# ---------------------------------------------------------------------------
+# Run metadata generation
+# ---------------------------------------------------------------------------
+
+def get_git_commit() -> str:
+    """Get git commit hash from environment variable."""
+    return os.getenv("GIT_COMMIT", "unknown")
+
+
+def generate_run_metadata(experiment_path: str, general_cfg: dict) -> dict:
+    """Generate metadata for this run."""
+    now = datetime.now()
+    timestamp_iso = now.strftime("%Y%m%d_%H%M%S")
+    timestamp_unix = int(now.timestamp())
+    
+    # Read full experiment file as raw YAML string
+    with open(experiment_path, 'r') as f:
+        experiment_yaml_raw = f.read()
+    
+    analysis_name = general_cfg.get('name', 'GridLock')
+    scenario_name = f"{analysis_name}_{timestamp_iso}"
+    
+    return {
+        "timestamp_iso": timestamp_iso,
+        "timestamp_unix": timestamp_unix,
+        "scenario_name": scenario_name,
+        "analysis": analysis_name,
+        "git_commit": get_git_commit(),
+        "experiment_path": experiment_path,
+        "experiment_yaml_raw": experiment_yaml_raw,
+    }
 
 
 # ---------------------------------------------------------------------------

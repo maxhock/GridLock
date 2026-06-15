@@ -23,6 +23,7 @@ load_env() {
 
   export PREFLIGHT_ENV_FILE
   export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$PREFLIGHT_ENV_FILE}"
+  export GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 }
 
 preflight_compose() {

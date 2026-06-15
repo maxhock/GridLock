@@ -156,6 +156,7 @@ services:
       CST_RUNTIME_POSTGRES_PORT: ${CST_POSTGRES_PORT}
       CST_RUNTIME_MONGO_HOST: mongodb://${CST_BROKER_HOST}
       CST_RUNTIME_MONGO_PORT: ${CST_MONGO_PORT}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
       - ${HOST_WORKSPACE_FOLDER:-.}/data:/data
