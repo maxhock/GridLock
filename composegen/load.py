@@ -922,7 +922,11 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         use_meta_db = general_cfg.get("use_meta_db", "json")
         meta_store_path = general_cfg.get("meta_store_path", "generated")
         
-        md_mgr = create_metadata_manager(backend=use_meta_db, location=meta_store_path)
+        md_kwargs = {"backend": use_meta_db}
+        if use_meta_db == "json":
+            md_kwargs["location"] = meta_store_path
+        
+        md_mgr = create_metadata_manager(**md_kwargs)
         md_mgr.connect()
         try:
             md_mgr.writer.write_scenario(scenario_name, scenario_metadata)
