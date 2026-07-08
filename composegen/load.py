@@ -697,6 +697,15 @@ def _wire_grid_child(
                 f"{child_fed_name.replace('.', '/')}/{load_id}/reactive_power"
             )
 
+            _add_group(
+                federation,
+                f"{load_id}/voltage",
+                grid_fed_name,
+                child_fed_name,
+                "double",
+                "V",
+            )
+
         print(f"    Wired {len(load_indices)} load(s).")
 
     else:
