@@ -1,6 +1,6 @@
 general:
  name: "TestGrid"
- start_time: 
+ start_time: 0
  end_time: 86400
  time_step: 3600
  duration: 86400
@@ -12,7 +12,7 @@ federation:
   class: "grid"
   config:
     location:
-      - plz: 91301
+      - plz: 91359
         kcid: 1
         bcid: 4
   sub_federates:
@@ -21,7 +21,7 @@ federation:
       class: "load"
       config:
         placement: "fill"  # pandapower load indices; use "fill" for all loads
-        electrical_load: "H0" # "H25", "electricloadcurve.csv"
+        electrical_load: "sample_house.csv" # "H25", "electricloadcurve.csv"
         heat_load: "" # "heatloadcurve.csv"
     # - id: "house_0"
     #   name: "sim house"
