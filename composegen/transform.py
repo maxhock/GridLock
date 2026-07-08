@@ -341,8 +341,11 @@ def process_general_config(general_cfg: dict) -> dict:
     if "end_time" not in general_cfg or general_cfg["end_time"] is None:
         raise ValueError("[General] Missing required field 'end_time'.")
 
-    if "start_time" not in general_cfg or general_cfg["start_time"] is None:
+    if not general_cfg.get("start_time"):
         general_cfg["start_time"] = "2023-01-01T00:00:00"
+    elif isinstance(general_cfg["start_time"], (int, float)):
+        base_ts = pd.Timestamp("2023-01-01T00:00:00")
+        general_cfg["start_time"] = (base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))).isoformat()
 
     if "time_step" not in general_cfg or general_cfg["time_step"] is None:
         general_cfg["time_step"] = 1.0
