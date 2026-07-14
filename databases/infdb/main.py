@@ -1,8 +1,8 @@
 """data setup data resolver for GridLock.
 
-Reads experiment.yml location queries, fetches data from InfDB,
-and writes resolved data into CST stores so all federates can
-read it at runtime without needing InfDB access themselves.
+Reads experiment.yml grid sources, fetches location-based grids from InfDB,
+and writes resolved data into CST stores so all federates can read it at
+runtime without needing InfDB access themselves.
 
 Grid nets → CST metadata store (collection "custom_metadata")
 Timeseries → CST timeseries store (preloaded TSRecords)  [future]
@@ -17,13 +17,14 @@ import shutil
 import tempfile
 
 import yaml
+import pandapower as pp
 from infdb import InfDB
 from cosim_toolbox.dbms import create_metadata_manager
 
 from src.infdb_data import resolve_grid_queries
 
 
-DEFAULT_EXPERIMENT_PATH = "/config/experiment-LV.yml"
+DEFAULT_EXPERIMENT_PATH = os.getenv("CONFIG_PATH", "/config/experiment-LV.yml")
 DEFAULT_META_STORE = "generated"
 DEFAULT_INFDB_CONFIG_DIR = "configs"
 
@@ -121,19 +122,17 @@ def parse_args() -> argparse.Namespace:
 def extract_grid_config(experiment_path: str) -> dict:
     """Extract grid federation config from experiment YAML.
 
-    Reads the top-level federation node and returns its id and
-    location queries.
+    Reads the top-level federation node and returns its id and grid source.
 
     Args:
         experiment_path: Path to experiment YAML file.
 
     Returns:
-        Dict with grid_id (str), location (list of query dicts),
-        and use_meta_db (str).
+        Dict with grid_id (str), source type, source value, and use_meta_db.
 
     Raises:
         FileNotFoundError: If experiment file doesn't exist.
-        ValueError: If no location queries are defined.
+        ValueError: If neither a location query nor local layout is defined.
     """
     path = Path(experiment_path)
     if not path.exists():
@@ -147,19 +146,34 @@ def extract_grid_config(experiment_path: str) -> dict:
     grid_id = federation.get("id", "grid")
     config = federation.get("config", {})
     location = config.get("location")
+    layout = config.get("layout")
     use_meta_db = general.get("use_meta_db", "json")
 
-    if not location:
+    if location and layout:
         raise ValueError(
-            f"No 'location' queries defined in experiment config "
-            f"at federation.config.location"
+            "Grid configuration must define either 'location' or 'layout', not both."
         )
 
-    return {
-        "grid_id": grid_id,
-        "location": location,
-        "use_meta_db": use_meta_db,
-    }
+    if location:
+        return {
+            "grid_id": grid_id,
+            "source": "infdb",
+            "location": location,
+            "use_meta_db": use_meta_db,
+        }
+
+    if layout:
+        return {
+            "grid_id": grid_id,
+            "source": "layout",
+            "layout": layout,
+            "use_meta_db": use_meta_db,
+        }
+
+    raise ValueError(
+        "No grid source defined in experiment config. Set federation.config.location "
+        "for InfDB or federation.config.layout for a local workbook."
+    )
 
 
 def write_grid_to_metadata(
@@ -212,6 +226,17 @@ def write_grid_to_metadata(
     return federate_names
 
 
+def load_local_layout(grid_id: str, layout: str) -> list[tuple[str, str]]:
+    """Load a local Pandapower workbook as the same JSON payload InfDB returns."""
+    layout_path = Path("/data/input") / layout
+    if not layout_path.is_file():
+        raise FileNotFoundError(f"Local grid layout not found: {layout_path}")
+
+    net = pp.from_excel(layout_path)
+    print(f"Loaded local grid '{grid_id}' from {layout_path}")
+    return [(grid_id, pp.to_json(net))]
+
+
 def main(
     experiment_path: str | None = None,
     meta_store_path: str | None = None,
@@ -231,40 +256,43 @@ def main(
     print(f"Experiment: {experiment_path}")
     print(f"Meta store: {meta_store_path}")
 
-    # 1. Extract location queries from experiment.yml
+    # 1. Extract grid source from experiment.yml
     grid_config = extract_grid_config(experiment_path)
     grid_id = grid_config["grid_id"]
-    location = grid_config["location"]
     use_meta_db = grid_config["use_meta_db"]
-    print(f"Grid '{grid_id}': {len(location)} location query(ies)")
+    if grid_config["source"] == "layout":
+        net_list = load_local_layout(grid_id, grid_config["layout"])
+    else:
+        location = grid_config["location"]
+        print(f"Grid '{grid_id}': {len(location)} location query(ies)")
 
-    # 2. Connect to InfDB and resolve queries
-    config_path, temp_config_dir = prepare_infdb_config()
-    infdb = InfDB(tool_name="infdb", config_path=config_path)
-    log = infdb.get_logger()
-    log.info("Starting data setup data resolution")
+        # 2. Connect to InfDB and resolve queries
+        config_path, temp_config_dir = prepare_infdb_config()
+        infdb = InfDB(tool_name="infdb", config_path=config_path)
+        log = infdb.get_logger()
+        log.info("Starting data setup data resolution")
 
-    try:
-        net_list = resolve_grid_queries(
-            infdb=infdb, log=log, grid_id=grid_id, queries=location
-        )
-        print(f"Resolved {len(net_list)} grid(s) from InfDB")
-        if not net_list:
-            query_summary = ", ".join([f"PLZ {q['plz']}" for q in location])
-            raise ValueError(
-                f"InfDB returned no grids for location queries: {query_summary}. "
-                f"Check that PLZ codes exist in pylovo.grid_result table."
+        try:
+            net_list = resolve_grid_queries(
+                infdb=infdb, log=log, grid_id=grid_id, queries=location
             )
-    except Exception as e:
-        log.error(f"Failed to resolve grid queries: {e}")
+            print(f"Resolved {len(net_list)} grid(s) from InfDB")
+            if not net_list:
+                query_summary = ", ".join([f"PLZ {q['plz']}" for q in location])
+                raise ValueError(
+                    f"InfDB returned no grids for location queries: {query_summary}. "
+                    f"Check that PLZ codes exist in pylovo.grid_result table."
+                )
+        except Exception as e:
+            log.error(f"Failed to resolve grid queries: {e}")
+            infdb.stop_logger()
+            if temp_config_dir is not None:
+                shutil.rmtree(temp_config_dir)
+            raise
+
         infdb.stop_logger()
         if temp_config_dir is not None:
             shutil.rmtree(temp_config_dir)
-        raise
-
-    infdb.stop_logger()
-    if temp_config_dir is not None:
-        shutil.rmtree(temp_config_dir)
 
     # 3. Write nets to CST metadata store
     print(f"Writing grids to CST metadata store (backend={use_meta_db})...")

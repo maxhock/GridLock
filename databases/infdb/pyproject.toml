@@ -6,5 +6,7 @@ dependencies = [
     "infdb",
     "geopandas",
     "cosim-toolbox",
+    "openpyxl",
+    "pandapower==3.3.2",
     "pyyaml",
 ]

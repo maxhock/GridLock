@@ -960,26 +960,29 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         time_step = general_cfg.get("time_step", 1.0)
         handled_nodes: set[str] = set()
 
-        # Phase 1: location-based grids.
+        # Phase 1: metadata-backed grids from InfDB or a local layout.
         for node in tree.all_nodes():
             if node.data.get("class") != "grid":
                 continue
 
-            if not node.data.get("location"):
+            if not node.data.get("location") and not node.data.get("layout"):
                 continue
 
             grid_tree_id = node.identifier
 
-            grid_fed_names = discover_grid_federates(
-                grid_tree_id,
-                use_meta_db,
-                meta_store_path=meta_store_path,
-                location=node.data.get("location"),
-            )
+            if node.data.get("layout"):
+                grid_fed_names = [grid_tree_id]
+            else:
+                grid_fed_names = discover_grid_federates(
+                    grid_tree_id,
+                    use_meta_db,
+                    meta_store_path=meta_store_path,
+                    location=node.data.get("location"),
+                )
 
             if not grid_fed_names:
                 print(
-                    f"Warning: Grid '{grid_tree_id}' uses location queries, "
+                    f"Warning: Grid '{grid_tree_id}' has no registered metadata, "
                     f"but no custom_metadata entries were found."
                 )
                 continue

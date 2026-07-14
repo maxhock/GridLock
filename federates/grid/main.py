@@ -192,7 +192,10 @@ def load_net_from_metadata(
             f"Ensure infdb data setup has run."
         )
 
-    net = cast(pp.pandapowerNet, pp.from_json_string(data["net_json"]))
+    net_json = data.get("net_json")
+    if not net_json:
+        raise ValueError(f"Grid metadata for '{federate_name}' has no net_json.")
+    net = cast(pp.pandapowerNet, pp.from_json_string(net_json))
     sanitize_net_for_power_flow(net)
     print(f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads")
     return net

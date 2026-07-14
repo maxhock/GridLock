@@ -45,7 +45,7 @@ main() {
   preflight_compose up --build --quiet-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb composegen
 
   print_stage "Stage 3: run experiment compose"
-  docker compose -f "$COMPOSE_FILE" up --build --quiet-build --remove-orphans --abort-on-container-exit
+  docker compose -f "$COMPOSE_FILE" up --build --quiet-build --remove-orphans #--abort-on-container-exit
 }
 
 main "$@"
