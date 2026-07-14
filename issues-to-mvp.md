@@ -12,3 +12,4 @@
 4. when not forcing docker compose to abort when the first federate dies logger runs longer, blocking finish
 4. check if you can also use local grid data
 5. synchronise clocks and runtimes
+6. Load nomenclature not correct 'lv-grid_91074_1_4/loadhouse_0/load_58/active_power'
