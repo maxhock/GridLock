@@ -9,7 +9,7 @@
    - Scenarios accumulate in CST metadata store (JSON or MongoDB backend)
    - Failed runs do NOT create scenario metadata
    - Timeseries data automatically tagged with scenario name for isolation
-4. when not forcing docker compose to abort when the first federate dies logger runs longer, blocking finish
+4. when not forcing docker compose to abort when the first federate dies logger runs longer, blocking finish (Fixed, removed manual logger)
 4. check if you can also use local grid data. FIXED
 5. synchronise clocks and runtimes
 6. Load nomenclature not correct 'lv-grid_91074_1_4/loadhouse_0/load_58/active_power'

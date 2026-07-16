@@ -140,7 +140,7 @@ def define_yaml(
             if fed_def[name]["logger"]:
                 add_logger = True
 
-    add_logger = True
+    add_logger = False
 
     # Add data logger federate
     if add_logger:
