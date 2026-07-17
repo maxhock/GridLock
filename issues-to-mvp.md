@@ -14,3 +14,7 @@
 5. synchronise clocks and runtimes
 6. Load nomenclature not correct 'lv-grid_91074_1_4/loadhouse_0/load_58/active_power'
 7. unknown route for messages in last timestep of simulation (because house load is done and turns off)
+8. The databases are killed after each experiment even though they should stay running and be accessible - FIXED: run.sh now only stops databases if it started them; pre-existing database containers are left running
+9. Test house as well
+10. what happens if the timeseries and experiment timeframe are mismatched?
+11. make output less verbose
