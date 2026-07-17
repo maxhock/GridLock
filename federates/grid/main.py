@@ -82,11 +82,13 @@ class GridFederate(Federate):
         self.net = net
 
     def update_internal_model(self) -> None:
-        # 1. Apply received load values
-        # House federates publish in W / VAr; pandapower expects MW / MVAr.
+        # 1. Apply received load values (filter out HELICS sentinel -1e+49)
         for key, value in self.data_from_federation.get("inputs", {}).items():
             idx = _parse_load_index(key)
             if value is None or idx is None:
+                continue
+            # Skip HELICS sentinel values (no data received yet)
+            if abs(value) > 1e40:
                 continue
             if key.endswith("/active_power"):
                 self.net.load.at[idx, "p_mw"] = float(value) / 1e6
@@ -109,6 +111,12 @@ class GridFederate(Federate):
             bus = int(self.net.load.at[idx, "bus"])
             v_pu = float(self.net.res_bus.at[bus, "vm_pu"])
             self.data_to_federation["publications"][key] = v_pu
+
+    def on_enter_executing_mode(self) -> None:
+        """Run initial power flow at t=0 with load values published by load players."""
+        self.get_data_from_federation()
+        self.update_internal_model()
+        self.send_data_to_federation()
 
 
 # ---------------------------------------------------------------------------

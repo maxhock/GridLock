@@ -66,6 +66,21 @@ class LoadPlayerFederate(Federate):
         super().create_federate(scenario_name, use_meta_db, use_data_db)
         self._build_pub_keys()
 
+    def on_enter_executing_mode(self) -> None:
+        """Publish initial t=0 state so grid has realistic loads from the start."""
+        p_value, q_value = lookup_power(self.timeseries, 0.0)
+
+        for key in self._pub_p_keys:
+            self.data_to_federation["publications"][key] = p_value
+        for key in self._pub_q_keys:
+            self.data_to_federation["publications"][key] = q_value
+
+        self.send_data_to_federation()
+
+        print(
+            f"t=0s (initial)  P={p_value:.2f} W  Q={q_value:.2f} VAr"
+        )
+
     def update_internal_model(self) -> None:
         """Look up the current time step in the timeseries and publish."""
         current_time = self.granted_time
