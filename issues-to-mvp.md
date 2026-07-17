@@ -17,4 +17,5 @@
 8. The databases are killed after each experiment even though they should stay running and be accessible - FIXED: run.sh now only stops databases if it started them; pre-existing database containers are left running
 9. Test house as well
 10. what happens if the timeseries and experiment timeframe are mismatched?
-11. make output less verbose
+11. make output less verbose (Fixed)
+12. add numba for speed up at no loss (Fixed)

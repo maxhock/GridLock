@@ -95,7 +95,7 @@ class GridFederate(Federate):
 
         # 2. Run power flow
         try:
-            pp.runpp(self.net, numba=False)
+            pp.runpp(self.net, numba=True)
             print(f"Power flow converged at time {self.granted_time}.")
         except Exception as e:
             print(f"Power flow failed at time {self.granted_time}: {e}")
