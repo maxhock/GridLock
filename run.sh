@@ -22,7 +22,10 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     --cleanup-dbs) CLEANUP_DBS=1; shift ;;
-    *) [[ -z "$EXPERIMENT" ]] && EXPERIMENT="$1" || echo "Unknown argument: $1" >&2 ;;
+    *)
+      if [[ -z "$EXPERIMENT" ]]; then EXPERIMENT="$1"; else echo "Unknown argument: $1" >&2; fi
+      shift
+      ;;
   esac
 done
 if [[ -n "$EXPERIMENT" ]]; then

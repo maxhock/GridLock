@@ -23,7 +23,7 @@ foreach ($arg in $args) {
     "--cleanup-dbs" { $CleanupDBs = $true }
     default {
       if (-not $Experiment) { $Experiment = $arg }
-      else { Write-Error "Unknown argument: $arg" }
+      else { Write-Error "Unknown argument: $arg"; exit 1 }
     }
   }
 }
