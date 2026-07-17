@@ -82,8 +82,6 @@ class GridFederate(Federate):
         self.net = net
 
     def update_internal_model(self) -> None:
-        print(f"\n=== Time: {self.granted_time} ===")
-
         # 1. Apply received load values
         # House federates publish in W / VAr; pandapower expects MW / MVAr.
         for key, value in self.data_from_federation.get("inputs", {}).items():
@@ -98,9 +96,9 @@ class GridFederate(Federate):
         # 2. Run power flow
         try:
             pp.runpp(self.net, numba=False)
-            print("Power flow converged.")
+            print(f"Power flow converged at time {self.granted_time}.")
         except Exception as e:
-            print(f"Power flow failed: {e}")
+            print(f"Power flow failed at time {self.granted_time}: {e}")
             return
 
         # 3. Publish per-load bus voltages
@@ -111,7 +109,6 @@ class GridFederate(Federate):
             bus = int(self.net.load.at[idx, "bus"])
             v_pu = float(self.net.res_bus.at[bus, "vm_pu"])
             self.data_to_federation["publications"][key] = v_pu
-            print(f"  Published {key} = {v_pu:.4f} pu")
 
 
 # ---------------------------------------------------------------------------
