@@ -337,6 +337,71 @@ def validate_tree(tree: Tree) -> None:
         raise ValueError("Configuration validation failed.")
 
 
+def validate_timeseries_coverage(
+    tree: Tree, general_cfg: dict, data_input_path: Path
+) -> None:
+    """Ensure every load timeseries CSV covers the full simulation duration.
+
+    Without this, a load-player federate silently holds its last known
+    value once the CSV runs out, producing a flat/stale load for the
+    remainder of the run instead of failing.
+    """
+    start_time = general_cfg.get("start_time") or 0
+    end_time = general_cfg.get("end_time")
+
+    if not isinstance(start_time, (int, float)) or not isinstance(end_time, (int, float)):
+        return
+
+    duration = float(end_time) - float(start_time)
+    validation_errors: list[str] = []
+
+    for node in tree.all_nodes():
+        data = node.data
+        if data.get("class") != "load":
+            continue
+
+        for field in ("electrical_load", "heat_load"):
+            csv_name = data.get(field)
+            if not csv_name or not str(csv_name).endswith(".csv"):
+                continue
+
+            csv_path = data_input_path / csv_name
+            if not csv_path.exists():
+                validation_errors.append(
+                    f"[Timeseries] Node '{node.tag}' ({node.identifier}): "
+                    f"'{field}' file '{csv_path}' not found."
+                )
+                continue
+
+            timestamps = pd.read_csv(csv_path, usecols=["timestamp"])["timestamp"]
+
+            if timestamps.dtype == object:
+                timestamps = pd.to_datetime(timestamps).astype("int64") // 10**9
+
+            first_ts = float(timestamps.min())
+            if first_ts > 1_000_000:
+                timestamps = timestamps - first_ts
+
+            covered = float(timestamps.max())
+
+            if covered < duration:
+                validation_errors.append(
+                    f"[Timeseries] Node '{node.tag}' ({node.identifier}): "
+                    f"'{field}' file '{csv_name}' only covers {covered:.0f}s "
+                    f"but the experiment runs for {duration:.0f}s "
+                    f"(start_time={start_time}, end_time={end_time}). Provide a "
+                    f"longer timeseries or shorten the experiment duration."
+                )
+
+    if validation_errors:
+        print("Timeseries coverage invalid:")
+
+        for error in validation_errors:
+            print(f" - {error}")
+
+        raise ValueError("Timeseries coverage validation failed.")
+
+
 def process_general_config(general_cfg: dict) -> dict:
     if "end_time" not in general_cfg or general_cfg["end_time"] is None:
         raise ValueError("[General] Missing required field 'end_time'.")
@@ -436,6 +501,7 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
     expand_grid_nodes(tree, extracted.grid_nodes)
 
     general_cfg = extracted.raw_config.get("general", {})
+    validate_timeseries_coverage(tree, general_cfg, extracted.data_input_path)
     general_cfg = process_general_config(general_cfg)
 
     wire_pub_sub(tree)

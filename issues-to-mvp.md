@@ -13,9 +13,9 @@
 4. check if you can also use local grid data. FIXED
 5. synchronise clocks and runtimes
 6. Load nomenclature not correct 'lv-grid_91074_1_4/loadhouse_0/load_58/active_power'
-7. unknown route for messages in last timestep of simulation (because house load is done and turns off)
+7. unknown route for messages in last timestep of simulation (because house load is done and turns off) (seems to be fixed)
 8. The databases are killed after each experiment even though they should stay running and be accessible - FIXED: run.sh now only stops databases if it started them; pre-existing database containers are left running
 9. Test house as well
-10. what happens if the timeseries and experiment timeframe are mismatched?
+10. what happens if the timeseries and experiment timeframe are mismatched? - FIXED: previously the load-player silently held the last CSV value for the remaining runtime; composegen now validates every load timeseries covers the full experiment duration and aborts with a clear error before any federate starts (see composegen/transform.py: validate_timeseries_coverage)
 11. make output less verbose (Fixed)
 12. add numba for speed up at no loss (Fixed)
