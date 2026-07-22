@@ -19,3 +19,4 @@
 10. what happens if the timeseries and experiment timeframe are mismatched? - FIXED: previously the load-player silently held the last CSV value for the remaining runtime; composegen now validates every load timeseries covers the full experiment duration and aborts with a clear error before any federate starts (see composegen/transform.py: validate_timeseries_coverage)
 11. make output less verbose (Fixed)
 12. add numba for speed up at no loss (Fixed)
+13. correctly filter for fill placement
