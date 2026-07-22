@@ -129,9 +129,8 @@ def create_grid_config(conf: DictConfig, output_path: Path) -> None:
 
 def create_house_runner(conf: DictConfig, output_path: Path) -> None:
     nodes = _get_nodes_for_fed(conf, "house")
-    stop_time = float(conf.general.end_time - conf.general.start_time)
-    dt = int(conf.general.time_step)
     config_file = conf.federates.house.get("config_file", "/config/house_config.yaml")
+    scenario_name = conf.federates.grid.get("name", "GridLock")
 
     federates = []
 
@@ -141,10 +140,9 @@ def create_house_runner(conf: DictConfig, output_path: Path) -> None:
                 "directory": "/app",
                 "exec": (
                     f"python house/main.py "
-                    f"--name=house_{i} "
-                    f"--config={config_file} "
-                    f"--stop_time={stop_time} "
-                    f"--dt={dt}"
+                    f"--scenario={scenario_name}Scenario "
+                    f"--federate_name=house_{i} "
+                    f"--config={config_file}"
                 ),
                 "host": "localhost",
                 "name": f"house_{i}",
@@ -422,7 +420,7 @@ def map_params_to_class(federate_class: str) -> dict:
         },
         "house": {
             "image": "house",
-            "command": "python3 main.py",
+            "command": "python3 house/main.py",
         },
         "load": {
             "image": "house_player",
@@ -434,19 +432,19 @@ def map_params_to_class(federate_class: str) -> dict:
         },
         "pv": {
             "image": "house",
-            "command": "python3 main.py",
+            "command": "python3 house/main.py",
         },
         "battery": {
             "image": "house",
-            "command": "python3 main.py",
+            "command": "python3 house/main.py",
         },
         "hems": {
             "image": "controller",
-            "command": "python3 main.py",
+            "command": "python3 controller/main.py",
         },
         "controller": {
             "image": "controller",
-            "command": "python3 main.py",
+            "command": "python3 controller/main.py",
         },
         "recorder": {
             "image": "recorder",
@@ -656,6 +654,37 @@ def _add_group(
     )
 
 
+def _add_source_only_group(
+    federation,
+    group_name: str,
+    pub_fed: str,
+    dtype: str = "double",
+    unit: str = "W",
+) -> None:
+    """Register a global publication with no required subscriber.
+
+    Used for data meant for consumption outside the HELICS federation
+    (e.g. an external provider/recorder), where CST's own timeseries
+    logging (triggered automatically for any real publication) is the
+    point, not a specific in-federation subscriber.
+    """
+    key_format = {
+        "src": {
+            "from_fed": pub_fed,
+            "keys": ["", ""],
+            "indices": [],
+        },
+    }
+
+    federation.add_group(
+        group_name,
+        dtype,
+        key_format,
+        unit=unit,
+        globl=True,
+    )
+
+
 def _wire_grid_child(
     federation,
     grid_fed_name: str,
@@ -754,6 +783,17 @@ def _wire_grid_child(
                 "string",
                 "json",
             )
+
+        if child_class == "house":
+            _add_source_only_group(
+                federation,
+                "state",
+                child_fed_name,
+                "string",
+                "json",
+            )
+
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/state")
 
     return child_pub_keys
 
@@ -1087,9 +1127,11 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             mapped = map_params_to_class(node_class)
             command = mapped["command"]
 
-            if mapped["image"] in ["grid", "house_player"]:
+            if mapped["image"] in ["grid", "house_player", "house"]:
                 command += f" --scenario {federation.scenario_name} --federate_name {node.identifier}"
-            elif mapped["image"] in ["house", "controller"]:
+                if node.data.get("config"):
+                    command += f" --config {node.data['config']}"
+            elif mapped["image"] in ["controller"]:
                 command += f" --name {node.identifier}"
 
             fed.config("image", mapped["image"])
