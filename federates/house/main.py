@@ -291,6 +291,7 @@ class HouseFederate(Federate):
                 "heat_pump": 0.0,
                 "air_conditioner": 0.0,
                 "battery": 0.0,
+                "pv_generation": 0.0,
                 "controllable_total": 0.0,
                 "grid_total": 0.0,
             },
@@ -320,7 +321,7 @@ class HouseFederate(Federate):
         )
         action = dict_to_system_actions(raw_action, self.n_rooms)
 
-        self.simulator, _outputs = self.simulator.step(action, exo)
+        self.simulator, outputs = self.simulator.step(action, exo)
         state = self.simulator.state
 
         hp_p_el = jnp.sum(state.heat_pump.current_electrical_w)
@@ -328,14 +329,19 @@ class HouseFederate(Federate):
         print(f"  Heat Pump Power: {hp_p_el} W, AC Power: {ac_p_el} W")
 
         bat_p_el = jnp.asarray(action.battery_power_w)
+        pv_p_gen = jnp.asarray(outputs.pv.pv_generation_w)
         base_load_w = float(getattr(exo, "base_load_w", getattr(exo, "load", 0.0)))
-        print(f"  Battery Power Action: {bat_p_el} W, Base Load: {base_load_w} W")
+        print(
+            f"  Battery Power Action: {bat_p_el} W, PV Generation: {pv_p_gen} W, "
+            f"Base Load: {base_load_w} W"
+        )
 
         heat_pump_w = float(hp_p_el)
         air_conditioner_w = float(ac_p_el)
         battery_w = float(bat_p_el)
+        pv_generation_w = float(pv_p_gen)
         controllable_load_w = heat_pump_w + air_conditioner_w + battery_w
-        total_load_w = base_load_w + controllable_load_w
+        total_load_w = base_load_w + controllable_load_w - pv_generation_w
 
         print(
             f"Time {self.granted_time}s: Controllable Load = "
@@ -358,6 +364,7 @@ class HouseFederate(Federate):
                 "heat_pump": heat_pump_w,
                 "air_conditioner": air_conditioner_w,
                 "battery": battery_w,
+                "pv_generation": pv_generation_w,
                 "controllable_total": controllable_load_w,
                 "grid_total": total_load_w,
             },

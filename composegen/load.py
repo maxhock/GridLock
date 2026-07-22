@@ -685,6 +685,104 @@ def _add_source_only_group(
     )
 
 
+def _add_sink_only_group(
+    federation,
+    group_name: str,
+    pub_fed: str,
+    sub_fed: str,
+    dtype: str = "double",
+    unit: str = "W",
+) -> None:
+    """Subscribe to an already-published global key without re-registering it.
+
+    Used when a second federate needs to read a source-only publication
+    (see ``_add_source_only_group``): calling ``federation.add_group`` again
+    would register a duplicate publication entry for the same key on the
+    publisher's federate config, since it always adds a fresh output. This
+    only touches the subscriber's side.
+    """
+    from cosim_toolbox.sims import HelicsSubGroup
+
+    key_format = {
+        "from_fed": pub_fed,
+        "keys": ["", ""],
+        "indices": [],
+    }
+
+    to_config = federation.federates[sub_fed]
+    sub_group = HelicsSubGroup(group_name, dtype, key_format, unit=unit)
+    to_config.inputs[to_config.unique()] = sub_group
+
+
+def _wire_house_subcomponents(
+    federation,
+    tree,
+    house_node,
+    house_fed_name: str,
+    name: str,
+    time_step: float,
+    handled_nodes: set[str],
+) -> str | None:
+    """Wire a house's own sub-federates.
+
+    Currently only ``hems`` is a real standalone federate: it's registered
+    here and subscribed to the house's ``state`` publication so it can read
+    battery SOC / forecasts. ``battery``/``pv`` sub-federates aren't
+    implemented as standalone federates yet (that physics still lives
+    inside the house's own simulator), so they're marked handled without
+    generating a container for them instead of falling through to Phase 2's
+    generic wiring, which would otherwise produce a broken device federate.
+
+    Returns the hems federate's name if one was wired, so the caller can
+    make it the publisher of the house's ``control`` topic instead of the
+    unused grid-sourced one.
+    """
+    from cosim_toolbox.sims import FederateConfig
+
+    hems_fed_name: str | None = None
+
+    for child in tree.children(house_node.identifier):
+        child_class = child.data.get("class")
+        child_local_id = child.identifier.split(".")[-1]
+        child_fed_name = f"{house_fed_name}.{child_local_id}"
+
+        if child_class == "hems":
+            hems_mapped = map_params_to_class("hems")
+
+            hems_fed = FederateConfig(child_fed_name, period=time_step)
+            federation.add_federate_config(hems_fed)
+            hems_fed.config("image", hems_mapped["image"])
+            hems_fed.config("federate_type", "value")
+            hems_fed.config(
+                "command",
+                f"{hems_mapped['command']} "
+                f"--scenario {name}Scenario --federate_name {child_fed_name}",
+            )
+
+            _add_sink_only_group(
+                federation,
+                "state",
+                house_fed_name,
+                child_fed_name,
+                "string",
+                "json",
+            )
+
+            handled_nodes.add(child.identifier)
+            hems_fed_name = child_fed_name
+            print(f"  Added child federate: {child_fed_name} (hems)")
+
+        elif child_class in ("battery", "pv"):
+            handled_nodes.add(child.identifier)
+            print(
+                f"  Skipping '{child.identifier}' ({child_class}): not yet "
+                "implemented as a standalone federate; its physics remains "
+                "inside the house simulator."
+            )
+
+    return hems_fed_name
+
+
 def _wire_grid_child(
     federation,
     grid_fed_name: str,
@@ -692,6 +790,7 @@ def _wire_grid_child(
     child_local_id: str,
     child_class: str,
     load_indices: list[int] | None = None,
+    control_publisher: str | None = None,
 ) -> list[str]:
     child_pub_keys: list[str] = []
 
@@ -778,7 +877,7 @@ def _wire_grid_child(
             _add_group(
                 federation,
                 f"{child_local_id}/control",
-                grid_fed_name,
+                control_publisher or grid_fed_name,
                 child_fed_name,
                 "string",
                 "json",
@@ -1084,6 +1183,19 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                             f"{len(load_indices)} load(s)."
                         )
 
+                    control_publisher = None
+
+                    if child_class == "house":
+                        control_publisher = _wire_house_subcomponents(
+                            federation,
+                            tree,
+                            child,
+                            child_fed_name,
+                            name,
+                            time_step,
+                            handled_nodes,
+                        )
+
                     _wire_grid_child(
                         federation,
                         fed_name,
@@ -1091,6 +1203,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                         child_local_id,
                         child_class,
                         load_indices=load_indices,
+                        control_publisher=control_publisher,
                     )
 
                     child_cmd = (
