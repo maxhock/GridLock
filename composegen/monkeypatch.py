@@ -157,9 +157,17 @@ def define_yaml(
     yaml_str += DockerRunner._network()
 
     # Add helics broker service
+    #
+    # --global_disconnect delays every federate's disconnect until the whole
+    # federation is done (HELICS 3.6+). Without it, a federate that reaches
+    # its own stop_time disconnects immediately, and if a sibling is still
+    # finishing its own final-timestep publish at that same instant (e.g.
+    # HEMS -> house), the broker has already torn down the route and drops
+    # the message with a "commWarning...unknown route" warning.
     params = [
         cosim_env,
-        f"helics_broker --ipv4 -f {cnt - 2} --loglevel=warning --name=broker",
+        f"helics_broker --ipv4 -f {cnt - 2} --loglevel=warning --name=broker "
+        f"--global_disconnect",
     ]
     yaml_str = (
         "services:\n"
