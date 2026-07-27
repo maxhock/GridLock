@@ -19,4 +19,4 @@
 10. what happens if the timeseries and experiment timeframe are mismatched? - FIXED: previously the load-player silently held the last CSV value for the remaining runtime; composegen now validates every load timeseries covers the full experiment duration and aborts with a clear error before any federate starts (see composegen/transform.py: validate_timeseries_coverage)
 11. make output less verbose (Fixed)
 12. add numba for speed up at no loss (Fixed)
-13. correctly filter for fill placement
+13. correctly filter for fill placement - FIXED: "fill" placement in composegen/load.py previously resolved to *all* pandapower load indices in the grid, even ones already explicitly claimed by a sibling federate (e.g. an explicit house at buses [4,6] alongside a "fill" load player), causing both to be wired to the same load index. `_resolve_placement` now excludes indices already claimed by sibling "load" children with explicit placement, and raises a clear error if two siblings explicitly claim the same index.

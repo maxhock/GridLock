@@ -599,11 +599,13 @@ def _read_load_list(
 def _resolve_placement(
     placement: Any,
     all_loads: list[tuple[int, str, int]],
+    exclude: set[int] | None = None,
 ) -> list[int]:
     valid_indices = {idx for idx, _, _ in all_loads}
 
     if placement == "fill":
-        return [idx for idx, _, _ in all_loads]
+        exclude = exclude or set()
+        return [idx for idx, _, _ in all_loads if idx not in exclude]
 
     if isinstance(placement, int):
         placement = [placement]
@@ -1156,6 +1158,20 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                     meta_store_path=meta_store_path,
                 )
 
+                explicit_load_indices: set[int] = set()
+                for child in children:
+                    placement = child.data.get("placement")
+                    if placement == "fill":
+                        continue
+                    claimed = set(_resolve_placement(placement, all_loads))
+                    overlap = explicit_load_indices & claimed
+                    if overlap:
+                        raise ValueError(
+                            f"Load index/indices {sorted(overlap)} in grid "
+                            f"'{fed_name}' are claimed by multiple federates."
+                        )
+                    explicit_load_indices.update(claimed)
+
                 for child in children:
                     child_data = child.data
                     child_class = child_data.get("class")
@@ -1176,7 +1192,9 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                     if child_class == "load" and all_loads:
                         placement = child_data.get("placement")
-                        load_indices = _resolve_placement(placement, all_loads)
+                        load_indices = _resolve_placement(
+                            placement, all_loads, exclude=explicit_load_indices
+                        )
 
                         print(
                             f"  Resolved placement {placement!r} to "
