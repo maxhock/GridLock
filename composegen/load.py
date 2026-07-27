@@ -911,6 +911,40 @@ def _resolve_timeseries_path(child_data: dict) -> str:
     return "/data/input/sample_house.csv"
 
 
+def _store_house_exogenous_data(
+    child_data: dict,
+    child_fed_name: str,
+    data_input_path: Path,
+    use_meta_db: str,
+    meta_store_path: str,
+) -> None:
+    """Load a house's exogenous dataset CSV and store it in the CST metadata store.
+
+    Houses read this back via ``metadata_manager.read("custom_metadata", ...)``
+    at runtime instead of mounting the CSV as a file, so the dataset travels
+    through the same CST store as the pandapower net rather than a path arg.
+    """
+    exogenous_data = child_data.get("exogenous_data")
+
+    if not exogenous_data:
+        return
+
+    csv_path = data_input_path / str(exogenous_data)
+
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Exogenous dataset for '{child_fed_name}' not found: {csv_path}"
+        )
+
+    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+        mgr.write(
+            "custom_metadata",
+            child_fed_name,
+            {"exogenous_data_csv": csv_path.read_text(), "source_file": str(exogenous_data)},
+            overwrite=True,
+        )
+
+
 def _add_generic_tree_pubsub_groups(
     federation,
     tree: Tree,
@@ -1235,6 +1269,15 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                         if ts_path:
                             child_cmd += f" --timeseries {ts_path}"
+
+                    if child_class == "house":
+                        _store_house_exogenous_data(
+                            child_data,
+                            child_fed_name,
+                            transformed.data_input_path,
+                            use_meta_db,
+                            meta_store_path,
+                        )
 
                     child_fed.config("command", child_cmd)
 

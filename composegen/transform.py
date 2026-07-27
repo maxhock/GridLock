@@ -298,6 +298,12 @@ def validate_tree(tree: Tree) -> None:
                     f"[House] Node '{node.tag}' ({node.identifier}) requires 'model'."
                 )
 
+            if not data.get("exogenous_data"):
+                validation_errors.append(
+                    f"[House] Node '{node.tag}' ({node.identifier}) requires "
+                    f"'exogenous_data'."
+                )
+
         elif node_class == "pv":
             if not data.get("max_production"):
                 validation_errors.append(
@@ -355,12 +361,18 @@ def validate_timeseries_coverage(
     duration = float(end_time) - float(start_time)
     validation_errors: list[str] = []
 
+    fields_by_class = {
+        "load": ("electrical_load", "heat_load"),
+        "house": ("exogenous_data",),
+    }
+
     for node in tree.all_nodes():
         data = node.data
-        if data.get("class") != "load":
+        fields = fields_by_class.get(data.get("class"))
+        if not fields:
             continue
 
-        for field in ("electrical_load", "heat_load"):
+        for field in fields:
             csv_name = data.get(field)
             if not csv_name or not str(csv_name).endswith(".csv"):
                 continue

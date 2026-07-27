@@ -28,6 +28,7 @@ federation:
     #   class: "house"
     #   config:
     #     placement: [4,6]
+    #     exogenous_data: "sample_data.csv"
     #     model:
     #       class: "1R1C"
     #       resistance: "5 Ohm"

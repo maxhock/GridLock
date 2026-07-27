@@ -23,8 +23,10 @@ from energysim.sim.simulator import JAXSimulator
 from energysim.core.data.dataset import SimulationDataset
 from house.common_config import create_common_configs
 from house.build_my_house import create_2_room_house
-from house.exogenous_data import prepare_aligned_timeseries
-import tools.sample_data_generator
+from house.exogenous_data import (
+    prepare_aligned_timeseries,
+    write_exogenous_csv_from_metadata,
+)
 import jax.numpy as jnp
 
 
@@ -196,8 +198,22 @@ class HouseFederate(Federate):
             self.config_path, dt_seconds
         )
 
+        exogenous_metadata = self.metadata_manager.read(
+            "custom_metadata", self.federate_name
+        )
+        csv_text = (exogenous_metadata or {}).get("exogenous_data_csv")
+        if not csv_text:
+            raise ValueError(
+                f"No exogenous dataset found in metadata store for "
+                f"'{self.federate_name}'. Ensure composegen ran with a valid "
+                f"'exogenous_data' field for this house."
+            )
+
+        exogenous_csv_path = write_exogenous_csv_from_metadata(
+            self.federate_name, csv_text
+        )
         dataset_info = prepare_aligned_timeseries(
-            tools.sample_data_generator.FILE_NAME,
+            exogenous_csv_path,
             dt_seconds,
         )
         logger.info(
