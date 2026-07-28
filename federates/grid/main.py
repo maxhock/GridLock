@@ -96,12 +96,26 @@ class GridFederate(Federate):
                 self.net.load.at[idx, "q_mvar"] = float(value) / 1e6
 
         # 2. Run power flow
+        #
+        # A diverged power flow must fail the run. Swallowing it leaves the
+        # previous step's voltages in data_to_federation, which are then
+        # published as if they were current - the co-simulation completes
+        # and reports success while every downstream federate reacts to a
+        # grid state that was never solved.
         try:
             pp.runpp(self.net, numba=True)
-            print(f"Power flow converged at time {self.granted_time}.")
-        except Exception as e:
-            print(f"Power flow failed at time {self.granted_time}: {e}")
-            return
+        except Exception as exc:
+            p_total_w = float(self.net.load["p_mw"].sum()) * 1e6
+            q_total_var = float(self.net.load["q_mvar"].sum()) * 1e6
+            raise RuntimeError(
+                f"Power flow did not converge at simulation time "
+                f"{self.granted_time}s for grid '{self.federate_name}' "
+                f"(applied load: P={p_total_w:.1f} W, Q={q_total_var:.1f} VAr "
+                f"across {len(self.net.load)} loads). pandapower reported: "
+                f"{exc}"
+            ) from exc
+
+        print(f"Power flow converged at time {self.granted_time}.")
 
         # 3. Publish per-load bus voltages
         for key in self.data_to_federation.get("publications", {}):
