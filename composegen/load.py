@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import traceback
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -327,25 +328,9 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
     
     scenario_name = run_metadata["scenario_name"]
     
-    # CST expects ISO 8601 format for start_time and stop_time (wall-clock time, not simulation time)
-    # Simulation times (e.g., 0, 86400) need to be converted to ISO 8601
-    start_time_val = general_cfg.get("start_time", 0)
-    end_time_val = general_cfg.get("end_time", 0)
-    
-    # Use a base date and add simulation seconds to get wall-clock ISO 8601
-    from datetime import datetime, timedelta, timezone
-    base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    
-    if isinstance(start_time_val, (int, float)):
-        start_time_iso = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
-    else:
-        start_time_iso = str(start_time_val)
-        
-    if isinstance(end_time_val, (int, float)):
-        end_time_iso = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
-    else:
-        end_time_iso = str(end_time_val)
-    
+    start_time_iso = _to_iso_wallclock(general_cfg.get("start_time", 0))
+    end_time_iso = _to_iso_wallclock(general_cfg.get("end_time", 0))
+
     scenario_metadata = {
         "analysis": run_metadata["analysis"],
         "federation": f"{run_metadata['analysis']}Federation",
@@ -460,6 +445,59 @@ def map_params_to_class(federate_class: str) -> dict:
             "command": "python3 main.py",
         },
     )
+
+
+def _to_iso_wallclock(value: Any) -> str:
+    """Render a simulation time as the ISO 8601 wall-clock string CST expects.
+
+    ``transform.process_general_config`` already converts numeric simulation
+    times into ISO strings using a 2023-01-01 base, so in practice the value
+    arrives here as a string. Numeric values are converted against the same
+    base so both paths agree on the epoch.
+    """
+    if isinstance(value, (int, float)):
+        base_date = datetime(2023, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        return (
+            (base_date + timedelta(seconds=float(value)))
+            .isoformat()
+            .replace("+00:00", "")
+        )
+
+    return str(value)
+
+
+def annotate_scenario_with_run_metadata(
+    scenario_name: str,
+    run_metadata: dict,
+    use_meta_db: str,
+    meta_store_path: str = "generated",
+) -> None:
+    """Merge run provenance into the scenario document CST just wrote.
+
+    ``FederationConfig.write_config`` writes the scenario document with
+    ``overwrite=True`` and only the fields CST needs (analysis, federation,
+    start/stop time, docker), so anything written beforehand is lost. This
+    reads that document back and adds the provenance that makes a stored run
+    reproducible: git commit, source experiment path, and the full experiment
+    YAML as it was at run time.
+    """
+    with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
+        scenario_doc = mgr.read_scenario(scenario_name) or {}
+        scenario_doc.pop("_id", None)
+
+        scenario_doc.update(
+            {
+                "run_timestamp": run_metadata["timestamp_iso"],
+                "run_timestamp_unix": run_metadata["timestamp_unix"],
+                "git_commit": run_metadata["git_commit"],
+                "experiment_path": run_metadata["experiment_path"],
+                "experiment_yaml_raw": run_metadata["experiment_yaml_raw"],
+            }
+        )
+
+        mgr.write_scenario(scenario_name, scenario_doc, overwrite=True)
+
+    print(f"Run recorded as scenario '{scenario_name}'.")
 
 
 def normalize_federation_keys(
@@ -734,7 +772,7 @@ def _wire_house_subcomponents(
     tree,
     house_node,
     house_fed_name: str,
-    name: str,
+    scenario_name: str,
     time_step: float,
     handled_nodes: set[str],
     max_depth: int,
@@ -778,7 +816,7 @@ def _wire_house_subcomponents(
             hems_fed.config(
                 "command",
                 f"{hems_mapped['command']} "
-                f"--scenario {name}Scenario --federate_name {child_fed_name}",
+                f"--scenario {scenario_name} --federate_name {child_fed_name}",
             )
 
             _add_sink_only_group(
@@ -1078,73 +1116,27 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         if tree is None:
             raise ValueError("Tree load expected transformed.tree, got None.")
 
-        # Generate and store run metadata
         from transform import generate_run_metadata
-        
+
         run_metadata = generate_run_metadata(
             experiment_path=transformed.config_path,
-            general_cfg=general_cfg
+            general_cfg=general_cfg,
         )
-        
+
+        # The run's own timestamped name *is* the CST scenario the federates
+        # run under, so every timeseries row is tagged with the run that
+        # produced it. Using a constant name here (e.g. "TestGridScenario")
+        # makes all runs pile into one indistinguishable, ever-growing table.
         scenario_name = run_metadata["scenario_name"]
-        
-        # Create scenario metadata for CST
-        # CST expects ISO 8601 format for start_time and stop_time (wall-clock time, not simulation time)
-        # Simulation times (e.g., 0, 86400) need to be converted to ISO 8601
-        start_time_val = general_cfg.get("start_time", 0)
-        end_time_val = general_cfg.get("end_time", 0)
-        
-        # Use a base date and add simulation seconds to get wall-clock ISO 8601
-        from datetime import datetime, timedelta, timezone
-        base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        
-        if isinstance(start_time_val, (int, float)):
-            start_time_iso = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
-        else:
-            start_time_iso = str(start_time_val)
-            
-        if isinstance(end_time_val, (int, float)):
-            end_time_iso = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
-        else:
-            end_time_iso = str(end_time_val)
-        
-        scenario_metadata = {
-            "analysis": run_metadata["analysis"],
-            "federation": f"{run_metadata['analysis']}Federation",
-            "start_time": start_time_iso,
-            "stop_time": end_time_iso,
-            "docker": True,
-            "cst_007": scenario_name,
-            "run_timestamp": run_metadata["timestamp_iso"],
-            "run_timestamp_unix": run_metadata["timestamp_unix"],
-            "git_commit": run_metadata["git_commit"],
-            "experiment_path": run_metadata["experiment_path"],
-            "experiment_yaml_raw": run_metadata["experiment_yaml_raw"],
-        }
-        
-        # Write to metadata store
+
         use_meta_db = general_cfg.get("use_meta_db", "json")
         meta_store_path = general_cfg.get("meta_store_path", "generated")
-        
-        md_kwargs = {"backend": use_meta_db}
-        if use_meta_db == "json":
-            md_kwargs["location"] = meta_store_path
-        
-        md_mgr = create_metadata_manager(**md_kwargs)
-        md_mgr.connect()
-        try:
-            md_mgr.writer.write_scenario(scenario_name, scenario_metadata)
-            print(f"Stored run metadata for scenario: {scenario_name}")
-        except Exception as e:
-            md_mgr.disconnect()
-            raise RuntimeError(f"Failed to store run metadata: {e}")
-        md_mgr.disconnect()
-        
+
         name = general_cfg.get("name", "GridLock")
         use_data_db = general_cfg.get("use_data_db", "postgres")
 
         federation = FederationConfig(
-            f"{name}Scenario",
+            scenario_name,
             f"{name}Analysis",
             f"{name}Federation",
             True,
@@ -1204,7 +1196,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                 cmd = (
                     f"{grid_mapped['command']} "
-                    f"--scenario {name}Scenario "
+                    f"--scenario {scenario_name} "
                     f"--federate_name {fed_name}"
                 )
 
@@ -1277,7 +1269,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                             tree,
                             child,
                             child_fed_name,
-                            name,
+                            scenario_name,
                             time_step,
                             handled_nodes,
                             max_depth,
@@ -1295,7 +1287,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                     child_cmd = (
                         f"{child_mapped['command']} "
-                        f"--scenario {name}Scenario "
+                        f"--scenario {scenario_name} "
                         f"--federate_name {child_fed_name}"
                     )
 
@@ -1357,26 +1349,21 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
         federation.define_io()
 
-        # Convert simulation times to ISO 8601 wall-clock times for CST
-        from datetime import datetime, timedelta, timezone
-        base_date = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        
-        start_time_val = general_cfg.get("start_time", 0)
-        end_time_val = general_cfg.get("end_time", 0)
-        
-        if isinstance(start_time_val, (int, float)):
-            start_str = (base_date + timedelta(seconds=float(start_time_val))).isoformat().replace("+00:00", "")
-        else:
-            start_str = str(start_time_val)
-            
-        if isinstance(end_time_val, (int, float)):
-            end_str = (base_date + timedelta(seconds=float(end_time_val))).isoformat().replace("+00:00", "")
-        else:
-            end_str = str(end_time_val)
+        start_str = _to_iso_wallclock(general_cfg.get("start_time", 0))
+        end_str = _to_iso_wallclock(general_cfg.get("end_time", 0))
 
         print("Generating CST federation configuration...")
 
         federation.write_config(start_str, end_str)
+
+        # write_config overwrites the scenario document with only the fields
+        # CST itself needs, so run provenance has to be merged in afterwards.
+        annotate_scenario_with_run_metadata(
+            scenario_name,
+            run_metadata,
+            use_meta_db,
+            meta_store_path=meta_store_path,
+        )
 
         normalize_federation_keys(
             federation.federation_name,
