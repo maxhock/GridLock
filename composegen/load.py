@@ -716,6 +716,19 @@ def _add_sink_only_group(
     to_config.inputs[to_config.unique()] = sub_group
 
 
+def _offset_for_node(tree, node_id: str, max_depth: int) -> int:
+    """Stagger a federate's HELICS grant times by its position in the tree.
+
+    Deeper nodes (e.g. a house's own ``hems``) get offset 0 and are granted
+    at the base period grid; each level up (house, then grid) gets a larger
+    offset and so is granted slightly later at every shared time step. This
+    guarantees a child's publish for a given step (state -> control, load ->
+    grid power) is always visible to its parent's read for that same step,
+    without relying on ``wait_for_current_time_update`` or lucky ordering.
+    """
+    return max_depth - tree.depth(node_id)
+
+
 def _wire_house_subcomponents(
     federation,
     tree,
@@ -724,6 +737,7 @@ def _wire_house_subcomponents(
     name: str,
     time_step: float,
     handled_nodes: set[str],
+    max_depth: int,
 ) -> str | None:
     """Wire a house's own sub-federates.
 
@@ -751,7 +765,13 @@ def _wire_house_subcomponents(
         if child_class == "hems":
             hems_mapped = map_params_to_class("hems")
 
-            hems_fed = FederateConfig(child_fed_name, period=time_step)
+            hems_offset = _offset_for_node(tree, child.identifier, max_depth)
+            hems_fed = FederateConfig(
+                child_fed_name,
+                period=time_step,
+                offset=hems_offset,
+                ignore_time_mismatch_warnings=hems_offset > 0,
+            )
             federation.add_federate_config(hems_fed)
             hems_fed.config("image", hems_mapped["image"])
             hems_fed.config("federate_type", "value")
@@ -1133,6 +1153,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         )
 
         time_step = general_cfg.get("time_step", 1.0)
+        max_depth = tree.depth()
         handled_nodes: set[str] = set()
 
         # Phase 1: metadata-backed grids from InfDB or a local layout.
@@ -1170,8 +1191,15 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
             grid_mapped = map_params_to_class("grid")
 
+            grid_offset = _offset_for_node(tree, node.identifier, max_depth)
+
             for fed_name in grid_fed_names:
-                fed = FederateConfig(fed_name, period=time_step)
+                fed = FederateConfig(
+                    fed_name,
+                    period=time_step,
+                    offset=grid_offset,
+                    ignore_time_mismatch_warnings=grid_offset > 0,
+                )
                 federation.add_federate_config(fed)
 
                 cmd = (
@@ -1216,7 +1244,13 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                     child_local_id = child.identifier.split(".")[-1]
                     child_fed_name = f"{fed_name}.{child_local_id}"
 
-                    child_fed = FederateConfig(child_fed_name, period=time_step)
+                    child_offset = _offset_for_node(tree, child.identifier, max_depth)
+                    child_fed = FederateConfig(
+                        child_fed_name,
+                        period=time_step,
+                        offset=child_offset,
+                        ignore_time_mismatch_warnings=child_offset > 0,
+                    )
                     federation.add_federate_config(child_fed)
 
                     child_fed.config("image", child_mapped["image"])
@@ -1246,6 +1280,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                             name,
                             time_step,
                             handled_nodes,
+                            max_depth,
                         )
 
                     _wire_grid_child(
@@ -1295,7 +1330,13 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             if not node_type or node_type == "empty":
                 continue
 
-            fed = FederateConfig(node.identifier, period=time_step)
+            node_offset = _offset_for_node(tree, node.identifier, max_depth)
+            fed = FederateConfig(
+                node.identifier,
+                period=time_step,
+                offset=node_offset,
+                ignore_time_mismatch_warnings=node_offset > 0,
+            )
             federation.add_federate_config(fed)
 
             mapped = map_params_to_class(node_class)
