@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -661,6 +662,44 @@ def _resolve_placement(
     raise ValueError(f"Unsupported placement value: {placement!r}")
 
 
+def _expand_child_instances(
+    child_local_id: str,
+    child_class: str,
+    load_indices: list[int] | None,
+) -> list[tuple[str, list[int] | None]]:
+    """Split a grid child into the federate instances it should launch.
+
+    A house federate simulates one building and drives exactly one
+    pandapower load, so ``placement: [4, 6]`` becomes two independent house
+    federates, each with its own sub-federates and its own single
+    ``active_power`` publication. Instances are named after the load they
+    drive rather than the declaring node, so ``house_0`` at ``[4, 6]``
+    yields ``house_4`` and ``house_6``; the declared trailing index is only
+    a placeholder and would otherwise survive as a misleading ``house_0_*``
+    prefix. Load indices are unique across explicit placements, so the names
+    cannot collide.
+
+    A load player is the opposite case: one federate replays one profile
+    across every load it is placed on, so it stays a single instance holding
+    all its indices.
+
+    Returns:
+        ``(instance_id, load_indices_for_that_instance)`` pairs.
+    """
+    if child_class != "house":
+        return [(child_local_id, load_indices)]
+
+    if not load_indices:
+        raise ValueError(
+            f"House '{child_local_id}' resolved to no pandapower load index. "
+            f"A house must be placed on at least one load."
+        )
+
+    base_id = re.sub(r"_\d+$", "", child_local_id)
+
+    return [(f"{base_id}_{idx}", [idx]) for idx in load_indices]
+
+
 def _add_group(
     federation,
     group_name: str,
@@ -854,8 +893,12 @@ def _wire_grid_child(
 ) -> list[str]:
     child_pub_keys: list[str] = []
 
-
-    if child_class == "load" and load_indices is not None:
+    # Any child that occupies pandapower load indices - a load player *or* a
+    # simulated house - is wired per index. The grid identifies incoming power
+    # by the `load_<idx>` segment of the key, so a child that publishes a bare
+    # `active_power` instead has its power silently dropped from the power
+    # flow and never gets a voltage back.
+    if load_indices is not None:
         for idx in load_indices:
             load_id = f"load_{idx}"
 
@@ -933,26 +976,28 @@ def _wire_grid_child(
                 f"{child_fed_name.replace('.', '/')}/reactive_power"
             )
 
-        if child_class in ("house", "hems", "controller"):
-            _add_group(
-                federation,
-                f"{child_local_id}/control",
-                control_publisher or grid_fed_name,
-                child_fed_name,
-                "string",
-                "json",
-            )
+    # Control and state are independent of how the child's power is wired:
+    # a house needs them whether it sits on pandapower load indices or not.
+    if child_class in ("house", "hems", "controller"):
+        _add_group(
+            federation,
+            f"{child_local_id}/control",
+            control_publisher or grid_fed_name,
+            child_fed_name,
+            "string",
+            "json",
+        )
 
-        if child_class == "house":
-            _add_source_only_group(
-                federation,
-                "state",
-                child_fed_name,
-                "string",
-                "json",
-            )
+    if child_class == "house":
+        _add_source_only_group(
+            federation,
+            "state",
+            child_fed_name,
+            "string",
+            "json",
+        )
 
-            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/state")
+        child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/state")
 
     return child_pub_keys
 
@@ -1230,27 +1275,12 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                     child_data = child.data
                     child_class = child_data.get("class")
 
-
                     child_mapped = map_params_to_class(child_class)
-
                     child_local_id = child.identifier.split(".")[-1]
-                    child_fed_name = f"{fed_name}.{child_local_id}"
-
-                    child_offset = _offset_for_node(tree, child.identifier, max_depth)
-                    child_fed = FederateConfig(
-                        child_fed_name,
-                        period=time_step,
-                        offset=child_offset,
-                        ignore_time_mismatch_warnings=child_offset > 0,
-                    )
-                    federation.add_federate_config(child_fed)
-
-                    child_fed.config("image", child_mapped["image"])
-                    child_fed.config("federate_type", "value")
 
                     load_indices: list[int] | None = None
 
-                    if child_class == "load" and all_loads:
+                    if child_class in ("load", "house") and all_loads:
                         placement = child_data.get("placement")
                         load_indices = _resolve_placement(
                             placement, all_loads, exclude=explicit_load_indices
@@ -1261,54 +1291,76 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                             f"{len(load_indices)} load(s)."
                         )
 
-                    control_publisher = None
+                    for instance_id, instance_loads in _expand_child_instances(
+                        child_local_id, child_class, load_indices
+                    ):
+                        child_fed_name = f"{fed_name}.{instance_id}"
 
-                    if child_class == "house":
-                        control_publisher = _wire_house_subcomponents(
+                        child_offset = _offset_for_node(
+                            tree, child.identifier, max_depth
+                        )
+                        child_fed = FederateConfig(
+                            child_fed_name,
+                            period=time_step,
+                            offset=child_offset,
+                            ignore_time_mismatch_warnings=child_offset > 0,
+                        )
+                        federation.add_federate_config(child_fed)
+
+                        child_fed.config("image", child_mapped["image"])
+                        child_fed.config("federate_type", "value")
+
+                        control_publisher = None
+
+                        if child_class == "house":
+                            control_publisher = _wire_house_subcomponents(
+                                federation,
+                                tree,
+                                child,
+                                child_fed_name,
+                                scenario_name,
+                                time_step,
+                                handled_nodes,
+                                max_depth,
+                            )
+
+                        _wire_grid_child(
                             federation,
-                            tree,
-                            child,
+                            fed_name,
                             child_fed_name,
-                            scenario_name,
-                            time_step,
-                            handled_nodes,
-                            max_depth,
+                            instance_id,
+                            child_class,
+                            load_indices=instance_loads,
+                            control_publisher=control_publisher,
                         )
 
-                    _wire_grid_child(
-                        federation,
-                        fed_name,
-                        child_fed_name,
-                        child_local_id,
-                        child_class,
-                        load_indices=load_indices,
-                        control_publisher=control_publisher,
-                    )
-
-                    child_cmd = (
-                        f"{child_mapped['command']} "
-                        f"--scenario {scenario_name} "
-                        f"--federate_name {child_fed_name}"
-                    )
-
-                    if child_class == "load":
-                        ts_path = _resolve_timeseries_path(child_data)
-
-                        if ts_path:
-                            child_cmd += f" --timeseries {ts_path}"
-
-                    if child_class == "house":
-                        _store_house_exogenous_data(
-                            child_data,
-                            child_fed_name,
-                            transformed.data_input_path,
-                            use_meta_db,
-                            meta_store_path,
+                        child_cmd = (
+                            f"{child_mapped['command']} "
+                            f"--scenario {scenario_name} "
+                            f"--federate_name {child_fed_name}"
                         )
 
-                    child_fed.config("command", child_cmd)
+                        if child_class == "load":
+                            ts_path = _resolve_timeseries_path(child_data)
 
-                    print(f"  Added child federate: {child_fed_name} ({child_class})")
+                            if ts_path:
+                                child_cmd += f" --timeseries {ts_path}"
+
+                        if child_class == "house":
+                            _store_house_exogenous_data(
+                                child_data,
+                                child_fed_name,
+                                transformed.data_input_path,
+                                use_meta_db,
+                                meta_store_path,
+                            )
+
+                        child_fed.config("command", child_cmd)
+
+                        print(
+                            f"  Added child federate: {child_fed_name} "
+                            f"({child_class})"
+                        )
 
         # Phase 2: layout-based and already-expanded nodes.
         for node in tree.all_nodes():
