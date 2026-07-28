@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 # --- arguments -------------------------------------------------------------
 EXPERIMENT=""
 CLEANUP_DBS=0
+SIM_TIMEOUT="${GRIDLOCK_SIM_TIMEOUT:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
@@ -18,10 +19,13 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --cleanup-dbs      Stop CST databases on exit (default: leave running)"
+      echo "  --timeout SECONDS  Abort the simulation if it runs longer (default: no limit,"
+      echo "                     override via GRIDLOCK_SIM_TIMEOUT)"
       echo "  --help, -h         Show this help message"
       exit 0
       ;;
     --cleanup-dbs) CLEANUP_DBS=1; shift ;;
+    --timeout) SIM_TIMEOUT="${2:?--timeout needs a value in seconds}"; shift 2 ;;
     *)
       if [[ -z "$EXPERIMENT" ]]; then EXPERIMENT="$1"; else echo "Unknown argument: $1" >&2; fi
       shift
@@ -69,4 +73,31 @@ echo "=== Stage 3: composegen ==="
 $DC up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
 
 echo "=== Stage 4: simulation ==="
-docker compose -f generated/docker-compose.yaml up --build --quiet-build --remove-orphans
+SIM_DC="docker compose -f generated/docker-compose.yaml"
+
+# --abort-on-container-failure (not --abort-on-container-exit) tears the whole
+# federation down as soon as any federate exits *non-zero*. Federates that
+# finish normally still get to flush their final timeseries writes, so this
+# keeps the fix for the "logger blocks finish" issue while making a crashed
+# federate fail the run instead of leaving its siblings blocked on the broker
+# forever.
+set +e
+if [[ "$SIM_TIMEOUT" -gt 0 ]]; then
+  timeout --foreground "${SIM_TIMEOUT}" \
+    $SIM_DC up --build --quiet-build --remove-orphans --abort-on-container-failure
+  SIM_STATUS=$?
+else
+  $SIM_DC up --build --quiet-build --remove-orphans --abort-on-container-failure
+  SIM_STATUS=$?
+fi
+set -e
+
+if [[ "$SIM_STATUS" -eq 124 ]]; then
+  # `timeout` fired: the federates are still running, so stop them explicitly.
+  echo "Simulation exceeded ${SIM_TIMEOUT}s without finishing; tearing down." >&2
+  $SIM_DC down --remove-orphans || true
+elif [[ "$SIM_STATUS" -ne 0 ]]; then
+  echo "Simulation failed (exit $SIM_STATUS)." >&2
+fi
+
+exit "$SIM_STATUS"

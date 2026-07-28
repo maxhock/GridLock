@@ -108,7 +108,13 @@ Write-Host "=== Stage 3: composegen ==="
 Invoke-PreflightCompose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
 
 Write-Host "=== Stage 4: simulation ==="
-& docker compose -f $ComposeFile up --build --quiet-build --remove-orphans
+# --abort-on-container-failure (not --abort-on-container-exit) tears the whole
+# federation down as soon as any federate exits *non-zero*. Federates that
+# finish normally still get to flush their final timeseries writes, so this
+# keeps the fix for the "logger blocks finish" issue while making a crashed
+# federate fail the run instead of leaving its siblings blocked on the broker
+# forever.
+& docker compose -f $ComposeFile up --build --quiet-build --remove-orphans --abort-on-container-failure
 if ($LASTEXITCODE -ne 0) {
-  throw "docker compose failed with exit code $LASTEXITCODE"
+  throw "simulation failed with exit code $LASTEXITCODE"
 }
