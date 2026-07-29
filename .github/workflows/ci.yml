@@ -3,7 +3,7 @@ name: CI
 on: [push]
 
 jobs:
-  test-and-lint:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -17,12 +17,3 @@ jobs:
         run: |
           pip install pre-commit
           pre-commit run --all-files
-
-      # - name: Install dependencies
-      #   run: |
-      #     pip install --upgrade pip
-      #     pip install .[cpu]
-
-      # - name: Run Pytest
-      #   run: |
-      #     pytest --ignore=tests/integration
