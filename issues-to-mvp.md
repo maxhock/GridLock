@@ -355,7 +355,17 @@ the *house* image, which would start a house simulation with no `exogenous_data`
 and crash on startup. Placement semantics get fixed here; running one has to
 fail loudly until the federate exists.
 
-### R8. Generic image names, and a compose project called `generated` — **OPEN**
+### R8. Generic image names, and a compose project called `generated` — **FIXED**
+Images are tagged `gridlock-*` and the generated file carries an explicit
+`name:` derived from the experiment's analysis name, so a run of
+`experiment-local-grid.yml` produces `gridlock-testgrid-local-grid-1` and
+friends. Two checkouts running experiments with the same `general.name` still
+share a project — they cannot run at once anyway, since both write the same
+generated file — but they no longer overwrite each other's image tags, and
+neither does an unrelated project that happens to build an image called `house`.
+Old untagged `broker`/`grid`/`house`/`controller`/`house_player` images are left
+behind on hosts that ran earlier versions and can be removed by hand.
+
 The generated compose file tags its images `broker`, `grid`, `house`,
 `controller`, `house_player` — names with no owner — and Compose derives the
 project name from the file's directory, so it is always `generated`. Any other
