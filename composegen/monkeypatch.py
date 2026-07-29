@@ -5,8 +5,10 @@ import cosim_toolbox as env
 from cosim_toolbox.sims import DockerRunner, FederateConfig
 from cosim_toolbox.dbms import create_metadata_manager
 
-# Broker is always the first service at 10.5.0.2 in the Docker network.
-BROKER_IP = "10.5.0.2"
+# The broker's Compose service name. Federates reach it through Compose's own
+# DNS rather than a fixed address, which is what lets the generated file drop
+# static IPs and a reserved subnet entirely (see _service).
+BROKER_SERVICE = "helics"
 
 
 def _service(
@@ -18,7 +20,8 @@ def _service(
         name (str): Name of the service being defined
         image (str): Name of the image on which the service runs
         params (list): Environment in image the service utilizes
-        cnt (int): Index used to define the IP for the service in the Docker virtual network
+        cnt (int): Federate counter, used by the caller to size the broker's
+            -f argument. No longer used to assign an address.
         depends (str, optional): Dependency for service being defined. Defaults to None.
 
     Returns:
@@ -46,9 +49,15 @@ def _service(
     if depends is not None:
         _svc += "    depends_on:\n"
         _svc += "      - " + depends + "\n"
-    _svc += "    networks:\n"
-    _svc += "      cst_net:\n"
-    _svc += "        ipv4_address: 10.5.0." + str(cnt) + "\n"
+    # No networks block and no ipv4_address: services land on the Compose
+    # project's own default network and find each other by service name.
+    # Upstream pinned every container to 10.5.0.<cnt> inside a reserved
+    # 10.5.0.0/16, which meant two experiments could not run at once ("Pool
+    # overlaps with other one on this address space"), a leftover network
+    # blocked the next run, the range could collide with a VPN or another
+    # project, and only ~253 of the 65k reserved addresses were reachable
+    # before <cnt> produced an invalid address. A grid whose loads are filled
+    # with houses now needs two federates per load, so that ceiling was close.
     _svc += '    command: /bin/bash -c "' + params[1] + '"\n'
     return _svc
 
@@ -154,7 +163,10 @@ def define_yaml(
             "cst_logger", "broker", params, cnt, depends="helics"
         )
 
-    yaml_str += DockerRunner._network()
+    # DockerRunner._network() is deliberately not appended: it emits a
+    # cst_net with a hard-coded 10.5.0.0/16 subnet and gateway. Without it
+    # Compose provisions a per-project network and allocates the subnet
+    # itself, so concurrent experiments no longer collide.
 
     # Add helics broker service
     #
@@ -181,19 +193,23 @@ def define_yaml(
 
 
 def _federate_docker(self, address: int = 0) -> None:
-    """Override: fix broker_address and set local_interface for Docker networking.
+    """Override: point each federate at the broker by Compose service name.
 
-    The upstream CST implementation sets ``broker_address`` to the
-    federate's own container IP.  Per HELICS docs:
+    ``broker_address`` is the address a federate uses to contact *its parent
+    broker*. The upstream CST implementation wrote the federate's own
+    container IP into that field, which is the wrong value; the first fix
+    here supplied the broker's fixed IP and set ``local_interface`` to the
+    federate's own.
 
-    - ``broker_address``: IP a federate should use to contact *its parent broker*
-    - ``local_interface``: IP the rest of the federation should use to contact *this federate*
+    Neither address is needed. Compose resolves service names on the project
+    network, so the broker is simply ``helics``, and each container has a
+    single interface, so ``local_interface`` has nothing to disambiguate.
+    Dropping both is what allows the generated file to carry no static
+    addresses at all.
 
-    CST was writing the federate IP into the wrong field.
+    ``address`` is retained because CST calls this positionally.
     """
-    if address > 0:
-        self.helics.config("broker_address", BROKER_IP)
-        self.helics.config("local_interface", f"10.5.0.{address}")
+    self.helics.config("broker_address", BROKER_SERVICE)
 
 
 def apply_monkeypatches() -> None:
