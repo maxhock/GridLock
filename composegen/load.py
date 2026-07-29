@@ -1030,16 +1030,27 @@ def _wire_grid_child(
     return child_pub_keys
 
 
-def _resolve_timeseries_path(child_data: dict) -> str:
+def _resolve_timeseries_path(child_data: dict, federate_name: str) -> str:
+    """Map a load federate's ``electrical_load`` to its container path.
+
+    Only CSV files are supported. Anything else - notably the standard load
+    profile names ``H0``/``H25`` that the schema accepts and the shipped
+    configs use - previously fell back to ``sample_house.csv`` without a
+    word, so the run looked successful while replaying a different building
+    than the config asked for. ``validate_tree`` rejects those cases up
+    front; this raise is the backstop, because there is no correct value to
+    substitute here.
+    """
     electrical_load = child_data.get("electrical_load")
 
-    if not electrical_load:
-        return ""
+    if not electrical_load or not str(electrical_load).endswith(".csv"):
+        raise ValueError(
+            f"Load '{federate_name}' has no usable 'electrical_load' CSV "
+            f"(got {electrical_load!r}). Standard load profiles are not "
+            f"implemented yet."
+        )
 
-    if str(electrical_load).endswith(".csv"):
-        return f"/data/input/{electrical_load}"
-
-    return "/data/input/sample_house.csv"
+    return f"/data/input/{electrical_load}"
 
 
 def _store_house_exogenous_data(
@@ -1379,10 +1390,10 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                         )
 
                         if child_class == "load":
-                            ts_path = _resolve_timeseries_path(child_data)
-
-                            if ts_path:
-                                child_cmd += f" --timeseries {ts_path}"
+                            ts_path = _resolve_timeseries_path(
+                                child_data, child_fed_name
+                            )
+                            child_cmd += f" --timeseries {ts_path}"
 
                         if child_class == "house":
                             _store_house_exogenous_data(

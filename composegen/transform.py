@@ -286,10 +286,28 @@ def validate_tree(tree: Tree) -> None:
                 )
 
         elif node_class == "load":
-            if not data.get("electrical_load") and not data.get("heat_load"):
+            electrical_load = data.get("electrical_load")
+            heat_load = data.get("heat_load")
+
+            if not electrical_load and not heat_load:
                 validation_errors.append(
                     f"[Load] Node '{node.tag}' ({node.identifier}) requires "
                     f"'electrical_load' or 'heat_load'."
+                )
+
+            elif not electrical_load:
+                validation_errors.append(
+                    f"[Load] Node '{node.tag}' ({node.identifier}) defines only "
+                    f"'heat_load'. Heat loads are not implemented yet; give it "
+                    f"an 'electrical_load' CSV."
+                )
+
+            elif not str(electrical_load).endswith(".csv"):
+                validation_errors.append(
+                    f"[Load] Node '{node.tag}' ({node.identifier}) requests "
+                    f"electrical_load '{electrical_load}'. Standard load "
+                    f"profiles are not implemented yet; give it a CSV file in "
+                    f"the data input directory."
                 )
 
         elif node_class == "house":
