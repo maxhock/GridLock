@@ -6,14 +6,15 @@ import argparse
 import os
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
 from cosim_toolbox.sims import Federate
 from energysim.sim.simulator import JAXSimulator
 from energysim.control.mpc_solver import JAX_MPC_Solver
 from energysim.core.data.dataset import SimulationDataset
+from energysim.core.shared.data_structs import ExogenousData
 from house.common_config import create_common_configs
-from house.build_my_house import create_2_room_house
 from house.exogenous_data import (
     prepare_aligned_timeseries,
     write_exogenous_csv_from_metadata,
@@ -203,6 +204,42 @@ class ControllerFederate(Federate):
             )
             return None
 
+    def _clamped_forecast(self, step_idx: int, horizon: int) -> ExogenousData:
+        """Return exactly ``horizon`` forecast steps, clamped at the dataset tail.
+
+        The QP is built for a fixed horizon when the solver is constructed, so
+        a short window cannot be solved and ``get_forecast`` silently returns
+        one whenever the window runs past the end of the dataset. The previous
+        answer was to publish a zero action for those steps, which meant the
+        MPC went quiet for the last ``N_horizon`` steps of every run - and for
+        the *whole* run whenever the dataset was sized to the experiment, which
+        is exactly what ``validate_timeseries_coverage`` asks users to provide.
+
+        Repeating the last available sample keeps the horizon full and the
+        battery under control to the end. The run still stops at ``end_time``;
+        a dataset longer than the experiment is simply never read that far.
+        """
+        # A dataset shorter than the run is rejected by composegen, so this
+        # only guards the exact final step.
+        start_idx = min(max(step_idx, 0), self.max_steps - 1)
+        available = min(horizon, self.max_steps - start_idx)
+
+        forecast = self.dataset.get_forecast(start_idx, available)
+
+        if available == horizon:
+            return forecast
+
+        missing = horizon - available
+        logger.info(
+            f"Time {self.granted_time}s | Forecast horizon runs {missing} step(s) "
+            f"past the end of the dataset; holding the last sample."
+        )
+
+        return jax.tree_util.tree_map(
+            lambda leaf: jnp.concatenate([leaf, jnp.repeat(leaf[-1:], missing, axis=0)]),
+            forecast,
+        )
+
     def update_internal_model(self) -> None:
         """Advance the controller by one CST-controlled time step."""
         dt_seconds = int(self.period)
@@ -220,21 +257,10 @@ class ControllerFederate(Federate):
             )
             return
 
-        horizon = self.mpc.N
-        if step_idx + horizon >= self.max_steps:
-            logger.info(
-                f"Time {self.granted_time}s | Not enough forecast horizon left, "
-                "publishing zero action."
-            )
-            self.data_to_federation["publications"][self.control_key] = json.dumps(
-                {"battery_power_w": 0.0}
-            )
-            return
-
         current_sim = eqx.tree_at(
             lambda s: s.battery.soc, self.sim_template, jnp.array(current_soc)
         )
-        exo_forecast = self.dataset.get_forecast(step_idx, horizon)
+        exo_forecast = self._clamped_forecast(step_idx, self.mpc.N)
         action = self.mpc.solve(current_sim, exo_forecast)
 
         battery_power_w = float(action.battery_power_w)

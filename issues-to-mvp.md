@@ -266,7 +266,13 @@ does not exist, unknown arguments are rejected where bash warns and continues,
 the root-owned `generated/` check is missing, and stage 2 does not pin its exit
 code. A Windows user is running a different program.
 
-### R5. The HEMS stops controlling before the run ends — **OPEN**
+### R5. The HEMS stops controlling before the run ends — **FIXED**
+`_clamped_forecast` repeats the last available sample to fill the window, so the
+MPC keeps solving to the last step. Verified against a 30-step dataset with a
+24-step horizon: step 0 takes a full window untouched, step 10 gets 20 real
+samples plus 4 held ones, the final step holds the whole window, and the QP
+solves in every case (previously all of these published `0.0`).
+
 `federates/controller/main.py` publishes `battery_power_w = 0.0` whenever
 `step_idx + N_horizon >= max_steps`, where `max_steps` is the length of the
 house's exogenous dataset and `N_horizon` is 24. The MPC therefore goes silent
