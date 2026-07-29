@@ -114,6 +114,9 @@ services:
     build:
       context: ./databases/infdb
       dockerfile: Dockerfile
+    # Write generated/ as the invoking user rather than root, so the files
+    # this produces stay editable and removable without sudo.
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:
@@ -141,6 +144,9 @@ services:
     build:
       context: ./composegen
       dockerfile: Dockerfile
+    # Write generated/docker-compose.yaml as the invoking user rather than
+    # root, so it stays editable and removable without sudo.
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:

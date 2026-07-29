@@ -44,6 +44,12 @@ export INFDB_ENV_FILE="${INFDB_ENV_FILE:-$ENV_FILE}"
 export CONFIG_PATH="${CONFIG_PATH:-/config/experiment-LV.yml}"
 export GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 
+# The infdb and composegen containers write into generated/. Without these
+# they run as root and leave root-owned files on the host, which then need
+# sudo to inspect, edit or delete.
+export HOST_UID="$(id -u)"
+export HOST_GID="$(id -g)"
+
 DC="docker compose --env-file $ENV_FILE -f docker-compose.preflight.yaml"
 
 # --- helpers ---------------------------------------------------------------
@@ -51,7 +57,25 @@ db_running() {
   docker inspect --format '{{.State.Running}}' "$1" 2>/dev/null | grep -q true
 }
 
+# Runs from before infdb/composegen were pinned to the invoking user left
+# root-owned files in generated/. Those containers can no longer write into
+# them, and the resulting failure is a bare "Permission denied" from deep
+# inside a metadata writer, so name the problem and the fix instead.
+check_generated_ownership() {
+  local foreign
+  foreign=$(find generated -mindepth 1 ! -user "$(id -u)" -print -quit 2>/dev/null)
+
+  if [[ -n "$foreign" ]]; then
+    echo "generated/ still holds files owned by another user (e.g. $foreign)," >&2
+    echo "left by earlier runs that executed as root. Reclaim them with:" >&2
+    echo "  docker run --rm -v \"\$PWD/generated:/g\" alpine chown -R $(id -u):$(id -g) /g" >&2
+    exit 1
+  fi
+}
+
 # --- main ------------------------------------------------------------------
+check_generated_ownership
+
 echo "=== Stage 1: CST databases ==="
 PROJECT=$($DC config --name 2>/dev/null || echo "gridlock-preflight")
 if ! (db_running "${PROJECT}-database-1" && db_running "${PROJECT}-mongodb-1"); then

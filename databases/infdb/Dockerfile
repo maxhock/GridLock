@@ -16,5 +16,12 @@ RUN uv sync --frozen --no-install-project
 COPY src src
 COPY main.py main.py
 
+# The InfDB library writes its log into the working directory. This container
+# runs as the invoking host user (so that anything it leaves in generated/ is
+# not root-owned), which is not the root that owns /app - hence the sticky
+# world-writable bit: new files such as infdb.log can be created, but the
+# application files already here still cannot be modified by that user.
+RUN chmod 1777 /app
+
 # Run the app from the pre-built virtual environment
 CMD ["python", "main.py"]

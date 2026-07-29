@@ -60,6 +60,14 @@ else {
 }
 $env:GIT_COMMIT = & git rev-parse HEAD 2>$null || "unknown"
 
+# Linux-style uid/gid mapping is what keeps generated/ owned by the invoking
+# user rather than root. Docker Desktop on Windows already maps ownership for
+# bind mounts, so leave these at the compose defaults (0:0) there.
+if (-not $IsWindows) {
+  $env:HOST_UID = & id -u
+  $env:HOST_GID = & id -g
+}
+
 # --- helpers ---------------------------------------------------------------
 function Invoke-PreflightCompose {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ComposeArgs)
