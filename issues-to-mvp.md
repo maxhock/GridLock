@@ -100,7 +100,7 @@ it; the real house is the hard-coded 2-room RC network in `build_my_house.py` wi
 not validating — it signals the config was understood. There is no unit parsing
 anywhere, which is why the shipped `capacity: "5 5 kW"` typo passes validation.
 
-### S2. The HEMS forecasts a different dataset than the house simulates — **OPEN**
+### S2. The HEMS forecasts a different dataset than the house simulates — **FIXED** (961b021)
 `federates/controller/main.py` hard-codes `tools.sample_data_generator.FILE_NAME`
 (`/data/input/sample_data.csv`), while the house pulls its exogenous data from the
 metadata store per `exogenous_data:`. They agree today only by coincidence of
@@ -112,7 +112,12 @@ forecast.
 stale voltages stay published and the run reports success. A diverged step must
 either fail the run or be recorded as flagged/NaN.
 
-### S4. Silent wrong-data fallback for non-CSV load profiles — **OPEN**
+### S4. Silent wrong-data fallback for non-CSV load profiles — **FIXED** (e5e499c)
+
+Also rejects a load defined with only `heat_load`, which is equally
+unimplemented. Note this makes `experiment-MV-LV.yml` fail validation earlier
+than before, on `electrical_load: "H0"` — that config was already broken (H8).
+
 `_resolve_timeseries_path` in `composegen/load.py` maps any non-`.csv`
 `electrical_load` — including the `"H25"` / `"H0"` standard-profile names used in
 the shipped configs — to `/data/input/sample_house.csv` without a word.
