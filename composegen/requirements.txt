@@ -1,7 +1,12 @@
-omegaconf
-pyyaml
-types-pyyaml
-pandas
-openpyxl
-treelib
-cosim_toolbox
+# Pinned to the versions composegen is known to run against. Bump
+# deliberately rather than by rebuilding: composegen decides the federation
+# topology and HELICS timing, so an unpinned rebuild can change how every
+# experiment is wired with no commit on this side.
+
+omegaconf==2.3.1
+pyyaml==6.0.3
+types-pyyaml==6.0.12.20260518
+pandas==2.3.3
+openpyxl==3.1.5
+treelib==1.8.0
+cosim-toolbox==1.0.1

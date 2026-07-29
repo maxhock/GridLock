@@ -1,8 +1,22 @@
-helics
-cosim-toolbox
-gymnasium
-pyyaml
-dacite
-pandas~=2.3.1
-packaging~=25.0
-git+https://github.com/Hosseini97/EnergySim.git@main
+# Shared by the house and controller images (both build from this file).
+#
+# Pinned to the versions these federates are known to run against. Bump
+# deliberately rather than by rebuilding: an unpinned rebuild can change the
+# simulation with no commit on this side, which makes the git_commit stored
+# with each run a misleading description of what actually ran.
+#
+# EnergySim is pinned to a commit rather than @main for the same reason - it
+# supplies the house's thermal, battery, PV and MPC models, so tracking a
+# moving branch means the physics can change between two runs of the same
+# experiment at the same GridLock commit.
+
+helics==3.6.1
+cosim-toolbox==1.0.1
+gymnasium==1.3.0
+pyyaml==6.0.3
+dacite==1.9.2
+pandas==2.3.3
+packaging==25.0
+jax==0.10.2
+equinox==0.13.8
+git+https://github.com/Hosseini97/EnergySim.git@3b9406c0f7ba059a3303d926200ed949e6442a18
