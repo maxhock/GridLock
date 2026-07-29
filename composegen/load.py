@@ -793,17 +793,45 @@ def _add_sink_only_group(
     to_config.inputs[to_config.unique()] = sub_group
 
 
-def _offset_for_node(tree, node_id: str, max_depth: int) -> int:
-    """Stagger a federate's HELICS grant times by its position in the tree.
-
-    Deeper nodes (e.g. a house's own ``hems``) get offset 0 and are granted
-    at the base period grid; each level up (house, then grid) gets a larger
-    offset and so is granted slightly later at every shared time step. This
-    guarantees a child's publish for a given step (state -> control, load ->
-    grid power) is always visible to its parent's read for that same step,
-    without relying on ``wait_for_current_time_update`` or lucky ordering.
-    """
-    return max_depth - tree.depth(node_id)
+# Every federate runs on the same period with no offset, so the whole
+# federation shares one time axis: a simulation step has the same `sim_time`
+# in every federate's recorded timeseries, and the run stops exactly at
+# `end_time`.
+#
+# Ordering within a step is a separate concern from the clock. Staggering
+# grant times by tree depth (the previous approach) bought the grid a fresh
+# read at the cost of moving every federate onto its own timeline - grid
+# samples landed at 2, 3602, 7202... and load samples at 1, 3601, 7201...,
+# so no two federates ever shared a timestamp, every run overran end_time by
+# the offset, and the t=0 record held a solve made before any child had
+# published. It also broke down whenever `time_step` approached the
+# whole-second offset, and CST rejects sub-second offsets outright because
+# HelicsMsg.verify type-checks against an int default.
+#
+# Ordering is instead handled with HELICS's `wait_for_current_time_update`,
+# which holds a federate's grant at time T until every other federate has
+# completed T. HELICS rejects a federation where more than one federate sets
+# it ("Multiple federates declaring wait_for_current_time flag will result
+# in deadlock"), so it is a single federation-wide slot.
+#
+# The slot goes to the grid, because a power flow computed from last step's
+# loads is the error that matters most here. Measured on
+# experiment-local-grid, with the slot vs. without:
+#   with:     t=3600 -> applies the loads published at 3600
+#   without:  t=3600 -> applies the loads published at 0
+#
+# A federation with several independent grids (a PLZ-only location query can
+# resolve to many) cannot give the slot to all of them, so it goes to none
+# and every grid lags one step uniformly, rather than one grid silently
+# behaving differently from its peers.
+#
+# What the slot does not buy: the grid publishes after everyone else, so
+# voltage reaches its children a step late (currently unread), and the
+# house/hems loop keeps a two-step round trip. HELICS iteration
+# (helicsFederateRequestTimeIterative) is the change that would remove both
+# and lift the multi-grid restriction; it belongs in the CST federate loop.
+def _grid_waits_for_current_time(grid_fed_count: int) -> bool:
+    return grid_fed_count == 1
 
 
 def _wire_house_subcomponents(
@@ -814,7 +842,6 @@ def _wire_house_subcomponents(
     scenario_name: str,
     time_step: float,
     handled_nodes: set[str],
-    max_depth: int,
 ) -> str | None:
     """Wire a house's own sub-federates.
 
@@ -842,13 +869,7 @@ def _wire_house_subcomponents(
         if child_class == "hems":
             hems_mapped = map_params_to_class("hems")
 
-            hems_offset = _offset_for_node(tree, child.identifier, max_depth)
-            hems_fed = FederateConfig(
-                child_fed_name,
-                period=time_step,
-                offset=hems_offset,
-                ignore_time_mismatch_warnings=hems_offset > 0,
-            )
+            hems_fed = FederateConfig(child_fed_name, period=time_step)
             federation.add_federate_config(hems_fed)
             hems_fed.config("image", hems_mapped["image"])
             hems_fed.config("federate_type", "value")
@@ -1190,10 +1211,12 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         )
 
         time_step = general_cfg.get("time_step", 1.0)
-        max_depth = tree.depth()
         handled_nodes: set[str] = set()
 
-        # Phase 1: metadata-backed grids from InfDB or a local layout.
+        # Resolve every grid's federate names up front: the count decides
+        # whether the single wait_for_current_time_update slot can be used.
+        grid_federates_by_node: dict[str, list[str]] = {}
+
         for node in tree.all_nodes():
             if node.data.get("class") != "grid":
                 continue
@@ -1201,17 +1224,34 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             if not node.data.get("location") and not node.data.get("layout"):
                 continue
 
-            grid_tree_id = node.identifier
-
             if node.data.get("layout"):
-                grid_fed_names = [grid_tree_id]
+                grid_federates_by_node[node.identifier] = [node.identifier]
             else:
-                grid_fed_names = discover_grid_federates(
-                    grid_tree_id,
+                grid_federates_by_node[node.identifier] = discover_grid_federates(
+                    node.identifier,
                     use_meta_db,
                     meta_store_path=meta_store_path,
                     location=node.data.get("location"),
                 )
+
+        grid_fed_count = sum(len(v) for v in grid_federates_by_node.values())
+        grid_waits = _grid_waits_for_current_time(grid_fed_count)
+
+        if not grid_waits and grid_fed_count > 1:
+            print(
+                f"Note: {grid_fed_count} grid federates in this federation. "
+                f"HELICS allows only one federate to wait for the current "
+                f"time update, so every grid will run its power flow on the "
+                f"previous step's published loads."
+            )
+
+        # Phase 1: metadata-backed grids from InfDB or a local layout.
+        for node in tree.all_nodes():
+            if node.identifier not in grid_federates_by_node:
+                continue
+
+            grid_tree_id = node.identifier
+            grid_fed_names = grid_federates_by_node[grid_tree_id]
 
             if not grid_fed_names:
                 print(
@@ -1228,14 +1268,11 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
             grid_mapped = map_params_to_class("grid")
 
-            grid_offset = _offset_for_node(tree, node.identifier, max_depth)
-
             for fed_name in grid_fed_names:
                 fed = FederateConfig(
                     fed_name,
                     period=time_step,
-                    offset=grid_offset,
-                    ignore_time_mismatch_warnings=grid_offset > 0,
+                    wait_for_current_time_update=grid_waits,
                 )
                 federation.add_federate_config(fed)
 
@@ -1296,14 +1333,9 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                     ):
                         child_fed_name = f"{fed_name}.{instance_id}"
 
-                        child_offset = _offset_for_node(
-                            tree, child.identifier, max_depth
-                        )
                         child_fed = FederateConfig(
                             child_fed_name,
                             period=time_step,
-                            offset=child_offset,
-                            ignore_time_mismatch_warnings=child_offset > 0,
                         )
                         federation.add_federate_config(child_fed)
 
@@ -1321,7 +1353,6 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                                 scenario_name,
                                 time_step,
                                 handled_nodes,
-                                max_depth,
                             )
 
                         _wire_grid_child(
@@ -1374,12 +1405,10 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             if not node_type or node_type == "empty":
                 continue
 
-            node_offset = _offset_for_node(tree, node.identifier, max_depth)
             fed = FederateConfig(
                 node.identifier,
                 period=time_step,
-                offset=node_offset,
-                ignore_time_mismatch_warnings=node_offset > 0,
+                wait_for_current_time_update=(node_class == "grid" and grid_waits),
             )
             federation.add_federate_config(fed)
 

@@ -115,7 +115,10 @@ class GridFederate(Federate):
                 f"{exc}"
             ) from exc
 
-        print(f"Power flow converged at time {self.granted_time}.")
+        print(
+            f"Power flow converged at time {self.granted_time} "
+            f"(applied P={float(self.net.load['p_mw'].sum()) * 1e6:.1f} W)."
+        )
 
         # 3. Publish per-load bus voltages
         for key in self.data_to_federation.get("publications", {}):
