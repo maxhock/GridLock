@@ -174,9 +174,16 @@ Only pandapower is pinned. `cosim-toolbox`, `helics`, `pandas`, `numpy`, `jax` a
 federate's physics can change with no commit on this side, which makes the
 `git_commit` field in run metadata misleading.
 
-### H5. No results export — **OPEN**
-`data/output/` does not exist and nothing writes to it. Combined with B2, extracting
-a run's results is a manual SQL exercise.
+### H5. No results export — **DROPPED**
+Resolved by dropping the `data/output/` notion rather than building an export.
+Results live in the CST timeseries store, and since B2 each run is identified by
+its own scenario name, so they are queryable there. The `.gitignore` entry for a
+directory nothing creates is removed.
+
+Two references remain inside the legacy composegen path (`create_recorder_runner`
+and `config/experiment.yml`), which is unreachable and deliberately kept for now
+— see H1. `AGENTS.md` still documents `data/output/` in the folder structure; left
+alone because that file is not to be edited without a direct instruction.
 
 ### H6. Dangling test wiring — **OPEN**
 `run-tests.sh` references a `docker-compose.test.yml` that is not in the repo; CI
