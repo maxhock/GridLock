@@ -225,7 +225,12 @@ run it, or run it on Windows. Both shipped experiments were re-run from HEAD
 first and both complete with exit 0, so — as in the first audit — the entries
 below are mostly things that pass silently rather than crash.
 
-### R1. CI fails on every push — **FIXED**
+Both were re-run again after the fixes landed and still complete with exit 0:
+`experiment-LV.yml` resolves `fill` to all 113 loads of the InfDB grid, and
+`experiment-local-grid.yml` runs its 11 load-player loads plus two houses with
+their HEMS, now under the `gridlock-testgrid` compose project.
+
+### R1. CI fails on every push — **FIXED** (f84ee29)
 `black --line-length=88 --check .` reformats 19 files and `ruff check` reports 14
 errors (unused imports in `federates/house/main.py`, `composegen/transform.py`,
 `databases/infdb/main.py`, `federates/controller/main.py`; `F402` loop-variable
@@ -249,7 +254,7 @@ It documents `config/tmp/docker-compose.yaml`, `num_houses`,
 `config/preflight.env`, which `run.sh` requires before anything runs. Explicitly
 out of scope for this pass; to be rewritten together with the 1.0 docs.
 
-### R4. `run.ps1` and `run.sh` have drifted apart — **FIXED**
+### R4. `run.ps1` and `run.sh` have drifted apart — **FIXED** (2b06510)
 `--cleanup-dbs` now wraps the actual stages, `--timeout` is implemented with a
 child process and the same 124 convention, and help, unknown-argument handling,
 the ownership check and stage 2's `--exit-code-from` all match. Verified in a
@@ -266,7 +271,7 @@ does not exist, unknown arguments are rejected where bash warns and continues,
 the root-owned `generated/` check is missing, and stage 2 does not pin its exit
 code. A Windows user is running a different program.
 
-### R5. The HEMS stops controlling before the run ends — **FIXED**
+### R5. The HEMS stops controlling before the run ends — **FIXED** (2c8e4b1)
 `_clamped_forecast` repeats the last available sample to fill the window, so the
 MPC keeps solving to the last step. Verified against a 30-step dataset with a
 24-step horizon: step 0 takes a full window untouched, step 10 gets 20 real
@@ -288,7 +293,7 @@ last available sample to fill the horizon — instead of dropping control. The r
 still ends at `end_time`; a dataset longer than the experiment is simply not
 read past it.
 
-### R6. Loads nothing is placed on, and grids whose load table cannot be read — **FIXED**
+### R6. Loads nothing is placed on, and grids whose load table cannot be read — **FIXED** (9564b28)
 `_read_load_list` now raises for a missing entry or a missing `net_json`,
 `_resolve_load_placement` refuses to resolve a load-placed child to nothing, and
 `_report_unclaimed_loads` names the indices that stay at 0 W. Verified by
@@ -332,7 +337,7 @@ that is better addressed by reporting the unclaimed set at generation time, whic
 is what this issue does. Revisit only if a use case appears that needs a real
 timeseries recorded for an empty point.
 
-### R7. A grid-level `pv` is placed on a bus, not a load index — **FIXED**
+### R7. A grid-level `pv` is placed on a bus, not a load index — **FIXED** (87708e1)
 `pv` and `battery` joined `load` and `house` in `LOAD_PLACED_CLASSES` — the same
 argument covers both, since a battery injects and draws power at a connection
 point exactly as generation does. Since neither has a federate of its own yet,
@@ -355,7 +360,7 @@ the *house* image, which would start a house simulation with no `exogenous_data`
 and crash on startup. Placement semantics get fixed here; running one has to
 fail loudly until the federate exists.
 
-### R8. Generic image names, and a compose project called `generated` — **FIXED**
+### R8. Generic image names, and a compose project called `generated` — **FIXED** (cb07f38)
 Images are tagged `gridlock-*` and the generated file carries an explicit
 `name:` derived from the experiment's analysis name, so a run of
 `experiment-local-grid.yml` produces `gridlock-testgrid-local-grid-1` and
@@ -379,7 +384,7 @@ runs; this is the other half of the same problem.
 the experiment directory is mounted at `/config`, so an experiment outside it
 cannot be read by the containers anyway.
 
-### R10. Stage 2 does not pin its exit code — **FIXED**
+### R10. Stage 2 does not pin its exit code — **FIXED** (ab92c86)
 Verified after the change by pointing `experiment-LV.yml` at a PLZ that does not
 exist (99999): infdb raises "No grids found in InfDB pylovo.grid_result", the
 stage aborts, `run.sh` exits 1 and stage 3 never starts.
@@ -391,7 +396,7 @@ Compose v5.3.1 (verified: a service exiting 3 gives `rc=3` either way), so the
 undocumented behaviour to build an abort path on, and the two stages should not
 differ.
 
-### R11. Credentials in the repo — **FIXED**
+### R11. Credentials in the repo — **FIXED** (d6c787b)
 `databases/db-access.txt` now names the env variables instead of their values,
 adds the `--profile cst-tools` command the front-ends actually need, and
 documents finding a run by its `scenario` column (verified against the live
