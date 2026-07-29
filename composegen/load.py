@@ -873,10 +873,17 @@ def _wire_house_subcomponents(
             federation.add_federate_config(hems_fed)
             hems_fed.config("image", hems_mapped["image"])
             hems_fed.config("federate_type", "value")
+            # --house_federate tells the hems which house it controls, so it
+            # can read that house's own exogenous dataset from the metadata
+            # store for its forecast. Without it the controller falls back to
+            # whatever dataset is hard-coded in its image, which silently
+            # diverges from the house as soon as a house names a different
+            # `exogenous_data` file.
             hems_fed.config(
                 "command",
                 f"{hems_mapped['command']} "
-                f"--scenario {scenario_name} --federate_name {child_fed_name}",
+                f"--scenario {scenario_name} --federate_name {child_fed_name} "
+                f"--house_federate {house_fed_name}",
             )
 
             _add_sink_only_group(

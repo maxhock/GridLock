@@ -12,10 +12,12 @@ from cosim_toolbox.sims import Federate
 from energysim.sim.simulator import JAXSimulator
 from energysim.control.mpc_solver import JAX_MPC_Solver
 from energysim.core.data.dataset import SimulationDataset
-import tools.sample_data_generator
 from house.common_config import create_common_configs
 from house.build_my_house import create_2_room_house
-from house.exogenous_data import prepare_aligned_timeseries
+from house.exogenous_data import (
+    prepare_aligned_timeseries,
+    write_exogenous_csv_from_metadata,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -23,10 +25,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def setup_mpc_and_data(dt_seconds: int):
-    """Setup MPC solver and aligned exogenous data."""
+def setup_mpc_and_data(dt_seconds: int, exogenous_csv_path: str):
+    """Setup MPC solver and aligned exogenous data.
+
+    ``exogenous_csv_path`` must be the dataset of the house this controller
+    drives. The MPC optimises against a load/PV/price forecast, so reading a
+    different dataset than the house simulates means optimising for a
+    building that does not exist.
+    """
     dataset_info = prepare_aligned_timeseries(
-        tools.sample_data_generator.FILE_NAME,
+        exogenous_csv_path,
         dt_seconds,
     )
     logger.info(
@@ -67,8 +75,9 @@ class ControllerFederate(Federate):
     federate was split out of the monolithic house simulation.
     """
 
-    def __init__(self, federate_name: str):
+    def __init__(self, federate_name: str, house_federate_name: str):
         super().__init__(federate_name)
+        self.house_federate_name = house_federate_name
         self.state_key = ""
         self.control_key = ""
         self.mpc: JAX_MPC_Solver | None = None
@@ -92,13 +101,45 @@ class ControllerFederate(Federate):
         self.state_key = self._find_sub_key("state")
         self.control_key = self._find_pub_key("control")
 
-        self.mpc, self.dataset, self.sim_template = setup_mpc_and_data(dt_seconds)
+        exogenous_csv_path = self._materialize_house_exogenous_data()
+
+        self.mpc, self.dataset, self.sim_template = setup_mpc_and_data(
+            dt_seconds, exogenous_csv_path
+        )
         self.max_steps = len(self.dataset)
 
+        logger.info(
+            f"Federate '{self.federate_name}' forecasting from the exogenous "
+            f"dataset of '{self.house_federate_name}'."
+        )
         logger.info(f"Federate '{self.federate_name}' subscribing to:")
         logger.info(f"  - {self.state_key}")
         logger.info(f"Federate '{self.federate_name}' publishing to:")
         logger.info(f"  - {self.control_key}")
+
+    def _materialize_house_exogenous_data(self) -> str:
+        """Fetch the controlled house's exogenous dataset from the CST store.
+
+        composegen writes each house's dataset into ``custom_metadata`` keyed
+        by that house's federate name, and the house reads it back the same
+        way. Reading the *house's* entry rather than a path baked into this
+        image is what keeps the MPC's forecast and the house's simulation on
+        the same data.
+        """
+        metadata = self.metadata_manager.read(
+            "custom_metadata", self.house_federate_name
+        )
+        csv_text = (metadata or {}).get("exogenous_data_csv")
+
+        if not csv_text:
+            raise ValueError(
+                f"No exogenous dataset found in the metadata store for house "
+                f"'{self.house_federate_name}', which '{self.federate_name}' "
+                f"controls. Ensure composegen ran with a valid "
+                f"'exogenous_data' field for that house."
+            )
+
+        return write_exogenous_csv_from_metadata(self.federate_name, csv_text)
 
     def _find_pub_key(self, suffix: str) -> str:
         """Find the registered publication key ending in ``suffix``."""
@@ -225,7 +266,17 @@ def parse_args() -> argparse.Namespace:
         "--federate_name",
         type=str,
         required=True,
-        help="Federate name matching meta_store entry (e.g. house_0.hems_0)",
+        help="Federate name matching meta_store entry (e.g. house_4.hems_0)",
+    )
+    parser.add_argument(
+        "--house_federate",
+        type=str,
+        required=True,
+        help=(
+            "Federate name of the house this controller drives (e.g. "
+            "local-grid.house_4). Its exogenous dataset is used for the "
+            "MPC forecast."
+        ),
     )
     args, _ = parser.parse_known_args()
     return args
@@ -248,24 +299,31 @@ def get_db_backends_from_env() -> tuple[str, str]:
 def main(
     scenario_name: str | None = None,
     federate_name: str | None = None,
+    house_federate_name: str | None = None,
 ) -> None:
     """Run the HEMS controller federate using CST lifecycle.
 
     Args:
         scenario_name: CST scenario name. If None, parsed from CLI.
         federate_name: Federate name. If None, parsed from CLI.
+        house_federate_name: Federate name of the controlled house. If None,
+            parsed from CLI.
     """
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario
         federate_name = args.federate_name
+        house_federate_name = args.house_federate
 
     if scenario_name is None or federate_name is None:
         raise ValueError("scenario_name and federate_name are required")
 
+    if house_federate_name is None:
+        raise ValueError("house_federate_name is required")
+
     use_meta_db, use_data_db = get_db_backends_from_env()
 
-    federate = ControllerFederate(federate_name)
+    federate = ControllerFederate(federate_name, house_federate_name)
     federate.run(
         scenario_name,
         use_meta_db=use_meta_db,
