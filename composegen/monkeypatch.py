@@ -1,4 +1,3 @@
-import re
 from typing import Optional
 from pathlib import Path
 
@@ -11,34 +10,6 @@ from cosim_toolbox.dbms import create_metadata_manager
 # static IPs and a reserved subnet entirely (see _service).
 BROKER_SERVICE = "helics"
 
-# Federate images were tagged `broker`, `grid`, `house`, `controller`,
-# `house_player` - names with no owner. Any other project on the host that
-# builds an image called `house` or `grid` would silently be used as a
-# federate image, and two GridLock checkouts overwrote each other's tags.
-IMAGE_PREFIX = "gridlock-"
-
-
-def _project_name(analysis_name: str) -> str:
-    """Derive the Compose project name from the experiment's analysis name.
-
-    Without a ``name:`` key Compose falls back to the compose file's directory,
-    which is always ``generated`` - so every checkout on a host shared one
-    project and therefore one set of container names. Keying on the analysis
-    name gives readable containers (``gridlock-testgrid-local-grid-1``) and
-    keeps consecutive runs of an experiment in one project, so a re-run
-    replaces the previous run's containers instead of orphaning them.
-
-    Two checkouts running experiments with the same ``general.name`` still
-    share a project; a stable, legible name is worth more here than a hash,
-    and they cannot run at once anyway - both write the same generated file.
-    """
-    # composegen builds the analysis as f"{general.name}Analysis", and
-    # "gridlock-testgridanalysis" says nothing "gridlock-testgrid" does not.
-    slug = re.sub(r"analysis$", "", analysis_name.lower())
-    slug = re.sub(r"[^a-z0-9_-]+", "-", slug).strip("-_")
-
-    return f"gridlock-{slug}" if slug else "gridlock"
-
 
 def _service(
     name: str, image: str, params: list, cnt: int, depends: Optional[str] = None
@@ -47,9 +18,7 @@ def _service(
 
     Args:
         name (str): Name of the service being defined
-        image (str): Federate image key ("grid", "house", ...). The image is
-            tagged with IMAGE_PREFIX; the key itself still selects the build
-            context.
+        image (str): Name of the image on which the service runs
         params (list): Environment in image the service utilizes
         cnt (int): Federate counter, used by the caller to size the broker's
             -f argument. No longer used to assign an address.
@@ -59,7 +28,7 @@ def _service(
         str: Docker-compose service block as a string.
     """
     _svc = "  " + name + ":\n"
-    _svc += '    image: "' + IMAGE_PREFIX + image + '"\n'
+    _svc += '    image: "' + image + '"\n'
     _svc += "    build:\n"
     if image in ["house", "controller"]:
         _svc += "      context: ..\n"
@@ -213,7 +182,6 @@ def define_yaml(
         f"--global_disconnect",
     ]
     yaml_str = (
-        f"name: {_project_name(analysis_name)}\n"
         "services:\n"
         + _service("helics", "broker", params, 2, depends=None)
         + yaml_str
