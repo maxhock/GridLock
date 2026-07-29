@@ -122,11 +122,14 @@ than before, on `electrical_load: "H0"` — that config was already broken (H8).
 `electrical_load` — including the `"H25"` / `"H0"` standard-profile names used in
 the shipped configs — to `/data/input/sample_house.csv` without a word.
 
-### S5. `generated/` is written as root — **OPEN**
+### S5. `generated/` is written as root — **FIXED** (cd1fd00)
+Existing installs need a one-time reclaim of old root-owned files; run.sh
+detects this and prints the command.
+
 The composegen container leaves `generated/docker-compose.yaml` owned by
 `root:root`. Inspecting, cleaning, or regenerating it needs sudo.
 
-### S6. Hard-coded `10.5.0.0/16` subnet and per-federate IPs — **OPEN**
+### S6. Hard-coded `10.5.0.0/16` subnet and per-federate IPs — **FIXED** (189ff4c)
 Two experiments cannot run concurrently on a host, a stale `generated_cst_net`
 blocks the next run (hit during the audit), and the range can collide with VPN/VM
 ranges. The `cnt`-based IP assignment also caps the federation near 250 federates.
