@@ -271,7 +271,7 @@ does not exist, unknown arguments are rejected where bash warns and continues,
 the root-owned `generated/` check is missing, and stage 2 does not pin its exit
 code. A Windows user is running a different program.
 
-### R5. The HEMS stops controlling before the run ends — **FIXED**
+### R5. The HEMS stops controlling before the run ends — **FIXED** (f1a628d)
 Settled the other way round from the first attempt (2c8e4b1, which filled the
 window by repeating the last sample): a dataset that is too short is a
 configuration error, and inventing forecast data to cover it hides that. The
@@ -374,7 +374,7 @@ the *house* image, which would start a house simulation with no `exogenous_data`
 and crash on startup. Placement semantics get fixed here; running one has to
 fail loudly until the federate exists.
 
-### R8. Generic image names, and a compose project called `generated` — **DROPPED**
+### R8. Generic image names, and a compose project called `generated` — **DROPPED** (1b8aee9)
 Namespacing was implemented (`gridlock-*` images, `name: gridlock-<analysis>` in
 the generated file) and then reverted — the longer container and image names
 were not worth the collision they avoid. The report below stands as a known
