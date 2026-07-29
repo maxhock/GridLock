@@ -332,7 +332,16 @@ that is better addressed by reporting the unclaimed set at generation time, whic
 is what this issue does. Revisit only if a use case appears that needs a real
 timeseries recorded for an empty point.
 
-### R7. A grid-level `pv` is placed on a bus, not a load index — **OPEN**
+### R7. A grid-level `pv` is placed on a bus, not a load index — **FIXED**
+`pv` and `battery` joined `load` and `house` in `LOAD_PLACED_CLASSES` — the same
+argument covers both, since a battery injects and draws power at a connection
+point exactly as generation does. Since neither has a federate of its own yet,
+generating one is now a `NotImplementedError` naming the reason instead of a
+house container that dies on a missing exogenous dataset. Verified: a grid-level
+PV at load index 99 is rejected against the grid's valid load indices, and one at
+index 5 fails with the not-implemented message; both abort composegen before any
+federate starts.
+
 `_resolve_placement` is applied to every child of a grid, but only `load` and
 `house` children have their placement resolved against pandapower load indices.
 A `pv` child (`experiment-MV-LV.yml` places `pv_0` at 5) is therefore validated

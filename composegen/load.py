@@ -27,8 +27,16 @@ RUNNER_FEDERATES = {
 # Classes that occupy a pandapower load index rather than sitting on a bare
 # bus. The grid identifies incoming power by the `load_<idx>` segment of the
 # HELICS key, so anything that injects or draws power has to be placed here to
-# reach the power flow at all.
-LOAD_PLACED_CLASSES = {"load", "house"}
+# reach the power flow at all. Generation is no exception - a PV plant is a
+# negative load, and a battery is a load of either sign.
+LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery"}
+
+# Classes that can be placed in a grid but have no federate of their own yet.
+# Their physics currently lives inside the house simulator, and
+# `map_params_to_class` maps them to the *house* image, so generating one
+# would start a house simulation with no exogenous dataset and fail at
+# startup with an unrelated message.
+UNIMPLEMENTED_GRID_CHILD_CLASSES = {"pv", "battery"}
 
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
@@ -1439,6 +1447,17 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                         print(
                             f"  Resolved placement {placement!r} to "
                             f"{len(load_indices)} load(s)."
+                        )
+
+                    if child_class in UNIMPLEMENTED_GRID_CHILD_CLASSES:
+                        raise NotImplementedError(
+                            f"'{child.identifier}' is a {child_class} placed "
+                            f"directly in grid '{fed_name}', but no standalone "
+                            f"{child_class} federate exists yet - its physics "
+                            f"lives inside the house simulator, and generating "
+                            f"one here would start a house image with no "
+                            f"exogenous dataset. Declare it as a sub-federate "
+                            f"of a house instead."
                         )
 
                     for instance_id, instance_loads in _expand_child_instances(
