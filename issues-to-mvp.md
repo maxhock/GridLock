@@ -391,7 +391,14 @@ Compose v5.3.1 (verified: a service exiting 3 gives `rc=3` either way), so the
 undocumented behaviour to build an abort path on, and the two stages should not
 differ.
 
-### R11. Credentials in the repo — **OPEN**
+### R11. Credentials in the repo — **FIXED**
+`databases/db-access.txt` now names the env variables instead of their values,
+adds the `--profile cst-tools` command the front-ends actually need, and
+documents finding a run by its `scenario` column (verified against the live
+schema: `"TestGridAnalysis".hdt_double`, columns `scenario`/`federate`/
+`data_name`/`data_value`/`sim_time`). `preflight.env.example` no longer carries
+an internal InfDB address.
+
 `databases/db-access.txt` is tracked and spells out passwords (`worker`/`worker`,
 `SuperSecret`) plus pgadmin credentials that do not even match
 `config/preflight.env.example` (`admin@gridlock.local`/`admin`) — so it is both a
