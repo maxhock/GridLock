@@ -1,6 +1,6 @@
 # Issues to MVP / 1.0.0
 
-Status legend: **OPEN** / **FIXED** / **REOPENED**
+Status legend: **OPEN** / **FIXED** / **PARTIALLY FIXED** / **DEFERRED** / **DROPPED**
 
 Audited end-to-end on 2026-07-28 by running `./run.sh config/experiment-LV.yml` and
 `./run.sh config/experiment-local-grid.yml`. Both complete without warnings, which is
@@ -135,7 +135,9 @@ ranges. The `cnt`-based IP assignment also caps the federation near 250 federate
 
 ## Housekeeping
 
-### H1. Dead code — **OPEN**
+### H1. Dead code — **DEFERRED**
+Kept deliberately for now; revisit before 1.0.
+
 - The entire legacy `extract`/`transform`/`load` path (~400 lines) is unreachable:
   Stage 2 rejects any config without a `federation:` key, so `config/experiment.yml`
   cannot run at all.
@@ -143,9 +145,6 @@ ranges. The `cnt`-based IP assignment also caps the federation near 250 federate
   `_extract_tree_config` sets every `grid_nodes` value to `None`.
 - Phase 2 of `load_tree_cst_outputs` and `_add_generic_tree_pubsub_groups` do not
   fire for any shipped config.
-- The 2026-01-01 base date in `load.py` is unreachable in tree mode — `transform.py`
-  has already stringified `start_time` off a 2023-01-01 base. Two epochs for one
-  field.
 - Unused federates: `grid-pypsa`, `forecasting`, `template`, `recorder`,
   `house/run_simple_simulation.py`, `run_fake_controller.py`, `start_broker.py`.
 
@@ -154,7 +153,7 @@ ranges. The `cnt`-based IP assignment also caps the federation near 250 federate
 `use_meta_db` / `use_data_db`, so it silently defaults to `json` while the databases
 hold Mongo state — no consistency check.
 
-### H10. Omitting `time_step` crashes composegen — **OPEN**
+### H10. Omitting `time_step` crashes composegen — **FIXED** (852dd43)
 `transform.py` defaults a missing `time_step` to the float `1.0`, but CST's
 `HelicsMsg.verify` type-checks against its defaults with exact type equality and
 `period` defaults to the int `1`. So any experiment without an explicit
@@ -162,13 +161,18 @@ hold Mongo state — no consistency check.
 Latent today because both shipped configs set it to an int. Found while testing
 sub-second offsets, which fail the same check.
 
-### H3. Key nomenclature — **OPEN** (was issue 6)
+### H3. Key nomenclature — **PARTIALLY FIXED** (0fc1fda)
+The duplicated house segment is gone: `local-grid/house_4/hems_0/house_4/control`
+is now `local-grid/house_4/hems_0/control`. The remaining composite keys
+(`<grid>/<federate>/load_<idx>/<quantity>`) were left as-is — each segment carries
+distinct information rather than repeating one.
+
 `local-grid/house_0/hems_0/house_0/control` duplicates the house segment, and
 `lv-grid_91074_1_4/loadhouse_0/load_58/active_power` fuses grid identity, federate
 identity and pandapower index into one opaque string. Worth settling before 1.0
 because it is the schema every downstream query binds to.
 
-### H4. Reproducibility / dependency pinning — **OPEN**
+### H4. Reproducibility / dependency pinning — **FIXED** (d741713)
 Only pandapower is pinned. `cosim-toolbox`, `helics`, `pandas`, `numpy`, `jax` and
 `git+https://github.com/Hosseini97/EnergySim.git@main` all float — the house
 federate's physics can change with no commit on this side, which makes the
@@ -185,12 +189,14 @@ and `config/experiment.yml`), which is unreachable and deliberately kept for now
 — see H1. `AGENTS.md` still documents `data/output/` in the folder structure; left
 alone because that file is not to be edited without a direct instruction.
 
-### H6. Dangling test wiring — **OPEN**
+### H6. Dangling test wiring — **FIXED** (cc65fa7)
+The old test suite was removed wholesale rather than repaired, ahead of a rewrite.
+
 `run-tests.sh` references a `docker-compose.test.yml` that is not in the repo; CI
 runs pre-commit only (pytest is commented out). Tests are being reworked separately;
 this notes the dangling reference only.
 
-### H7. Stray credentials file — **OPEN**
+### H7. Stray credentials file — **FIXED** (no commit; the file was untracked)
 `config/preflight.env.bak` sits untracked next to the gitignored env file with real
 credentials in it.
 
@@ -202,8 +208,9 @@ exist. Valid indices: []`. Either implement nested grids or mark the config
 explicitly as unsupported.
 
 ### H9. Test house as well — **OPEN** (was issue 9)
-Superseded in practice by B1 — the house is exercised by
-`config/experiment-local-grid.yml`, but its grid coupling is a no-op until B1 lands.
+B1 has landed, so the house now genuinely drives the grid and is exercised by
+`config/experiment-local-grid.yml`. What remains is test coverage, which falls
+under the test rework (H6).
 
 ---
 
