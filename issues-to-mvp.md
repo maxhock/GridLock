@@ -337,7 +337,11 @@ runs; this is the other half of the same problem.
 the experiment directory is mounted at `/config`, so an experiment outside it
 cannot be read by the containers anyway.
 
-### R10. Stage 2 does not pin its exit code — **OPEN**
+### R10. Stage 2 does not pin its exit code — **FIXED**
+Verified after the change by pointing `experiment-LV.yml` at a PLZ that does not
+exist (99999): infdb raises "No grids found in InfDB pylovo.grid_result", the
+stage aborts, `run.sh` exits 1 and stage 3 never starts.
+
 `run.sh` stage 3 passes `--exit-code-from composegen`; stage 2 relies on
 `--abort-on-container-exit` alone propagating infdb's exit code. It does on
 Compose v5.3.1 (verified: a service exiting 3 gives `rc=3` either way), so the

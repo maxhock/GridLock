@@ -91,7 +91,11 @@ if [[ "$CLEANUP_DBS" == "1" ]]; then
 fi
 
 echo "=== Stage 2: infdb ==="
-$DC up --build --quiet-build --abort-on-container-exit --no-deps infdb
+# --exit-code-from pins whose status this stage returns. --abort-on-container-exit
+# alone happens to propagate it on current Compose, but that is undocumented and
+# this stage is the gate that stops a bad grid resolution from reaching stage 3,
+# so it should not rest on it. Same form as stage 3.
+$DC up --build --quiet-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb
 
 echo "=== Stage 3: composegen ==="
 $DC up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
