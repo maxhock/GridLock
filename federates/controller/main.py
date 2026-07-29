@@ -6,14 +6,12 @@ import argparse
 import os
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
 
 from cosim_toolbox.sims import Federate
 from energysim.sim.simulator import JAXSimulator
 from energysim.control.mpc_solver import JAX_MPC_Solver
 from energysim.core.data.dataset import SimulationDataset
-from energysim.core.shared.data_structs import ExogenousData
 from house.common_config import create_common_configs
 from house.exogenous_data import (
     prepare_aligned_timeseries,
@@ -25,8 +23,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Only used when this federate is started by hand. composegen passes --horizon,
+# because it is the side that checks each house's exogenous dataset is long
+# enough for both the run and the forecast window (composegen/transform.py:
+# MPC_FORECAST_HORIZON_STEPS). The two numbers have to be the same one.
+DEFAULT_MPC_HORIZON_STEPS = 24
 
-def setup_mpc_and_data(dt_seconds: int, exogenous_csv_path: str):
+
+def setup_mpc_and_data(dt_seconds: int, exogenous_csv_path: str, horizon: int):
     """Setup MPC solver and aligned exogenous data.
 
     ``exogenous_csv_path`` must be the dataset of the house this controller
@@ -60,7 +64,7 @@ def setup_mpc_and_data(dt_seconds: int, exogenous_csv_path: str):
         pv_config=configs["pv_config"],
     )
 
-    mpc = JAX_MPC_Solver(N_horizon=24, simulator_template=sim_template)
+    mpc = JAX_MPC_Solver(N_horizon=horizon, simulator_template=sim_template)
 
     return mpc, dataset, sim_template
 
@@ -76,9 +80,15 @@ class ControllerFederate(Federate):
     federate was split out of the monolithic house simulation.
     """
 
-    def __init__(self, federate_name: str, house_federate_name: str):
+    def __init__(
+        self,
+        federate_name: str,
+        house_federate_name: str,
+        horizon: int = DEFAULT_MPC_HORIZON_STEPS,
+    ):
         super().__init__(federate_name)
         self.house_federate_name = house_federate_name
+        self.horizon = horizon
         self.state_key = ""
         self.control_key = ""
         self.mpc: JAX_MPC_Solver | None = None
@@ -105,7 +115,7 @@ class ControllerFederate(Federate):
         exogenous_csv_path = self._materialize_house_exogenous_data()
 
         self.mpc, self.dataset, self.sim_template = setup_mpc_and_data(
-            dt_seconds, exogenous_csv_path
+            dt_seconds, exogenous_csv_path, self.horizon
         )
         self.max_steps = len(self.dataset)
 
@@ -204,42 +214,6 @@ class ControllerFederate(Federate):
             )
             return None
 
-    def _clamped_forecast(self, step_idx: int, horizon: int) -> ExogenousData:
-        """Return exactly ``horizon`` forecast steps, clamped at the dataset tail.
-
-        The QP is built for a fixed horizon when the solver is constructed, so
-        a short window cannot be solved and ``get_forecast`` silently returns
-        one whenever the window runs past the end of the dataset. The previous
-        answer was to publish a zero action for those steps, which meant the
-        MPC went quiet for the last ``N_horizon`` steps of every run - and for
-        the *whole* run whenever the dataset was sized to the experiment, which
-        is exactly what ``validate_timeseries_coverage`` asks users to provide.
-
-        Repeating the last available sample keeps the horizon full and the
-        battery under control to the end. The run still stops at ``end_time``;
-        a dataset longer than the experiment is simply never read that far.
-        """
-        # A dataset shorter than the run is rejected by composegen, so this
-        # only guards the exact final step.
-        start_idx = min(max(step_idx, 0), self.max_steps - 1)
-        available = min(horizon, self.max_steps - start_idx)
-
-        forecast = self.dataset.get_forecast(start_idx, available)
-
-        if available == horizon:
-            return forecast
-
-        missing = horizon - available
-        logger.info(
-            f"Time {self.granted_time}s | Forecast horizon runs {missing} step(s) "
-            f"past the end of the dataset; holding the last sample."
-        )
-
-        return jax.tree_util.tree_map(
-            lambda leaf: jnp.concatenate([leaf, jnp.repeat(leaf[-1:], missing, axis=0)]),
-            forecast,
-        )
-
     def update_internal_model(self) -> None:
         """Advance the controller by one CST-controlled time step."""
         dt_seconds = int(self.period)
@@ -257,10 +231,25 @@ class ControllerFederate(Federate):
             )
             return
 
+        # The QP is built for a fixed horizon, so a short forecast window
+        # cannot be solved - and `get_forecast` returns one silently. composegen
+        # sizes every controlled house's dataset to cover the run plus this
+        # window, so reaching here means the federation was generated against a
+        # different horizon than this federate is running with. Failing is the
+        # only honest answer: the alternative, publishing a zero action, is a
+        # battery that quietly stops being controlled.
+        if step_idx + self.mpc.N > self.max_steps:
+            raise ValueError(
+                f"Forecast window [{step_idx}, {step_idx + self.mpc.N}) runs past "
+                f"the end of the exogenous dataset ({self.max_steps} steps) for "
+                f"'{self.federate_name}'. The dataset was validated against a "
+                f"different MPC horizon than the {self.mpc.N} steps in use here."
+            )
+
         current_sim = eqx.tree_at(
             lambda s: s.battery.soc, self.sim_template, jnp.array(current_soc)
         )
-        exo_forecast = self._clamped_forecast(step_idx, self.mpc.N)
+        exo_forecast = self.dataset.get_forecast(step_idx, self.mpc.N)
         action = self.mpc.solve(current_sim, exo_forecast)
 
         battery_power_w = float(action.battery_power_w)
@@ -304,6 +293,15 @@ def parse_args() -> argparse.Namespace:
             "MPC forecast."
         ),
     )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=DEFAULT_MPC_HORIZON_STEPS,
+        help=(
+            "Number of steps the MPC optimises over. Passed by composegen, "
+            "which sizes the house's exogenous dataset around it."
+        ),
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -326,6 +324,7 @@ def main(
     scenario_name: str | None = None,
     federate_name: str | None = None,
     house_federate_name: str | None = None,
+    horizon: int | None = None,
 ) -> None:
     """Run the HEMS controller federate using CST lifecycle.
 
@@ -334,12 +333,14 @@ def main(
         federate_name: Federate name. If None, parsed from CLI.
         house_federate_name: Federate name of the controlled house. If None,
             parsed from CLI.
+        horizon: Steps the MPC optimises over. If None, parsed from CLI.
     """
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario
         federate_name = args.federate_name
         house_federate_name = args.house_federate
+        horizon = args.horizon
 
     if scenario_name is None or federate_name is None:
         raise ValueError("scenario_name and federate_name are required")
@@ -349,7 +350,11 @@ def main(
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 
-    federate = ControllerFederate(federate_name, house_federate_name)
+    federate = ControllerFederate(
+        federate_name,
+        house_federate_name,
+        horizon=horizon or DEFAULT_MPC_HORIZON_STEPS,
+    )
     federate.run(
         scenario_name,
         use_meta_db=use_meta_db,

@@ -31,6 +31,13 @@ class TransformedConfig:
     config_path: str | None = None
 
 
+# Steps of load/PV/price forecast the HEMS optimises over. composegen owns this
+# number: it decides how much exogenous data a house with a HEMS needs, and it
+# is passed to the controller federate on the command line so the two cannot
+# disagree. federates/controller/main.py only falls back to its own default
+# when run by hand.
+MPC_FORECAST_HORIZON_STEPS = 24
+
 SUPPORTED_TREE_CLASSES = {
     "grid",
     "house",
@@ -361,14 +368,37 @@ def validate_tree(tree: Tree) -> None:
         raise ValueError("Configuration validation failed.")
 
 
+def _forecast_margin_seconds(tree: Tree, node, time_step: float) -> float:
+    """Extra coverage a house needs beyond the run itself, in seconds.
+
+    A house controlled by a HEMS is read past the end of the run: at the last
+    simulation step the MPC still asks for a full window of forecast. Without
+    the margin the solver is handed a short window, which it cannot use - so
+    the requirement belongs here, before anything starts, rather than being
+    papered over at runtime.
+    """
+    if node.data.get("class") != "house":
+        return 0.0
+
+    has_controller = any(
+        child.data.get("class") in ("hems", "controller")
+        for child in tree.children(node.identifier)
+    )
+
+    return MPC_FORECAST_HORIZON_STEPS * time_step if has_controller else 0.0
+
+
 def validate_timeseries_coverage(
     tree: Tree, general_cfg: dict, data_input_path: Path
 ) -> None:
-    """Ensure every load timeseries CSV covers the full simulation duration.
+    """Ensure every timeseries CSV covers everything that will be read from it.
 
     Without this, a load-player federate silently holds its last known
     value once the CSV runs out, producing a flat/stale load for the
     remainder of the run instead of failing.
+
+    A CSV longer than needed is fine and stays untouched: federates index into
+    it by simulation step, so the run simply stops before the surplus.
     """
     start_time = general_cfg.get("start_time") or 0
     end_time = general_cfg.get("end_time")
@@ -377,6 +407,8 @@ def validate_timeseries_coverage(
         return
 
     duration = float(end_time) - float(start_time)
+    # process_general_config has not run yet, so apply the same default it does.
+    time_step = float(general_cfg.get("time_step") or 1)
     validation_errors: list[str] = []
 
     fields_by_class = {
@@ -389,6 +421,9 @@ def validate_timeseries_coverage(
         fields = fields_by_class.get(data.get("class"))
         if not fields:
             continue
+
+        margin = _forecast_margin_seconds(tree, node, time_step)
+        required = duration + margin
 
         for field in fields:
             csv_name = data.get(field)
@@ -414,12 +449,23 @@ def validate_timeseries_coverage(
 
             covered = float(timestamps.max())
 
-            if covered < duration:
+            if covered < required:
+                because = (
+                    f"the experiment runs for {duration:.0f}s "
+                    f"(start_time={start_time}, end_time={end_time})"
+                )
+
+                if margin:
+                    because += (
+                        f" and its HEMS needs a further {margin:.0f}s "
+                        f"({MPC_FORECAST_HORIZON_STEPS} steps of "
+                        f"{time_step:.0f}s) of forecast at the last step"
+                    )
+
                 validation_errors.append(
                     f"[Timeseries] Node '{node.tag}' ({node.identifier}): "
                     f"'{field}' file '{csv_name}' only covers {covered:.0f}s "
-                    f"but the experiment runs for {duration:.0f}s "
-                    f"(start_time={start_time}, end_time={end_time}). Provide a "
+                    f"but {required:.0f}s are needed - {because}. Provide a "
                     f"longer timeseries or shorten the experiment duration."
                 )
 

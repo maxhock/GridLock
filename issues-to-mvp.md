@@ -271,12 +271,26 @@ does not exist, unknown arguments are rejected where bash warns and continues,
 the root-owned `generated/` check is missing, and stage 2 does not pin its exit
 code. A Windows user is running a different program.
 
-### R5. The HEMS stops controlling before the run ends — **FIXED** (2c8e4b1)
-`_clamped_forecast` repeats the last available sample to fill the window, so the
-MPC keeps solving to the last step. Verified against a 30-step dataset with a
-24-step horizon: step 0 takes a full window untouched, step 10 gets 20 real
-samples plus 4 held ones, the final step holds the whole window, and the QP
-solves in every case (previously all of these published `0.0`).
+### R5. The HEMS stops controlling before the run ends — **FIXED**
+Settled the other way round from the first attempt (2c8e4b1, which filled the
+window by repeating the last sample): a dataset that is too short is a
+configuration error, and inventing forecast data to cover it hides that. The
+requirement moved to `validate_timeseries_coverage`, which now asks a house with
+a HEMS for `duration + horizon * time_step` and stops the run before any
+federate starts. A dataset longer than needed is untouched — federates index
+into it by step, so the surplus is simply never read.
+
+`MPC_FORECAST_HORIZON_STEPS` lives in composegen, which is the side that
+validates, and is passed to the controller as `--horizon` so the two numbers
+cannot drift apart. The controller now raises instead of publishing a zero
+action if a short window ever does reach it.
+
+Verified three ways: a house dataset covering exactly the run's 86400s is
+rejected with "only covers 86400s but 172800s are needed - the experiment runs
+for 86400s and its HEMS needs a further 86400s (24 steps of 3600s) of forecast
+at the last step"; the same dataset with the HEMS removed passes and runs to
+completion, so the margin is only demanded where it is read; and both shipped
+experiments still run unchanged.
 
 `federates/controller/main.py` publishes `battery_power_w = 0.0` whenever
 `step_idx + N_horizon >= max_steps`, where `max_steps` is the length of the
@@ -288,10 +302,10 @@ provide) yields an MPC that publishes zero for the entire run, at INFO level,
 exit code 0. The shipped configs escape only because `sample_data.csv` holds 7
 days for a 1-day run.
 
-Fix direction: clamp the forecast window to the tail of the dataset — repeat the
-last available sample to fill the horizon — instead of dropping control. The run
-still ends at `end_time`; a dataset longer than the experiment is simply not
-read past it.
+Fix direction: refuse the run in composegen when a controlled house's dataset
+cannot cover the forecast window, rather than dropping control or synthesising
+the missing samples. The run still ends at `end_time`; a dataset longer than the
+experiment is simply not read past it.
 
 ### R6. Loads nothing is placed on, and grids whose load table cannot be read — **FIXED** (9564b28)
 `_read_load_list` now raises for a missing entry or a missing `net_json`,

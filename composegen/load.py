@@ -13,7 +13,7 @@ import yaml
 from omegaconf import DictConfig
 from treelib import Tree
 
-from transform import TransformedConfig
+from transform import MPC_FORECAST_HORIZON_STEPS, TransformedConfig
 from cosim_toolbox.dbms import create_metadata_manager
 
 
@@ -960,11 +960,15 @@ def _wire_house_subcomponents(
             # whatever dataset is hard-coded in its image, which silently
             # diverges from the house as soon as a house names a different
             # `exogenous_data` file.
+            # --horizon keeps the controller's MPC window and the coverage
+            # composegen validated for the house's exogenous dataset in step
+            # (see transform.MPC_FORECAST_HORIZON_STEPS).
             hems_fed.config(
                 "command",
                 f"{hems_mapped['command']} "
                 f"--scenario {scenario_name} --federate_name {child_fed_name} "
-                f"--house_federate {house_fed_name}",
+                f"--house_federate {house_fed_name} "
+                f"--horizon {MPC_FORECAST_HORIZON_STEPS}",
             )
 
             _add_sink_only_group(
