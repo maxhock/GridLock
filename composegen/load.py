@@ -1007,9 +1007,21 @@ def _wire_grid_child(
     # Control and state are independent of how the child's power is wired:
     # a house needs them whether it sits on pandapower load indices or not.
     if child_class in ("house", "hems", "controller"):
+        # A HELICS key is "<publisher federate>/<group name>". When the house's
+        # own hems is the publisher, its federate name already carries the
+        # house segment, so naming the group "<house>/control" repeated it:
+        # local-grid/house_4/hems_0/house_4/control. The group is just
+        # "control" in that case.
+        #
+        # When the grid publishes instead, every child's control topic comes
+        # from the same federate, so the child id is what keeps them apart.
+        control_group = (
+            "control" if control_publisher else f"{child_local_id}/control"
+        )
+
         _add_group(
             federation,
-            f"{child_local_id}/control",
+            control_group,
             control_publisher or grid_fed_name,
             child_fed_name,
             "string",
