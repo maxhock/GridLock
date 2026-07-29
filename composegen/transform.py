@@ -443,7 +443,25 @@ def process_general_config(general_cfg: dict) -> dict:
         general_cfg["start_time"] = (base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))).isoformat()
 
     if "time_step" not in general_cfg or general_cfg["time_step"] is None:
-        general_cfg["time_step"] = 1.0
+        general_cfg["time_step"] = 1
+
+    # CST's HelicsMsg.verify type-checks every value against its default with
+    # exact type equality, and `period` defaults to the int 1. A float here -
+    # including the old 1.0 default used when time_step was omitted - fails
+    # deep inside composegen with "Diction type '<class 'float'>' not allowed
+    # for period". Whole-number floats are accepted and narrowed; genuinely
+    # fractional ones are unsupported, so say so here rather than there.
+    time_step = general_cfg["time_step"]
+
+    if isinstance(time_step, float) and time_step.is_integer():
+        general_cfg["time_step"] = int(time_step)
+
+    elif not isinstance(time_step, int):
+        raise ValueError(
+            f"[General] 'time_step' must be a whole number of seconds, got "
+            f"{time_step!r}. HELICS periods are configured as integers here, "
+            f"so sub-second time steps are not supported."
+        )
 
     start_time = general_cfg["start_time"]
     end_time = general_cfg["end_time"]
