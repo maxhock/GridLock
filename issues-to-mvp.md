@@ -10,7 +10,7 @@ why several of the issues below are silent-wrong-result problems rather than cra
 
 ## Blockers
 
-### B1. House federate has no effect on the grid, in either direction — **OPEN**
+### B1. House federate has no effect on the grid, in either direction — **FIXED** (b107324)
 `federates/grid/main.py` matches inputs with the regex `/load_(\d+)/`. The house
 publishes `local-grid/house_0/active_power`, so `update_internal_model` hits
 `continue` and never writes it into `net.load`. The publish loop filters the same
@@ -26,7 +26,7 @@ Fix direction: give `house` the same per-load key wiring the `load` class gets i
 `_wire_grid_child`, or make the grid resolve federate -> load index by name instead
 of by regex on the key.
 
-### B2. Every run writes into the same scenario — **REOPENED** (was issue 3)
+### B2. Every run writes into the same scenario — **FIXED** (069a304)
 `composegen/load.py` builds a timestamped scenario name (`TestGrid_YYYYMMDD_HHMMSS`)
 and stores metadata for it, then constructs `FederationConfig(f"{name}Scenario", ...)`
 — so the federates all run under the constant `TestGridScenario`.
@@ -36,7 +36,7 @@ Verified: `"TestGridAnalysis".hdt_double` held 13,138,220 rows, all tagged
 documents in Mongo that nothing references. Runs cannot be told apart except by
 `created_at`, and the table grows without bound.
 
-### B3. A crashing federate hangs the run forever — **OPEN**
+### B3. A crashing federate hangs the run forever — **FIXED** (2c51946)
 Stage 4 of `run.sh` is a bare `docker compose up` — no `--abort-on-container-exit`,
 no `--exit-code-from`, no timeout. Stages 2 and 3 both handle this correctly.
 
@@ -44,7 +44,28 @@ Verified by killing the grid federate at startup: the surviving federates sat on
 broker until a 180 s external timeout fired. Nothing exited, and the status `run.sh`
 returns is not the simulation's. Same gap in `run.ps1`.
 
-### B4. Federates do not share a time axis — **OPEN** (supersedes issue 5)
+### B4. Federates do not share a time axis — **FIXED** (2c243be, supersedes issue 5)
+
+Fixed by dropping the depth offsets and using HELICS
+`wait_for_current_time_update` on the grid. All federates now report the same
+`sim_time` values and runs stop exactly at `end_time`.
+
+Two follow-ups came out of it, neither blocking:
+
+- **HEMS optimises from a two-step-stale house state** — GitHub issue #55. The
+  flag is a single federation-wide slot (HELICS rejects a second holder), so it
+  went to the grid and the house/hems round trip grew from one step to two.
+  Proposed fix is dead-reckoning in the controller.
+- **Multi-grid federations cannot get same-step coupling at all.** With more
+  than one grid federate the slot goes unused and every grid runs its power flow
+  on the previous step's loads. HELICS iteration
+  (`helicsFederateRequestTimeIterative`) is the only thing that lifts this; it
+  would also remove the one-step voltage feedback delay to children and the
+  hems lag above. Belongs in the CST federate loop.
+
+Original report follows.
+
+
 `_offset_for_node` in `composegen/load.py` staggers grant times by the tree-depth
 difference in whole seconds, independent of `time_step`. Measured `sim_time` ranges
 from the local-grid run:
@@ -86,7 +107,7 @@ metadata store per `exogenous_data:`. They agree today only by coincidence of
 naming; change the house's CSV and the MPC silently optimizes against the wrong
 forecast.
 
-### S3. Power-flow divergence is swallowed — **OPEN**
+### S3. Power-flow divergence is swallowed — **FIXED** (45cd089)
 `federates/grid/main.py` catches every `runpp` exception, prints, and returns —
 stale voltages stay published and the run reports success. A diverged step must
 either fail the run or be recorded as flagged/NaN.
@@ -127,6 +148,14 @@ ranges. The `cnt`-based IP assignment also caps the federation near 250 federate
 `duration:` is read by nothing in any experiment file. `experiment-MV-LV.yml` omits
 `use_meta_db` / `use_data_db`, so it silently defaults to `json` while the databases
 hold Mongo state — no consistency check.
+
+### H10. Omitting `time_step` crashes composegen — **OPEN**
+`transform.py` defaults a missing `time_step` to the float `1.0`, but CST's
+`HelicsMsg.verify` type-checks against its defaults with exact type equality and
+`period` defaults to the int `1`. So any experiment without an explicit
+`time_step` dies with `Diction type '<class 'float'>' not allowed for period`.
+Latent today because both shipped configs set it to an int. Found while testing
+sub-second offsets, which fail the same check.
 
 ### H3. Key nomenclature — **OPEN** (was issue 6)
 `local-grid/house_0/hems_0/house_0/control` duplicates the house segment, and
