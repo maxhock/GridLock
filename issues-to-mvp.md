@@ -225,7 +225,7 @@ run it, or run it on Windows. Both shipped experiments were re-run from HEAD
 first and both complete with exit 0, so — as in the first audit — the entries
 below are mostly things that pass silently rather than crash.
 
-### R1. CI fails on every push — **OPEN**
+### R1. CI fails on every push — **FIXED**
 `black --line-length=88 --check .` reformats 19 files and `ruff check` reports 14
 errors (unused imports in `federates/house/main.py`, `composegen/transform.py`,
 `databases/infdb/main.py`, `federates/controller/main.py`; `F402` loop-variable
