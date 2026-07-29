@@ -217,6 +217,171 @@ under the test rework (H6).
 
 ---
 
+## Release pass (audited 2026-07-29)
+
+A second audit, this time of the repository as a release artefact rather than of
+simulation results: what a person who is not the author hits when they clone it,
+run it, or run it on Windows. Both shipped experiments were re-run from HEAD
+first and both complete with exit 0, so — as in the first audit — the entries
+below are mostly things that pass silently rather than crash.
+
+### R1. CI fails on every push — **OPEN**
+`black --line-length=88 --check .` reformats 19 files and `ruff check` reports 14
+errors (unused imports in `federates/house/main.py`, `composegen/transform.py`,
+`databases/infdb/main.py`, `federates/controller/main.py`; `F402` loop-variable
+shadowing in `composegen/transform.py:393` and `tools/yaml_graph_tui.py:318`;
+`F841` in `tools/yaml_graph_tui.py:770`). Every workflow run since 2026-07-22 is
+red, so the signal is worth nothing.
+
+Decision: remove the workflow. Formatting stays a pre-commit concern until the
+test rework (H6) gives CI something worth gating on.
+
+### R2. No LICENSE, no tag, no CHANGELOG — **OPEN**
+244 commits, no license file, no tags. Without a license the default is "all
+rights reserved", so nobody outside the group may legally use, publish or build
+on the code — which is the opposite of what a research platform release is for.
+Blocking for a public 1.0.0; see the licence note at the end of this section.
+
+### R3. README describes a workflow that no longer exists — **DEFERRED**
+It documents `config/tmp/docker-compose.yaml`, `num_houses`,
+`federates.house.csv`, recorder output under `data/`, and top-level `broker/`,
+`grid/`, `house/` folders — none of which exist. It also never mentions
+`config/preflight.env`, which `run.sh` requires before anything runs. Explicitly
+out of scope for this pass; to be rewritten together with the 1.0 docs.
+
+### R4. `run.ps1` and `run.sh` have drifted apart — **OPEN**
+`--cleanup-dbs` is actively broken on Windows: the `try` block is empty and only
+carries a `# Main logic below` comment, so the `finally` stops the databases
+immediately and stages 2-4 then run against stopped containers. On top of that
+`-h` exits 0 without printing help, `--timeout` (advertised by `run.sh --help`)
+does not exist, unknown arguments are rejected where bash warns and continues,
+the root-owned `generated/` check is missing, and stage 2 does not pin its exit
+code. A Windows user is running a different program.
+
+### R5. The HEMS stops controlling before the run ends — **OPEN**
+`federates/controller/main.py` publishes `battery_power_w = 0.0` whenever
+`step_idx + N_horizon >= max_steps`, where `max_steps` is the length of the
+house's exogenous dataset and `N_horizon` is 24. The MPC therefore goes silent
+for the last 24 steps of any run whose dataset ends with it — and
+`validate_timeseries_coverage` only demands `covered >= duration`, so a dataset
+sized exactly to the experiment (precisely what that validator asks users to
+provide) yields an MPC that publishes zero for the entire run, at INFO level,
+exit code 0. The shipped configs escape only because `sample_data.csv` holds 7
+days for a 1-day run.
+
+Fix direction: clamp the forecast window to the tail of the dataset — repeat the
+last available sample to fill the horizon — instead of dropping control. The run
+still ends at `end_time`; a dataset longer than the experiment is simply not
+read past it.
+
+### R6. Loads nothing is placed on, and grids whose load table cannot be read — **OPEN**
+Two different situations that currently share one silent code path.
+
+*Unclaimed load indices are legitimate.* `sanitize_net_for_power_flow` zeroes
+every static load at import, so a pandapower load that no federate claims is
+already a zero-power load: the bus stays in the power flow, the topology is
+unchanged, and nothing is published for it. That is the intended way to leave a
+connection point empty and needs no new mechanism (see the dummy-load argument
+below). What it does need is to be *stated* — composegen should report which
+indices ended up unclaimed, so an accidental placement typo does not look like a
+deliberately empty bus.
+
+*A grid with no readable load table is a defect.* `_read_load_list` prints a
+warning and returns `[]` when `custom_metadata` is missing or carries no
+`net_json`; `load_indices` then stays `None` (`load.py:1350` guards on
+`and all_loads`) and `_wire_grid_child` falls through to the branch that wires a
+bare `active_power` key — which the grid's `/load_(\d+)/` regex ignores. The
+whole federation then runs with every load at 0 W and reports success. This is
+B1's failure mode reachable by a different route, and must be a hard error.
+
+**Argument: should composegen auto-generate a zero dummy load federate?** No.
+The point of a dummy load would be to make an empty connection point explicit,
+but it buys nothing that zeroing does not already give: pandapower solves the
+identical network either way, since a load of 0 MW and no load at that index
+produce the same bus injection. Against it: every dummy is a container, a HELICS
+federate, a broker slot and two timeseries keys per step, so a 200-load LV grid
+with a handful of houses would spend most of the federation publishing zeros —
+and a "fill" placement already covers the common case of wanting every load
+driven. It would also make the federate count depend on grid size rather than on
+what the experiment declares, which is exactly the coupling `placement` exists to
+avoid. The cost of *not* having it is that an unclaimed index is invisible, and
+that is better addressed by reporting the unclaimed set at generation time, which
+is what this issue does. Revisit only if a use case appears that needs a real
+timeseries recorded for an empty point.
+
+### R7. A grid-level `pv` is placed on a bus, not a load index — **OPEN**
+`_resolve_placement` is applied to every child of a grid, but only `load` and
+`house` children have their placement resolved against pandapower load indices.
+A `pv` child (`experiment-MV-LV.yml` places `pv_0` at 5) is therefore validated
+against the load table by the claim loop while being wired as if it sat on a bus,
+so it reaches the grid on a key the grid ignores — the same silent path as R6.
+Generation belongs on a load index like everything else that injects power; a PV
+plant is a negative load.
+
+Note that no standalone PV federate exists: `map_params_to_class("pv")` returns
+the *house* image, which would start a house simulation with no `exogenous_data`
+and crash on startup. Placement semantics get fixed here; running one has to
+fail loudly until the federate exists.
+
+### R8. Generic image names, and a compose project called `generated` — **OPEN**
+The generated compose file tags its images `broker`, `grid`, `house`,
+`controller`, `house_player` — names with no owner — and Compose derives the
+project name from the file's directory, so it is always `generated`. Any other
+project on the host that builds an image called `house` or `grid` silently
+swaps out a federate image, and two GridLock checkouts collide on both image
+tags and container names. S6 removed the fixed subnet that blocked concurrent
+runs; this is the other half of the same problem.
+
+### R9. `run.sh` rewrites any experiment path to `/config/<basename>` — **DROPPED**
+`./run.sh ~/elsewhere/foo.yml` runs `config/foo.yml` if that exists. Deliberate:
+the experiment directory is mounted at `/config`, so an experiment outside it
+cannot be read by the containers anyway.
+
+### R10. Stage 2 does not pin its exit code — **OPEN**
+`run.sh` stage 3 passes `--exit-code-from composegen`; stage 2 relies on
+`--abort-on-container-exit` alone propagating infdb's exit code. It does on
+Compose v5.3.1 (verified: a service exiting 3 gives `rc=3` either way), so the
+"run.sh aborts before stage 3 when infdb fails" fix does hold today — but it is
+undocumented behaviour to build an abort path on, and the two stages should not
+differ.
+
+### R11. Credentials in the repo — **OPEN**
+`databases/db-access.txt` is tracked and spells out passwords (`worker`/`worker`,
+`SuperSecret`) plus pgadmin credentials that do not even match
+`config/preflight.env.example` (`admin@gridlock.local`/`admin`) — so it is both a
+credentials file and wrong. They are development defaults rather than live
+secrets, but a public release should carry no password list at all: the file
+should describe how to reach the databases and point at the env file for values.
+`preflight.env.example` separately hardcodes an internal InfDB host,
+`10.162.28.40`.
+
+### R12. infdb never clears `custom_metadata` — **DEFERRED**
+Stale grid entries from earlier runs persist, and `discover_grid_federates`
+prefix-scans that collection for PLZ-only queries, so a run can pick up a grid
+that the current query no longer resolves. Kept deliberately for now: the same
+behaviour is what lets a re-run skip the InfDB round trip.
+
+### Licence note (for R2)
+Three candidates, all compatible with the dependency stack (HELICS is BSD-3,
+pandapower and CST are BSD-3/MIT-family, EnergySim currently ships no licence of
+its own — worth resolving before release, since an unlicensed dependency binds
+tighter than anything chosen here):
+
+- **MIT** — shortest, permissive, imposes nothing on users. Best if the goal is
+  maximum uptake and citation.
+- **BSD-3-Clause** — same permissions as MIT plus a no-endorsement clause; it is
+  what HELICS and pandapower use, so it is the least surprising choice for a
+  co-simulation tool and keeps the whole stack under one familiar licence.
+- **Apache-2.0** — permissive plus an explicit patent grant and contributor
+  terms. Best if the institution cares about patent protection or expects
+  outside contributions.
+
+Copyleft (GPL/AGPL) is possible but would restrict the industrial partners who
+typically use grid co-simulation tooling, so it is only worth it if keeping
+derivative work open is an explicit goal.
+
+---
+
 ## Fixed
 
 1. mongodb volume not clean, so mongodb does not start - FIXED: deleted volume gridlock2_mongo_data
