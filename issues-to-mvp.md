@@ -249,7 +249,15 @@ It documents `config/tmp/docker-compose.yaml`, `num_houses`,
 `config/preflight.env`, which `run.sh` requires before anything runs. Explicitly
 out of scope for this pass; to be rewritten together with the 1.0 docs.
 
-### R4. `run.ps1` and `run.sh` have drifted apart — **OPEN**
+### R4. `run.ps1` and `run.sh` have drifted apart — **FIXED**
+`--cleanup-dbs` now wraps the actual stages, `--timeout` is implemented with a
+child process and the same 124 convention, and help, unknown-argument handling,
+the ownership check and stage 2's `--exit-code-from` all match. Verified in a
+`mcr.microsoft.com/powershell` container: the script parses, `--help` prints and
+exits 0, and `--timeout 60 config/experiment-LV.yml extra-arg` consumes the
+timeout value, keeps the experiment and reports the stray argument without
+aborting.
+
 `--cleanup-dbs` is actively broken on Windows: the `try` block is empty and only
 carries a `# Main logic below` comment, so the `finally` stops the databases
 immediately and stages 2-4 then run against stopped containers. On top of that
