@@ -328,10 +328,14 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
     # Generate and store run metadata for legacy mode
     from transform import generate_run_metadata
     
+    # Legacy configs are not run through `process_general_config`, so the
+    # times here are still the raw numeric offsets from the YAML. Keep them
+    # numeric: `_to_iso_wallclock` passes strings through untouched, so
+    # stringifying them first would store "0"/"82800" instead of wall clock.
     general_cfg = {
         "name": conf.federates.grid.get("name", "GridLock"),
-        "start_time": str(conf.general.get("start_time", "0")),
-        "end_time": str(conf.general.get("end_time", "0")),
+        "start_time": conf.general.get("start_time") or 0,
+        "end_time": conf.general.get("end_time") or 0,
         "use_meta_db": "json",
         "use_data_db": "postgres",
     }
@@ -1410,11 +1414,25 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 )
 
                 explicit_load_indices: set[int] = set()
+                fill_children: list[str] = []
                 for child in children:
                     if child.data.get("class") not in LOAD_PLACED_CLASSES:
                         continue
                     placement = child.data.get("placement")
                     if placement == "fill":
+                        # 'fill' resolves to every load not claimed by an
+                        # explicit placement, so a second one resolves to the
+                        # same set and both federates would publish on the
+                        # same load keys.
+                        fill_children.append(child.identifier)
+                        if len(fill_children) > 1:
+                            raise ValueError(
+                                f"Grid '{fed_name}' has more than one child "
+                                f"with placement 'fill' "
+                                f"({', '.join(sorted(fill_children))}). Only "
+                                f"one federate can fill the remaining loads; "
+                                f"give the others explicit load indices."
+                            )
                         continue
                     claimed = set(_resolve_placement(placement, all_loads))
                     overlap = explicit_load_indices & claimed
