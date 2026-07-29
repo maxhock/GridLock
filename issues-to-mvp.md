@@ -288,7 +288,16 @@ last available sample to fill the horizon — instead of dropping control. The r
 still ends at `end_time`; a dataset longer than the experiment is simply not
 read past it.
 
-### R6. Loads nothing is placed on, and grids whose load table cannot be read — **OPEN**
+### R6. Loads nothing is placed on, and grids whose load table cannot be read — **FIXED**
+`_read_load_list` now raises for a missing entry or a missing `net_json`,
+`_resolve_load_placement` refuses to resolve a load-placed child to nothing, and
+`_report_unclaimed_loads` names the indices that stay at 0 W. Verified by
+running `experiment-local-grid.yml` with the fill load player removed: composegen
+reports "11 of 13 load(s) in 'local-grid' are not driven by any federate and stay
+at 0 W: [0, 1, 2, 3, 5, 7, 8, 9, 10, 11, 12]", and the run completes with the two
+houses as the only sources of load. Leaving connection points empty therefore
+works as intended, and no dummy federates were needed to do it.
+
 Two different situations that currently share one silent code path.
 
 *Unclaimed load indices are legitimate.* `sanitize_net_for_power_flow` zeroes

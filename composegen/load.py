@@ -24,6 +24,12 @@ RUNNER_FEDERATES = {
     "house_player",
 }
 
+# Classes that occupy a pandapower load index rather than sitting on a bare
+# bus. The grid identifies incoming power by the `load_<idx>` segment of the
+# HELICS key, so anything that injects or draws power has to be placed here to
+# reach the power flow at all.
+LOAD_PLACED_CLASSES = {"load", "house"}
+
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
     "recorder": (
@@ -595,12 +601,17 @@ def _read_load_list(
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         meta_data = mgr.read("custom_metadata", grid_fed_name)
 
+    # A missing or contentless entry is a defect in the infdb stage, not an
+    # empty grid. Warning and returning [] let the caller wire its children on
+    # keys the grid ignores, so the whole federation ran with every load at
+    # 0 W and reported success - the same failure mode as B1, reached from a
+    # different direction.
     if not meta_data:
-        print(
-            f"Warning: custom_metadata '{grid_fed_name}' not found "
-            f"in backend '{use_meta_db}'."
+        raise ValueError(
+            f"No custom_metadata entry '{grid_fed_name}' in backend "
+            f"'{use_meta_db}'. The grid's pandapower net is written there by "
+            f"the infdb stage; re-run it before composegen."
         )
-        return []
 
     net_json_raw = meta_data.get("net_json")
     net_json_str = (
@@ -610,8 +621,10 @@ def _read_load_list(
     )
 
     if not net_json_str:
-        print(f"Warning: no net_json in custom_metadata '{grid_fed_name}'.")
-        return []
+        raise ValueError(
+            f"custom_metadata entry '{grid_fed_name}' carries no 'net_json', "
+            f"so the grid has no pandapower net to place federates on."
+        )
 
     net_dict = json.loads(net_json_str)
     load_obj = net_dict.get("_object", {}).get("load", {})
@@ -660,6 +673,66 @@ def _resolve_placement(
         return list(placement)
 
     raise ValueError(f"Unsupported placement value: {placement!r}")
+
+
+def _resolve_load_placement(
+    placement: Any,
+    all_loads: list[tuple[int, str, int]],
+    child_id: str,
+    child_class: str,
+    grid_fed_name: str,
+    exclude: set[int] | None = None,
+) -> list[int]:
+    """Resolve a load-placed child's placement, refusing to resolve to nothing.
+
+    ``_resolve_placement`` returns an empty list for ``"fill"`` against a grid
+    with no loads, or against one whose loads are all claimed by siblings. The
+    caller used to accept that and wire the child on a bare ``active_power``
+    key, which the grid ignores - so the federate ran, published, and moved no
+    power. Both cases are configuration errors and are named as such here.
+    """
+    if not all_loads:
+        raise ValueError(
+            f"'{child_id}' ({child_class}) has to be placed on a pandapower "
+            f"load index, but grid '{grid_fed_name}' has no loads in its net."
+        )
+
+    load_indices = _resolve_placement(placement, all_loads, exclude=exclude)
+
+    if not load_indices:
+        raise ValueError(
+            f"Placement {placement!r} for '{child_id}' ({child_class}) in grid "
+            f"'{grid_fed_name}' resolved to no pandapower load index. Every "
+            f"load in the grid is already claimed by a sibling federate: "
+            f"{sorted(exclude or set())}."
+        )
+
+    return load_indices
+
+
+def _report_unclaimed_loads(
+    grid_fed_name: str,
+    all_loads: list[tuple[int, str, int]],
+    claimed: set[int],
+) -> None:
+    """Name the load indices no federate drives.
+
+    Leaving a connection point empty is supported: the grid federate zeroes
+    every static load at import, so an unclaimed index is already a zero-power
+    load and needs no dummy federate. But an unclaimed index looks exactly
+    like a placement typo, so say which ones they are rather than letting the
+    run report a lower total load than expected without comment.
+    """
+    unclaimed = sorted({idx for idx, _, _ in all_loads} - claimed)
+
+    if not unclaimed:
+        return
+
+    shown = unclaimed if len(unclaimed) <= 20 else unclaimed[:20] + ["..."]
+    print(
+        f"  {len(unclaimed)} of {len(all_loads)} load(s) in '{grid_fed_name}' "
+        f"are not driven by any federate and stay at 0 W: {shown}"
+    )
 
 
 def _expand_child_instances(
@@ -1326,6 +1399,8 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                 explicit_load_indices: set[int] = set()
                 for child in children:
+                    if child.data.get("class") not in LOAD_PLACED_CLASSES:
+                        continue
                     placement = child.data.get("placement")
                     if placement == "fill":
                         continue
@@ -1338,6 +1413,8 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                         )
                     explicit_load_indices.update(claimed)
 
+                claimed_load_indices: set[int] = set()
+
                 for child in children:
                     child_data = child.data
                     child_class = child_data.get("class")
@@ -1347,11 +1424,17 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
                     load_indices: list[int] | None = None
 
-                    if child_class in ("load", "house") and all_loads:
+                    if child_class in LOAD_PLACED_CLASSES:
                         placement = child_data.get("placement")
-                        load_indices = _resolve_placement(
-                            placement, all_loads, exclude=explicit_load_indices
+                        load_indices = _resolve_load_placement(
+                            placement,
+                            all_loads,
+                            child.identifier,
+                            child_class,
+                            fed_name,
+                            exclude=explicit_load_indices,
                         )
+                        claimed_load_indices.update(load_indices)
 
                         print(
                             f"  Resolved placement {placement!r} to "
@@ -1422,6 +1505,8 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                             f"  Added child federate: {child_fed_name} "
                             f"({child_class})"
                         )
+
+                _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
 
         # Phase 2: layout-based and already-expanded nodes.
         for node in tree.all_nodes():
