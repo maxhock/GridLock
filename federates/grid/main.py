@@ -82,13 +82,13 @@ class GridFederate(Federate):
         self.net = net
 
     def update_internal_model(self) -> None:
-        print(f"\n=== Time: {self.granted_time} ===")
-
-        # 1. Apply received load values
-        # House federates publish in W / VAr; pandapower expects MW / MVAr.
+        # 1. Apply received load values (filter out HELICS sentinel -1e+49)
         for key, value in self.data_from_federation.get("inputs", {}).items():
             idx = _parse_load_index(key)
             if value is None or idx is None:
+                continue
+            # Skip HELICS sentinel values (no data received yet)
+            if abs(value) > 1e40:
                 continue
             if key.endswith("/active_power"):
                 self.net.load.at[idx, "p_mw"] = float(value) / 1e6
@@ -96,12 +96,29 @@ class GridFederate(Federate):
                 self.net.load.at[idx, "q_mvar"] = float(value) / 1e6
 
         # 2. Run power flow
+        #
+        # A diverged power flow must fail the run. Swallowing it leaves the
+        # previous step's voltages in data_to_federation, which are then
+        # published as if they were current - the co-simulation completes
+        # and reports success while every downstream federate reacts to a
+        # grid state that was never solved.
         try:
-            pp.runpp(self.net, numba=False)
-            print("Power flow converged.")
-        except Exception as e:
-            print(f"Power flow failed: {e}")
-            return
+            pp.runpp(self.net, numba=True)
+        except Exception as exc:
+            p_total_w = float(self.net.load["p_mw"].sum()) * 1e6
+            q_total_var = float(self.net.load["q_mvar"].sum()) * 1e6
+            raise RuntimeError(
+                f"Power flow did not converge at simulation time "
+                f"{self.granted_time}s for grid '{self.federate_name}' "
+                f"(applied load: P={p_total_w:.1f} W, Q={q_total_var:.1f} VAr "
+                f"across {len(self.net.load)} loads). pandapower reported: "
+                f"{exc}"
+            ) from exc
+
+        print(
+            f"Power flow converged at time {self.granted_time} "
+            f"(applied P={float(self.net.load['p_mw'].sum()) * 1e6:.1f} W)."
+        )
 
         # 3. Publish per-load bus voltages
         for key in self.data_to_federation.get("publications", {}):
@@ -111,7 +128,12 @@ class GridFederate(Federate):
             bus = int(self.net.load.at[idx, "bus"])
             v_pu = float(self.net.res_bus.at[bus, "vm_pu"])
             self.data_to_federation["publications"][key] = v_pu
-            print(f"  Published {key} = {v_pu:.4f} pu")
+
+    def on_enter_executing_mode(self) -> None:
+        """Run initial power flow at t=0 with load values published by load players."""
+        self.get_data_from_federation()
+        self.update_internal_model()
+        self.send_data_to_federation()
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +214,10 @@ def load_net_from_metadata(
             f"Ensure infdb data setup has run."
         )
 
-    net = cast(pp.pandapowerNet, pp.from_json_string(data["net_json"]))
+    net_json = data.get("net_json")
+    if not net_json:
+        raise ValueError(f"Grid metadata for '{federate_name}' has no net_json.")
+    net = cast(pp.pandapowerNet, pp.from_json_string(net_json))
     sanitize_net_for_power_flow(net)
     print(f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads")
     return net

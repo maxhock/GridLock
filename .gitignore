@@ -1,5 +1,4 @@
 config/tmp/
-data/output/
 __pycache__/
 .venv/
 generated/*

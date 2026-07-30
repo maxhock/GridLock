@@ -83,8 +83,6 @@ class GridFederate(Federate):
 
     def update_internal_model(self):
         """Run power flow simulation for current timestep."""
-        print(f"\n=== Time: {self.granted_time} ===")
-
         # Read subscriptions from CST's data structure
         for pyp_idx in self.load_indices:
             sub_key = f"node_{pyp_idx}/P"
@@ -95,17 +93,15 @@ class GridFederate(Federate):
 
         try:
             self.pypsa_net.run_pf()
-            print("Power flow executed.")
+            print(f"Power flow converged at time {self.granted_time}.")
         except Exception as e:
-            print(f"Power flow failed: {e}")
+            print(f"Power flow failed at time {self.granted_time}: {e}")
             return
         for pyp_idx in self.ext_grid_indices:
             p_mw = self.pypsa_net.res_ext_grid()
             self.data_to_federation["publications"][
                 f"Grid/transformer_{self.ext_grid_idx}_power"
             ] = float(p_mw)
-            print(
-                f"Published ext_grid {self.ext_grid_idx} p_mw: {p_mw}")
 
 
 def parse_args():

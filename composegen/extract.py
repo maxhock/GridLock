@@ -184,14 +184,15 @@ def _extract_tree_config(
         if layout and location:
             raise ValueError(
                 f"Grid '{grid_id}' defines both 'layout' and 'location'. "
-                f"Please define only one."
+                "Please define only one."
             )
 
         if layout:
             layout_path = data_input_path / layout
-            buses = _read_layout_buses(layout_path)
-            grid_nodes[grid_id] = buses
-            print(f"Loaded {len(buses)} buses for grid '{grid_id}' from {layout_path}")
+            if not layout_path.exists():
+                raise FileNotFoundError(f"Grid layout file not found: {layout_path}")
+            grid_nodes[grid_id] = None
+            print(f"Grid '{grid_id}' uses local layout: {layout_path}")
 
         elif location:
             validate_location_queries(location, grid_id)

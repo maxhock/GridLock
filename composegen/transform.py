@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import copy
+import os
+import yaml
 import pandas as pd
+from datetime import datetime
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from omegaconf import DictConfig, OmegaConf
@@ -24,7 +28,15 @@ class TransformedConfig:
     general_cfg: dict[str, Any] | None = None
     output_path: Any = None
     data_input_path: Any = None
+    config_path: str | None = None
 
+
+# Steps of load/PV/price forecast the HEMS optimises over. composegen owns this
+# number: it decides how much exogenous data a house with a HEMS needs, and it
+# is passed to the controller federate on the command line so the two cannot
+# disagree. federates/controller/main.py only falls back to its own default
+# when run by hand.
+MPC_FORECAST_HORIZON_STEPS = 24
 
 SUPPORTED_TREE_CLASSES = {
     "grid",
@@ -102,6 +114,7 @@ def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
         conf=conf,
         output_path=extracted.output_path,
         data_input_path=extracted.data_input_path,
+        config_path=str(extracted.config_path),
     )
 
 
@@ -280,16 +293,40 @@ def validate_tree(tree: Tree) -> None:
                 )
 
         elif node_class == "load":
-            if not data.get("electrical_load") and not data.get("heat_load"):
+            electrical_load = data.get("electrical_load")
+            heat_load = data.get("heat_load")
+
+            if not electrical_load and not heat_load:
                 validation_errors.append(
                     f"[Load] Node '{node.tag}' ({node.identifier}) requires "
                     f"'electrical_load' or 'heat_load'."
+                )
+
+            elif not electrical_load:
+                validation_errors.append(
+                    f"[Load] Node '{node.tag}' ({node.identifier}) defines only "
+                    f"'heat_load'. Heat loads are not implemented yet; give it "
+                    f"an 'electrical_load' CSV."
+                )
+
+            elif not str(electrical_load).endswith(".csv"):
+                validation_errors.append(
+                    f"[Load] Node '{node.tag}' ({node.identifier}) requests "
+                    f"electrical_load '{electrical_load}'. Standard load "
+                    f"profiles are not implemented yet; give it a CSV file in "
+                    f"the data input directory."
                 )
 
         elif node_class == "house":
             if not data.get("model"):
                 validation_errors.append(
                     f"[House] Node '{node.tag}' ({node.identifier}) requires 'model'."
+                )
+
+            if not data.get("exogenous_data"):
+                validation_errors.append(
+                    f"[House] Node '{node.tag}' ({node.identifier}) requires "
+                    f"'exogenous_data'."
                 )
 
         elif node_class == "pv":
@@ -331,15 +368,146 @@ def validate_tree(tree: Tree) -> None:
         raise ValueError("Configuration validation failed.")
 
 
+def _forecast_margin_seconds(tree: Tree, node, time_step: float) -> float:
+    """Extra coverage a house needs beyond the run itself, in seconds.
+
+    A house controlled by a HEMS is read past the end of the run: at the last
+    simulation step the MPC still asks for a full window of forecast. Without
+    the margin the solver is handed a short window, which it cannot use - so
+    the requirement belongs here, before anything starts, rather than being
+    papered over at runtime.
+    """
+    if node.data.get("class") != "house":
+        return 0.0
+
+    has_controller = any(
+        child.data.get("class") in ("hems", "controller")
+        for child in tree.children(node.identifier)
+    )
+
+    return MPC_FORECAST_HORIZON_STEPS * time_step if has_controller else 0.0
+
+
+def validate_timeseries_coverage(
+    tree: Tree, general_cfg: dict, data_input_path: Path
+) -> None:
+    """Ensure every timeseries CSV covers everything that will be read from it.
+
+    Without this, a load-player federate silently holds its last known
+    value once the CSV runs out, producing a flat/stale load for the
+    remainder of the run instead of failing.
+
+    A CSV longer than needed is fine and stays untouched: federates index into
+    it by simulation step, so the run simply stops before the surplus.
+    """
+    start_time = general_cfg.get("start_time") or 0
+    end_time = general_cfg.get("end_time")
+
+    if not isinstance(start_time, (int, float)) or not isinstance(end_time, (int, float)):
+        return
+
+    duration = float(end_time) - float(start_time)
+    # process_general_config has not run yet, so apply the same default it does.
+    time_step = float(general_cfg.get("time_step") or 1)
+    validation_errors: list[str] = []
+
+    fields_by_class = {
+        "load": ("electrical_load", "heat_load"),
+        "house": ("exogenous_data",),
+    }
+
+    for node in tree.all_nodes():
+        data = node.data
+        fields = fields_by_class.get(data.get("class"))
+        if not fields:
+            continue
+
+        margin = _forecast_margin_seconds(tree, node, time_step)
+        required = duration + margin
+
+        for field in fields:
+            csv_name = data.get(field)
+            if not csv_name or not str(csv_name).endswith(".csv"):
+                continue
+
+            csv_path = data_input_path / csv_name
+            if not csv_path.exists():
+                validation_errors.append(
+                    f"[Timeseries] Node '{node.tag}' ({node.identifier}): "
+                    f"'{field}' file '{csv_path}' not found."
+                )
+                continue
+
+            timestamps = pd.read_csv(csv_path, usecols=["timestamp"])["timestamp"]
+
+            if timestamps.dtype == object:
+                timestamps = pd.to_datetime(timestamps).astype("int64") // 10**9
+
+            first_ts = float(timestamps.min())
+            if first_ts > 1_000_000:
+                timestamps = timestamps - first_ts
+
+            covered = float(timestamps.max())
+
+            if covered < required:
+                because = (
+                    f"the experiment runs for {duration:.0f}s "
+                    f"(start_time={start_time}, end_time={end_time})"
+                )
+
+                if margin:
+                    because += (
+                        f" and its HEMS needs a further {margin:.0f}s "
+                        f"({MPC_FORECAST_HORIZON_STEPS} steps of "
+                        f"{time_step:.0f}s) of forecast at the last step"
+                    )
+
+                validation_errors.append(
+                    f"[Timeseries] Node '{node.tag}' ({node.identifier}): "
+                    f"'{field}' file '{csv_name}' only covers {covered:.0f}s "
+                    f"but {required:.0f}s are needed - {because}. Provide a "
+                    f"longer timeseries or shorten the experiment duration."
+                )
+
+    if validation_errors:
+        print("Timeseries coverage invalid:")
+
+        for error in validation_errors:
+            print(f" - {error}")
+
+        raise ValueError("Timeseries coverage validation failed.")
+
+
 def process_general_config(general_cfg: dict) -> dict:
     if "end_time" not in general_cfg or general_cfg["end_time"] is None:
         raise ValueError("[General] Missing required field 'end_time'.")
 
-    if "start_time" not in general_cfg or general_cfg["start_time"] is None:
+    if not general_cfg.get("start_time"):
         general_cfg["start_time"] = "2023-01-01T00:00:00"
+    elif isinstance(general_cfg["start_time"], (int, float)):
+        base_ts = pd.Timestamp("2023-01-01T00:00:00")
+        general_cfg["start_time"] = (base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))).isoformat()
 
     if "time_step" not in general_cfg or general_cfg["time_step"] is None:
-        general_cfg["time_step"] = 1.0
+        general_cfg["time_step"] = 1
+
+    # CST's HelicsMsg.verify type-checks every value against its default with
+    # exact type equality, and `period` defaults to the int 1. A float here -
+    # including the old 1.0 default used when time_step was omitted - fails
+    # deep inside composegen with "Diction type '<class 'float'>' not allowed
+    # for period". Whole-number floats are accepted and narrowed; genuinely
+    # fractional ones are unsupported, so say so here rather than there.
+    time_step = general_cfg["time_step"]
+
+    if isinstance(time_step, float) and time_step.is_integer():
+        general_cfg["time_step"] = int(time_step)
+
+    elif not isinstance(time_step, int):
+        raise ValueError(
+            f"[General] 'time_step' must be a whole number of seconds, got "
+            f"{time_step!r}. HELICS periods are configured as integers here, "
+            f"so sub-second time steps are not supported."
+        )
 
     start_time = general_cfg["start_time"]
     end_time = general_cfg["end_time"]
@@ -427,6 +595,7 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
     expand_grid_nodes(tree, extracted.grid_nodes)
 
     general_cfg = extracted.raw_config.get("general", {})
+    validate_timeseries_coverage(tree, general_cfg, extracted.data_input_path)
     general_cfg = process_general_config(general_cfg)
 
     wire_pub_sub(tree)
@@ -437,7 +606,41 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
         general_cfg=general_cfg,
         output_path=extracted.output_path,
         data_input_path=extracted.data_input_path,
+        config_path=str(extracted.config_path),
     )
+
+
+# ---------------------------------------------------------------------------
+# Run metadata generation
+# ---------------------------------------------------------------------------
+
+def get_git_commit() -> str:
+    """Get git commit hash from environment variable."""
+    return os.getenv("GIT_COMMIT", "unknown")
+
+
+def generate_run_metadata(experiment_path: str, general_cfg: dict) -> dict:
+    """Generate metadata for this run."""
+    now = datetime.now()
+    timestamp_iso = now.strftime("%Y%m%d_%H%M%S")
+    timestamp_unix = int(now.timestamp())
+    
+    # Read full experiment file as raw YAML string
+    with open(experiment_path, 'r') as f:
+        experiment_yaml_raw = f.read()
+    
+    analysis_name = general_cfg.get('name', 'GridLock')
+    scenario_name = f"{analysis_name}_{timestamp_iso}"
+    
+    return {
+        "timestamp_iso": timestamp_iso,
+        "timestamp_unix": timestamp_unix,
+        "scenario_name": scenario_name,
+        "analysis": analysis_name,
+        "git_commit": get_git_commit(),
+        "experiment_path": experiment_path,
+        "experiment_yaml_raw": experiment_yaml_raw,
+    }
 
 
 # ---------------------------------------------------------------------------

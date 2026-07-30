@@ -16,22 +16,7 @@ RUN pip install --no-cache-dir helics[cli]
 COPY main.py .
 
 
-# --- Test stage ---
-FROM base AS test
-# Install test dependencies
-RUN pip install --no-cache-dir pytest pytest-mock
-# Copy test files
-COPY test_main.py .
-# Always run tests in this stage
-RUN pytest --maxfail=1 --disable-warnings -v
-
 # --- Final image ---
 FROM base AS final
 # Default command: run via HELICS runner
 CMD ["helics", "run", "--path=runner.json"]
-
-# --- Usage ---
-# To run tests during build:
-# docker build --target test --build-arg RUN_TESTS=true -t grid-test .
-# To build production image:
-# docker build --target final -t grid-prod .

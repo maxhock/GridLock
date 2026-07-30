@@ -46,6 +46,20 @@ def _infer_source_dt_seconds(timestamps: pd.Series) -> int:
     return int(round(float(positive_deltas.mode().iloc[0])))
 
 
+def write_exogenous_csv_from_metadata(federate_name: str, csv_text: str) -> str:
+    """Materialize a house's exogenous CSV (fetched from the CST metadata store)
+    to a local scratch file so ``prepare_aligned_timeseries`` can consume it.
+
+    The dataset lives in the metadata store, not a mounted file, so this just
+    gives the existing file-based alignment/caching logic something to read.
+    """
+    output_dir = Path("/tmp/gridlock_exogenous")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{federate_name.replace('/', '_')}.csv"
+    output_path.write_text(csv_text)
+    return str(output_path)
+
+
 def prepare_aligned_timeseries(
     source_path: str,
     target_dt_seconds: int,

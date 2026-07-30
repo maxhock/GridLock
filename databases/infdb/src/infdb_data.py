@@ -126,6 +126,23 @@ def resolve_grid_queries(
             net_list.append((federate_name, net_json_str))
             log.info(f"  Resolved {federate_name} ({bus_count} buses)")
 
+    if not net_list:
+        query_details = []
+        for query in queries:
+            plz = query["plz"]
+            kcid = query.get("kcid")
+            bcid = query.get("bcid")
+            if kcid is not None and bcid is not None:
+                query_details.append(f"PLZ {plz}, KCID {kcid}, BCID {bcid}")
+            else:
+                query_details.append(f"PLZ {plz}")
+        
+        raise ValueError(
+            f"No grids found in InfDB pylovo.grid_result for location queries: "
+            f"{', '.join(query_details)}. "
+            f"Verify PLZ codes exist in the database."
+        )
+
     return net_list
 
 

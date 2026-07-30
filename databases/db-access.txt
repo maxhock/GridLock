@@ -1,19 +1,52 @@
-mongo-db:
-1. browser: http://localhost:8081
-2. navigate to copper
+Reaching the CST databases
+==========================
 
-postgres timescale database:
-1. browser: http://localhost:5050
-2. enter pgadmin credentials: 
-  username: user@domain.com
-  password: SuperSecret
-3. Create Server:
-  Name: GridLock
-  Connection (from wsl):
-    Host: database
-    Port: 5432
+All credentials live in config/preflight.env (copy it from
+config/preflight.env.example and adjust for your machine). Nothing in this file
+repeats a password: look the values up there, or load them into a shell with
+`set -a; source config/preflight.env; set +a` and use the variables below as
+written.
+
+run.sh starts only the two databases. The web front-ends sit behind a Compose
+profile and have to be asked for:
+
+  docker compose --env-file config/preflight.env \
+    -f docker-compose.preflight.yaml --profile cst-tools up -d pgadmin mongoexpress
+
+Mongo - metadata (scenarios, federations, custom_metadata)
+----------------------------------------------------------
+  mongo-express:  http://localhost:8081
+  Database:       $CST_MONGO_DB
+  Direct client:  mongosh "mongodb://localhost:$CST_MONGO_PORT" \
+                    -u "$CST_MONGO_ROOT_USERNAME" -p
+
+Timescale/Postgres - timeseries (every published HELICS value)
+--------------------------------------------------------------
+  pgAdmin:        http://localhost:5050
+                  Log in with $CST_POSTGRES_ADMIN_EMAIL / $CST_POSTGRES_ADMIN_PASSWORD.
+  Direct client:  psql -h localhost -p "$CST_POSTGRES_PORT" \
+                    -U "$CST_POSTGRES_USER" -d "$CST_POSTGRES_DB"
+
+  Registering the server inside pgAdmin - it runs in the Compose network, so it
+  reaches the database by service name rather than localhost:
+    Name:                 GridLock
+    Host:                 database
+    Port:                 5432
     Maintenance database: postgres
-    Username: worker
-    Password: worker
-4. Schema: <name>Analysis
-5. Tables: e.g. hdt_double
+    Username / Password:  $CST_POSTGRES_USER / $CST_POSTGRES_PASSWORD
+
+Finding a run's data
+--------------------
+  Schema: "<general.name>Analysis"   e.g. "TestGridAnalysis"
+  Tables: hdt_double, hdt_string, ... one per HELICS value type
+  Columns: scenario, federate, data_name, data_value, sim_time, real_time
+
+  Every run has its own scenario, named <general.name>_<YYYYMMDD_HHMMSS>, so
+  one experiment's runs are told apart by that column:
+
+    select scenario, count(*)
+    from "TestGridAnalysis".hdt_double
+    group by scenario order by scenario desc;
+
+  The matching document in Mongo's scenarios collection carries the git commit
+  and the full experiment YAML the run was generated from.

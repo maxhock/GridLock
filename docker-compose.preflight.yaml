@@ -34,7 +34,7 @@ services:
       - sim_net
 
   mongodb:
-    image: mongodb/mongodb-community-server:7.0-ubuntu2204
+    image: mongodb/mongodb-community-server:8.0.7-ubuntu2204 
     ports:
       - "${CST_MONGO_PORT}:27017"
     expose:
@@ -114,6 +114,9 @@ services:
     build:
       context: ./databases/infdb
       dockerfile: Dockerfile
+    # Write generated/ as the invoking user rather than root, so the files
+    # this produces stay editable and removable without sudo.
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:
@@ -124,8 +127,10 @@ services:
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017
+      CONFIG_PATH: ${CONFIG_PATH:-/config/experiment-LV.yml}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/databases/infdb/configs:/app/configs:ro
+      - ${HOST_WORKSPACE_FOLDER:-.}/data:/data:ro
       - ${HOST_WORKSPACE_FOLDER:-.}/generated:/app/generated
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config:ro
     extra_hosts:
@@ -139,6 +144,9 @@ services:
     build:
       context: ./composegen
       dockerfile: Dockerfile
+    # Write generated/docker-compose.yaml as the invoking user rather than
+    # root, so it stays editable and removable without sudo.
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
     env_file:
       - ${PREFLIGHT_ENV_FILE:-./config/preflight.env}
     depends_on:
@@ -151,11 +159,13 @@ services:
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017
+      CONFIG_PATH: ${CONFIG_PATH:-/config/experiment-LV.yml}
       CST_BROKER_HOST: ${CST_BROKER_HOST}
       CST_RUNTIME_POSTGRES_HOST: ${CST_BROKER_HOST}
       CST_RUNTIME_POSTGRES_PORT: ${CST_POSTGRES_PORT}
       CST_RUNTIME_MONGO_HOST: mongodb://${CST_BROKER_HOST}
       CST_RUNTIME_MONGO_PORT: ${CST_MONGO_PORT}
+      GIT_COMMIT: ${GIT_COMMIT:-unknown}
     volumes:
       - ${HOST_WORKSPACE_FOLDER:-.}/config:/config
       - ${HOST_WORKSPACE_FOLDER:-.}/data:/data
