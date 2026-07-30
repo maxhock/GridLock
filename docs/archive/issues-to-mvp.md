@@ -1,5 +1,15 @@
 # Issues to MVP / 1.0.0
 
+> **Archived 2026-07-30.** This punch list is closed out; the work is issue #54, merged into
+> `main`. It is kept for the reports and the reasoning, not as a live list — do not add to it.
+> Everything still open here, plus the findings of the review of the CST-migration diff, is
+> tracked in **issue #56 (Post-MVP)**.
+>
+> One correction, because it misleads: **H1 claims the legacy composegen path is unreachable.
+> It is not.** `extract.py:230` tests for `federates` *before* `federation`, so
+> `config/experiment.yml` routes into `_extract_legacy_config` → `load_legacy_outputs` and
+> generates federates that die on startup. See #56.
+
 Status legend: **OPEN** / **FIXED** / **PARTIALLY FIXED** / **DEFERRED** / **DROPPED**
 
 Audited end-to-end on 2026-07-28 by running `./run.sh config/experiment-LV.yml` and
