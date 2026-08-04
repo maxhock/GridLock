@@ -176,6 +176,13 @@ A house is expanded into one federate per load index it occupies; a load player 
 Input CSVs and grid workbooks live in `data/input/`.
 Every timeseries CSV must cover the full simulated duration — composegen checks this up front and refuses to start otherwise, rather than letting a federate replay its last known value once the data runs out.
 
+> **The physical parameters above do not reach a federate yet.**
+> `model`, `capacity`, `power`, `max_production`, `control_strategy` and `accessible` are validated for presence and then discarded.
+> Every house simulates the same hardcoded two-room RC network with a fixed battery and heat pump, whatever the YAML says.
+> The topology — which federates exist, where they sit on the grid, and what data they read — is fully config-driven; the device sizing is not.
+
+[`docs/experiment-reference.md`](docs/experiment-reference.md) is the full reference: every key, the required CSV columns per federate class, and the HELICS keys a run writes.
+
 `tools/yaml_graph_tui.py` renders an experiment file as a browsable tree:
 
 ```bash
@@ -202,7 +209,7 @@ composegen/    Federation and compose-file generator (extract → transform → 
 config/        Experiment YAMLs and the preflight environment file
 data/input/    Grid workbooks and timeseries CSVs
 databases/     CST database stack (cstdb) and the InfDB grid resolver (infdb)
-docs/          Notes and archived issue lists
+docs/          Experiment reference and archived issue lists
 federates/     One directory per federate class, each with its own Dockerfile
 generated/     Generated compose file and metadata (git-ignored)
 tools/         Standalone helper scripts

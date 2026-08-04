@@ -91,6 +91,8 @@ run in order by `main.py`:
   CSVs that are too short, `process_general_config` normalises the times, and
   `wire_pub_sub` derives each node's publications/subscriptions from its parent/child
   pairs. Produces a `TransformedConfig`.
+  `wire_pub_sub` is not where a working federation's keys come from, though — see
+  below.
 - `load.py` — **resolve and emit**. Reads the nets infdb wrote, resolves `placement`
   onto pandapower load indices, registers the CST groups, stores each house's
   exogenous CSV, and writes the federation, the scenario document and
@@ -105,6 +107,14 @@ branches of `load.py` import it and call it themselves.
 every database access is in `load.py`. That is what makes a bad experiment fail before
 anything exists to clean up, and it is the rule to preserve: new validation belongs in
 `transform.py`, new output in `load.py`.
+
+Topic wiring is split across both phases, and the transform half is the *fallback*.
+`wire_pub_sub` records topics on every tree node, but `load.py` registers the real CST
+groups itself in `_wire_grid_child` — per `load_<idx>` keys for anything placed on a
+load, plus the house `state` and HEMS `control` groups — and marks those nodes handled.
+`_add_generic_tree_pubsub_groups` then registers `wire_pub_sub`'s topics for whatever is
+left over. In both working experiments that is nothing, so changing `wire_pub_sub` alone
+changes no key a federate actually sees.
 
 Placement breaks the phase split, and looks misplaced until you need to change it:
 resolving it needs the grid's load table, which exists only once `_read_load_list` has
@@ -130,6 +140,10 @@ string. Interpolation only works in legacy configs.
 
 `config/experiment-LV.yml` (InfDB location) and `config/experiment-local-grid.yml`
 (local layout, houses + HEMS) are the two working tree-mode references.
+
+`docs/experiment-reference.md` documents the tree-mode schema for users: every key, the
+required CSV columns per class, and the HELICS keys a run emits. Keep it in step when
+you change `validate_tree`, `_wire_grid_child`, or what a federate reads from a CSV.
 
 ### How placement and HELICS keys fit together
 
