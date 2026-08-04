@@ -87,6 +87,18 @@ docker compose -f generated/docker-compose.yaml down --remove-orphans
 3. **composegen** — read the experiment YAML, place every federate on the grid, wire the HELICS keys, and write the CST federation plus `generated/docker-compose.yaml`.
 4. **Simulation** — bring up the generated compose file: a broker and one container per federate. Any federate exiting non-zero fails the whole run.
 
+### Inside the generator
+
+Stage 3 is where a description becomes a configuration, so it is built as a small ETL — extract, transform, load — with one module per phase.
+
+- **Extract** (`composegen/extract.py`) reads the experiment YAML and parses the federation into a tree.
+- **Transform** (`composegen/transform.py`) validates that tree, normalises the times, and derives which federate publishes what to whom.
+- **Load** (`composegen/load.py`) places the federates on the grid's loads, registers the HELICS keys, and writes the CST federation and the compose file.
+
+The point of the split is that the first two phases only read.
+Everything the run produces, and every write to a database, happens in load — so a misconfigured experiment is rejected before there is a container or a stored document to clean up.
+That is also why the generator is deliberately strict: it would rather refuse to start than fill in a value it cannot know.
+
 ## Configuring an experiment
 
 An experiment is a tree: a grid, and the federates placed on it.

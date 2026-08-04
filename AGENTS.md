@@ -72,10 +72,44 @@ Single federates can be debugged on the host against a JSON meta store — see
    metadata store under `custom_metadata/<grid federate name>`. Federates read it
    from there at runtime, so nothing but this stage needs InfDB access.
 3. **composegen** (`composegen/`) — an ETL over the experiment YAML:
-   `extract.py` → `transform.py` → `load.py`, orchestrated by `main.py`. Produces
-   the CST federation/scenario documents and `generated/docker-compose.yaml`.
+   `extract.py` → `transform.py` → `load.py`, orchestrated by `main.py` (see below).
+   Produces the CST federation/scenario documents and `generated/docker-compose.yaml`.
 4. **simulation** — the generated compose file, one container per federate plus a
    `helics` broker service.
+
+### Inside composegen: the ETL
+
+Turning an experiment description into a running federation is the only real
+transformation in the project, so it is split into three phases, one module each,
+run in order by `main.py`:
+
+- `extract.py` — **read**. Dispatches on the config's top-level key, builds the
+  `treelib.Tree` for tree mode, and checks that each grid names exactly one source
+  (`layout` or `location`). Produces an `ExtractedConfig`.
+- `transform.py` — **validate and normalise**. `validate_tree` collects every missing
+  or unsupported field before raising, `validate_timeseries_coverage` rejects input
+  CSVs that are too short, `process_general_config` normalises the times, and
+  `wire_pub_sub` derives each node's publications/subscriptions from its parent/child
+  pairs. Produces a `TransformedConfig`.
+- `load.py` — **resolve and emit**. Reads the nets infdb wrote, resolves `placement`
+  onto pandapower load indices, registers the CST groups, stores each house's
+  exogenous CSV, and writes the federation, the scenario document and
+  `generated/docker-compose.yaml`.
+
+Each module exposes one public function named after its phase, which dispatches on the
+config mode to a private per-mode implementation behind it. One function sits in the
+wrong file: `transform.generate_run_metadata` is never called by `transform()` - both
+branches of `load.py` import it and call it themselves.
+
+**Extract and transform never write, and never touch the CST store.** Every output and
+every database access is in `load.py`. That is what makes a bad experiment fail before
+anything exists to clean up, and it is the rule to preserve: new validation belongs in
+`transform.py`, new output in `load.py`.
+
+Placement breaks the phase split, and looks misplaced until you need to change it:
+resolving it needs the grid's load table, which exists only once `_read_load_list` has
+read what the infdb stage wrote, so it cannot happen any earlier than `load.py`.
+`transform.expand_grid_nodes` is the abandoned attempt to do it in the transform phase.
 
 ### Experiment config: two formats
 
