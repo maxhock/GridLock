@@ -9,7 +9,7 @@ Two experiments in `config/` are known to work and are the best starting points:
 > `model`, `capacity`, `power`, `max_production`, `control_strategy` and `accessible` are checked for presence and then dropped — no federate reads them.
 > The house that runs is the hardcoded two-room RC network in `federates/house/build_my_house.py`, with the battery and heat pump from `federates/house/common_config.py`, whatever the YAML says.
 > Changing `resistance: "5 Ohm"` changes nothing about the simulation.
-> This is tracked as S1 in [`archive/issues-to-mvp.md`](archive/issues-to-mvp.md); the sections below mark each affected key.
+> This is tracked as S1 in issue #56; the sections below mark each affected key.
 
 ## `general:`
 
