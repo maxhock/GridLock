@@ -18,14 +18,17 @@ Results are written to a time-series database and tagged with a timestamped scen
 
 | Class | Image | Role |
 |---|---|---|
-| `grid` | `federates/grid` | pandapower power flow; applies the loads it receives and publishes bus voltages |
-| `load` | `federates/house_player` | replays an electrical load profile from CSV onto one or more grid loads |
-| `house` | `federates/house` | simulated building — thermal model, heat pump, AC, battery, PV (via [EnergySim](https://github.com/Hosseini97/EnergySim)) |
-| `hems` / `controller` | `federates/controller` | model-predictive home energy management; commands a house's battery |
-| `pv`, `battery` | `federates/house` | declared as sub-federates of a house; their physics currently runs inside the house simulator |
-| — | `federates/broker` | the HELICS broker every federation needs |
-| `recorder` | `federates/recorder` | `helics_recorder` capture; a leftover of the legacy config format, not usable from a tree experiment — results come from the CST time-series store |
-| — | `federates/template` | starting point for a new federate class |
+| `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages |
+| `load` | [`federates/house_player`](federates/house_player) | replays an electrical load profile from CSV onto one or more grid loads |
+| `house` | [`federates/house`](federates/house) | simulated building — thermal model, heat pump, AC, battery, PV (via [EnergySim](https://github.com/Hosseini97/EnergySim)) |
+| `hems` / `controller` | [`federates/controller`](federates/controller) | model-predictive home energy management; commands a house's battery |
+| `pv`, `battery` | [`federates/house`](federates/house) | declared as sub-federates of a house; their physics currently runs inside the house simulator |
+| — | [`federates/broker`](federates/broker) | the HELICS broker every federation needs |
+| `recorder` | [`federates/recorder`](federates/recorder) | `helics_recorder` capture; a leftover of the legacy config format, not usable from a tree experiment — results come from the CST time-series store |
+| — | [`federates/template`](federates/template) | starting point for a new federate class |
+
+Each directory has a README covering what its federate does, its HELICS interfaces, and how to run it on its own.
+`federates/forecasting/` and `federates/grid-pypsa/` exist but are not wired into tree mode.
 
 Supporting containers: `composegen/` generates the federation and the compose file, and `databases/infdb/` resolves grids into the metadata store before it runs.
 
