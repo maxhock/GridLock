@@ -16,12 +16,16 @@ Two experiments in `config/` are known to work and are the best starting points:
 | Key | Required | Default | Meaning |
 |---|---|---|---|
 | `name` | no | `GridLock` | Names the run. The scenario is `<name>_<YYYYMMDD_HHMMSS>` and the results schema is `"<name>Analysis"`. |
-| `start_time` | no | `0` | Seconds, converted to a wall clock offset from `2023-01-01T00:00:00`. An ISO 8601 string is also accepted. |
-| `end_time` | **yes** | — | Seconds after `start_time`, or an ISO 8601 string. |
+| `start_time` | no | `0` | Seconds, converted to a wall clock offset from `2023-01-01T00:00:00`. |
+| `end_time` | **yes** | — | Seconds after `start_time`. |
 | `time_step` | no | `1` | Simulation period in **whole** seconds, shared by every federate. |
 | `use_meta_db` | no | `json` | `mongo`, or `json` to write metadata into `generated/` instead. |
 | `use_data_db` | no | `postgres` | Where the timeseries go. |
 | `meta_store_path` | no | `generated` | Directory the `json` metadata backend writes into. |
+
+Give both times as numbers.
+A string is passed through composegen unchanged and has to be exactly `YYYY-MM-DDTHH:MM:SS`; any other ISO 8601 form — a bare date, or an offset like `+01:00` — is accepted here and then kills every federate at startup.
+It also switches off the coverage check below.
 
 `time_step` has to be a whole number of seconds.
 CST type-checks the HELICS `period` against an integer default, so a fractional step is refused up front rather than failing deep inside composegen.
@@ -147,6 +151,11 @@ Without the check a load player silently repeats its last known value once the d
 
 A house with a HEMS needs more than the run itself: at the last step the MPC still asks for a full forecast window, so it needs a further 24 steps (`transform.MPC_FORECAST_HORIZON_STEPS`) beyond `end_time`.
 A CSV longer than needed is fine.
+
+Two gaps in that check are worth knowing about, both tracked as N4 and N5 in issue #56:
+
+- It does not run at all if `start_time` or `end_time` is a string, so an ISO 8601 time means no CSV is validated.
+- It sizes the run as `end_time - start_time`, while a numeric `end_time` is a duration *from* `start_time`. With a non-zero `start_time` it asks for too little, and a CSV that passes can still run out mid-run. Both shipped experiments use `start_time: 0`, where the two agree.
 
 ### What is in `data/input/` today
 
