@@ -17,11 +17,7 @@ from src.load_player import LoadPlayerFederate, load_timeseries
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Namespace with scenario, federate_name, and timeseries path.
-    """
+    """Read the scenario, federate name and CSV path composegen put on the CLI."""
     parser = argparse.ArgumentParser(description="Load-player federate using CST")
     parser.add_argument(
         "--scenario",
@@ -66,18 +62,7 @@ def run_load_player(
     use_meta_db: str,
     use_data_db: str,
 ) -> None:
-    """Run a single LoadPlayerFederate lifecycle.
-
-    Uses CST's built-in ``run()`` which calls
-    ``create_federate`` → ``run_cosim_loop`` → ``destroy_federate``.
-
-    Args:
-        federate_name: Unique HELICS federate name.
-        timeseries_path: Path to the timeseries CSV.
-        scenario_name: CST scenario name to look up in meta_store.
-        use_meta_db: Metadata backend type.
-        use_data_db: Data backend type.
-    """
+    """Run one load player: CST's ``run()`` does create, loop, destroy."""
     ts = load_timeseries(timeseries_path)
     federate = LoadPlayerFederate(federate_name, ts)
     federate.run(
@@ -92,13 +77,7 @@ def main(
     federate_name: str | None = None,
     timeseries_path: str | None = None,
 ) -> None:
-    """Load timeseries and run load-player federate.
-
-    Args:
-        scenario_name: CST scenario name. If None, parsed from CLI.
-        federate_name: Federate name. If None, parsed from CLI.
-        timeseries_path: Path to timeseries CSV. If None, parsed from CLI.
-    """
+    """Run one load player, taking the names and CSV path from the CLI unless given."""
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario

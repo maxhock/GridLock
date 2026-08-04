@@ -1,3 +1,5 @@
+"""Build a house's exogenous dataset from measured load, PV and price series."""
+
 import pandas as pd
 import numpy as np
 import os
@@ -24,6 +26,7 @@ WATTS_PER_KWH_PER_TIMESTEP = 1000.0 / TIMESTEP_HOURS
 EUROS_PER_MWH_TO_EUROS_PER_KWH = 1.0 / 1000.0
 
 def create_sample_data(n_days: int = 7):
+    """Write `n_days` of 15-minute exogenous data, tiling the measured series to fit."""
     n_steps = n_days * STEPS_PER_DAY
     print(f"Generating {n_steps} steps of sample data...")
     

@@ -1,110 +1,273 @@
 # AGENTS.md
 
-This is general information for coding agents applying to this repository and project GridLock.
-Do not modify this file unless explicitly asked to do so by the user.
+Instructions for coding agents working on GridLock. This is the single source of
+truth for agent-facing guidance; `CLAUDE.md` imports this file. Do not modify it
+unless explicitly asked to.
+
+`README.md` is the human-facing overview — concept, tech stack, quick start. This
+file covers what you need in order to change the code.
 
 ## Concept
-GridLock is a Co-Simulation platform for power grids and houses or loads based on Helics.
-Each Helics federate class is organized as a separate docker container and communication between them is restricted to using the Helics publication and subscription api.
-Class specific features are defined inside each container, whereas experiment specific configurations of each instance are handled by using Helics runner.json files.
-These runner.json files are derived from a central experiment.yml with a configuration generation container. 
-The runner.json files are also responsible for starting the right number of instances of a class inside each container.
-This configuration generation container also generates a docker compose file that is used to launch the correct containers.
-Each container by default mounts a central data and config folder.
-The data folder contains input and output folders where the input folder contains grid definitions and timeseries data and the output folder contains the resulting timeseries after an experiment.
-The log folder is meant to store logs.
 
+GridLock is a HELICS co-simulation platform for power grids and the buildings on
+them. Every federate class is its own Docker image, and federates communicate only
+through HELICS publications and subscriptions. A single experiment YAML is turned
+into a complete federation — HELICS wiring, CST metadata, and a
+`docker-compose.yaml` — by a generator container, so no part of the topology is
+written by hand.
 
-### Tech Stack
-| Component        | Technology         | Version/Notes                | Documentation Link                                      |
-|------------------|-------------------|------------------------------|---------------------------------------------------------|
-| Simulation       | HELICS            | Latest stable                | [HELICS Docs](https://docs.helics.org/en/latest/)       |
-| Grid Modeling    | pandapower        | Python 3.11 compatible       | [pandapower Docs](https://pandapower.readthedocs.io/)   |
-| Federate Framework | CoSim Toolbox (CST) | latest stable            | [CST Docs](https://cst.readthedocs.io/en/stable/) |
-| Containerization | Docker Compose    | v2+                          | [Docker Compose Docs](https://docs.docker.com/compose/) |
-| Configuration    | OmegaConf         | YAML-based, Python 3.11      | [OmegaConf Docs](https://omegaconf.readthedocs.io/)     |
-| Scripting        | Python            | 3.11                         | [Python Docs](https://docs.python.org/3.11/)            |
-| Data I/O         | Excel, CSV        | Input: Excel, Output: CSV    | [pandas Docs](https://pandas.pydata.org/docs/)          |
-| Testing          | pytest            | Dockerized and local support | [pytest Docs](https://docs.pytest.org/en/stable/)       |
-| Formatting       | black, ruff       | Optional, recommended        | [black](https://black.readthedocs.io/) / [ruff](https://docs.astral.sh/ruff/) |
+## Commands
 
-### Container Types / Classes
+Everything runs in Docker; no host Python environment is required.
 
-| Container   | Description                                                                 | Entrypoint / Role                |
-|-------------|-----------------------------------------------------------------------------|----------------------------------|
-| composegen  | Docker compose file and configuration generator, automatically derives necessary values if possible | Turns experiment.yml into configs and runner.json files |
-| broker      | HELICS broker, manages message routing and synchronisation between simulations | Starts HELICS broker             |
-| grid        | Grid federate based on CoSim Toolbox, runs pandapower simulation             | Loads grid, runs power flow      |
-| rl_house    | RL-based house federate, interacts via obs/action topics for rich control    | RL agent, publishes/receives obs/action |
-| csv_house   | Player house federate, publishes precomputed load series from CSV            | Publishes timeseries to grid (needs to be reintroduced later)    |
-| recorder    | Recorder federate, captures HELICS topics to output logs                     | Runs helics_recorder CLI         |
-
-### Folder Structure
-```
-.
-├── composegen/           # Compose and config generator (Dockerfile, main.py, test_main.py)
-├── grid/                 # Grid federate
-│   ├── Dockerfile        # Docker build file for grid federate
-│   ├── main.py           # Entrypoint for grid federate
-│   └── test_main.py      # Unit tests for grid logic
-├── house/                # RL house federate and CSV player
-├── recorder/             # Minimal image for helics_recorder
-├── template/             # Template for new CST-based federates
-├── config/
-│   ├── experiment.yml    # Main experiment configuration (source of truth)
-│   └── tmp/              # Generated docker-compose and config files
-├── data/
-│   ├── input/            # Input datasets (Excel grid files, CSV timeseries)
-│   └── output/           # Recorded outputs (logs, results)
-├── tools/                # Folder for single use scripts that might be useful but are not core functionality
-├── docker-compose.test.yml  # Test container orchestration
-├── run.sh                # Entrypoint: run experiment end-to-end (Linux/Mac)
-├── run.ps1               # Entrypoint: run experiment end-to-end (Windows)
-├── run-tests.sh          # Entrypoint: run all tests (dockerized)
-└── README.md             # Project overview and instructions
+```bash
+cp config/preflight.env.example config/preflight.env   # one-time; fill in InfDB creds
+./run.sh                                   # runs config/experiment-LV.yml by default
+./run.sh config/experiment-local-grid.yml  # a specific experiment
+./run.sh --timeout 600 config/...yml       # abort a hung federation
+./run.sh --cleanup-dbs config/...yml       # stop the CST databases on exit
+docker compose -f generated/docker-compose.yaml down --remove-orphans   # teardown
 ```
 
+`run.ps1` is the Windows equivalent and is kept deliberately in step with `run.sh` —
+change both.
 
-## Code Conventions
-Each folder representing a container must be independent of the other folders in the sense that they use their own environment through their dockerfile.
-Code is implemented in simple scripts that use functions provided by libraries as far as possible. 
-There is no need for pyproject.toml or similar, as the main script is automatically executed through the runner.json file which is in turn called by docker file or compose command.
-Each function is accompanied by a function test in the test_*.py file using pytest.
+`run.sh` is four stages; run them individually when debugging:
 
-## Configuration Conventions
-Configuration decisions that need to be changed for each experiment must be defined in 'experiment.yml' and must be piped to a config inside the config folder for that federate through composegen.
-Inside the experiment.yml file two sections define all classes of federates launched and general configuration.
-In experiment.yml information must never be doubled.
-It must be placed at the most logical place and all other mentions must reference this according to the OmegaConf interpolation pattern ${.nestinglevel.value}.
-Other, more static configuration should be either done in code or inside a configuration file in the federate folder.
-
-## Style Conventions
-Code must be typed and formatted with black formatter.
-Code should be broken up into logical functions that are easy to test.
-Code must have minimal repetition according to the DRY principle.
-
-## Test Conventions
-Unit tests are stored inside the docker container inside a test_*.py file and cover each function.
-Unittests can be automatically invoked by using an optional build stage in the dockerfiles. they are generally invoked with the docker-compose.test.yml.
-E2E tests are stored inside the tests folder under project root but are currently not implemented.
-They provide an input file and configuration and compare the result to an existing one.
-
-## Git Conventions
-All code changes must be done in a branch other than main.
-The branch must be named after the issue it solves in the pattern #issue-solution-to-issue.
-Finalized code changes are only integrated to main through pull requests.
-Always pull before pushing.
-Always format with black and ruff before commiting.
-
-## Agent Role
-You are playing the following role:
-You are a programming partner in pair programming called Samantha.
-Your knowledge of frameworks is outdated, always look up the current practice in the documentation of a given framework.
-Given a task you split it into separate smaller tasks that you can solve.
-Always use the /todos command to show these tasks.
-Alternatively if using /todos is not possible, print this task list as markdown in the form:
+```bash
+DC="docker compose --env-file config/preflight.env -f docker-compose.preflight.yaml"
+$DC up -d --wait database mongodb        # 1: timescale + mongo (CST stores)
+$DC up --build --abort-on-container-exit --exit-code-from infdb --no-deps infdb        # 2
+$DC up --build --abort-on-container-exit --exit-code-from composegen --no-deps composegen  # 3
+docker compose -f generated/docker-compose.yaml up --build --abort-on-container-failure  # 4
 ```
-- [x] Research framework docu
-- [ ] Formulate implementation strategy
-- [ ] Implement function
-```
+
+Stages 2 and 3 must both run before stage 4: stage 3 reads what stage 2 wrote.
+`CONFIG_PATH` (a container path, e.g. `/config/experiment-LV.yml`) selects the
+experiment for stages 2–3; `run.sh` derives it from the CLI argument.
+
+Optional DB inspection UIs (pgadmin, mongo-express, grafana) sit behind a profile:
+`$DC --profile cst-tools up -d`.
+
+Single federates can be debugged on the host against a JSON meta store — see
+`.vscode/launch.json` for working argument sets (`--scenario`, `--federate_name`,
+`CST_USE_META_DB=json`).
+
+### Lint and format
+
+`.pre-commit-config.yaml` runs mypy, ruff (`--fix`, line length 88) and black
+(line length 88). Format before committing.
+
+## Architecture
+
+### The four stages
+
+1. **CST databases** — Timescale/Postgres holds run timeseries, Mongo holds metadata
+   (scenarios, federations, `custom_metadata`). Backends are chosen per experiment
+   via `general.use_meta_db` / `use_data_db`; `json` writes into `generated/`
+   instead of Mongo.
+2. **infdb** (`databases/infdb/main.py`) — resolves the grid. Either fetches nets
+   from an external InfDB by location query (`plz`/`kcid`/`bcid`) or loads a local
+   pandapower workbook from `data/input/`. Writes each net as JSON into the CST
+   metadata store under `custom_metadata/<grid federate name>`. Federates read it
+   from there at runtime, so nothing but this stage needs InfDB access.
+3. **composegen** (`composegen/`) — an ETL over the experiment YAML:
+   `extract.py` → `transform.py` → `load.py`, orchestrated by `main.py` (see below).
+   Produces the CST federation/scenario documents and `generated/docker-compose.yaml`.
+4. **simulation** — the generated compose file, one container per federate plus a
+   `helics` broker service.
+
+### Inside composegen: the ETL
+
+Turning an experiment description into a running federation is the only real
+transformation in the project, so it is split into three phases, one module each,
+run in order by `main.py`:
+
+- `extract.py` — **read**. Dispatches on the config's top-level key, builds the
+  `treelib.Tree` for tree mode, and checks that each grid names exactly one source
+  (`layout` or `location`). Produces an `ExtractedConfig`.
+- `transform.py` — **validate and normalise**. `validate_tree` collects every missing
+  or unsupported field before raising, `validate_timeseries_coverage` rejects input
+  CSVs that are too short, `process_general_config` normalises the times, and
+  `wire_pub_sub` derives each node's publications/subscriptions from its parent/child
+  pairs. Produces a `TransformedConfig`.
+  `wire_pub_sub` is not where a working federation's keys come from, though — see
+  below.
+- `load.py` — **resolve and emit**. Reads the nets infdb wrote, resolves `placement`
+  onto pandapower load indices, registers the CST groups, stores each house's
+  exogenous CSV, and writes the federation, the scenario document and
+  `generated/docker-compose.yaml`.
+
+Each module exposes one public function named after its phase, which dispatches on the
+config mode to a private per-mode implementation behind it. One function sits in the
+wrong file: `transform.generate_run_metadata` is never called by `transform()` - both
+branches of `load.py` import it and call it themselves.
+
+**Extract and transform never write, and never touch the CST store.** Every output and
+every database access is in `load.py`. That is what makes a bad experiment fail before
+anything exists to clean up, and it is the rule to preserve: new validation belongs in
+`transform.py`, new output in `load.py`.
+
+Topic wiring is split across both phases, and the transform half is the *fallback*.
+`wire_pub_sub` records topics on every tree node, but `load.py` registers the real CST
+groups itself in `_wire_grid_child` — per `load_<idx>` keys for anything placed on a
+load, plus the house `state` and HEMS `control` groups — and marks those nodes handled.
+`_add_generic_tree_pubsub_groups` then registers `wire_pub_sub`'s topics for whatever is
+left over. In both working experiments that is nothing, so changing `wire_pub_sub` alone
+changes no key a federate actually sees.
+
+Placement breaks the phase split, and looks misplaced until you need to change it:
+resolving it needs the grid's load table, which exists only once `_read_load_list` has
+read what the infdb stage wrote, so it cannot happen any earlier than `load.py`.
+`transform.expand_grid_nodes` is the abandoned attempt to do it in the transform phase.
+
+### Experiment config: two formats
+
+`extract.py:extract` dispatches on the top-level key:
+
+- `federation:` → **tree mode**, the current format. A recursive tree of federates
+  (`id`, `name`, `class`, `config`, `sub_federates`) parsed into a `treelib.Tree`.
+- `federates:` → **legacy mode**, a flat dict resolved with OmegaConf, emitting
+  `runner.json` files into `config/tmp/`. Deprecated and known-broken
+  (`config/experiment.yml` still routes here and produces federates that die on
+  startup); do not build on it. It also writes its compose file to
+  `config/tmp/docker-compose.yml`, which `run.sh` never reads — stage 4 only ever brings
+  up `generated/docker-compose.yaml`.
+
+Tree configs are read with `yaml.safe_load`, **not** OmegaConf — so `${...}`
+interpolation does not resolve there and would be passed through as a literal
+string. Interpolation only works in legacy configs.
+
+`config/experiment-LV.yml` (InfDB location) and `config/experiment-local-grid.yml`
+(local layout, houses + HEMS) are the two working tree-mode references.
+
+`docs/experiment-reference.md` documents the tree-mode schema for users: every key, the
+required CSV columns per class, and the HELICS keys a run emits. Keep it in step when
+you change `validate_tree`, `_wire_grid_child`, or what a federate reads from a CSV.
+
+### How placement and HELICS keys fit together
+
+This is the core invariant of the project.
+
+The grid federate identifies incoming power purely by the `load_<idx>` segment of
+the HELICS key (`federates/grid/main.py:_LOAD_RE`). So anything that injects or
+draws power — `load`, `house`, `pv`, `battery` (`LOAD_PLACED_CLASSES` in
+`composegen/load.py`) — must be wired onto a **pandapower load index**, not a bare
+bus. A federate that publishes a plain `active_power` key is silently dropped from
+the power flow, which is why composegen raises rather than defaulting in these paths.
+
+`placement` accepts an int, a list of ints, or `"fill"` (every load not claimed by
+an explicit placement). At most one `"fill"` child per grid.
+
+Expansion differs by class (`_expand_child_instances`):
+- a **house** simulates one building, so `placement: [4, 6]` becomes two independent
+  federates named after the load they drive — `house_4`, `house_6`, not `house_0_*`;
+- a **load player** replays one profile across all its indices and stays a single
+  federate holding all of them.
+
+Unclaimed load indices are legal (the grid zeroes all static loads at import, so they
+sit at 0 W) but are reported, since they look identical to a placement typo.
+
+All of this resolution happens in `load.py` phase 1 (`_resolve_placement` /
+`_resolve_load_placement`). `transform.expand_grid_nodes` looks like it does the same
+job on buses, but it is unreachable: `extract` sets every entry of `grid_nodes` to
+`None` — for local layouts as well as InfDB locations — and that function skips a
+`None`. Its bus-based expansion, its own duplicate/`fill` checks, and
+`extract._read_layout_buses` are all dead. Change placement behaviour in `load.py`, or
+the change will have no effect.
+
+### Timing
+
+Every federate shares one period and no offset, so a simulation step has the same
+`sim_time` everywhere. Step ordering uses HELICS `wait_for_current_time_update`,
+which HELICS permits on exactly one federate in the federation; composegen gives that
+slot to the grid, and only when there is exactly one grid federate
+(`_grid_waits_for_current_time`). With several grids nobody gets it and every grid
+uniformly lags one step. The long comment above that function records what was
+measured and why depth-staggered offsets were removed — read it before touching
+timing.
+
+`time_step` must be a whole number of seconds: CST's `HelicsMsg.verify` type-checks
+`period` against an int default.
+
+### CST monkeypatches
+
+`composegen/monkeypatch.py` replaces `DockerRunner._service`, `DockerRunner.define_yaml`
+and `FederateConfig.docker` from the upstream CoSim Toolbox. The generated compose file
+therefore carries **no static IPs and no reserved subnet** — federates reach the broker
+by the Compose service name `helics`, which is what lets two experiments run at once.
+Anything that changes the shape of the generated compose file lives here, not in CST.
+
+### Federate images
+
+`map_params_to_class` in `composegen/load.py` maps a config `class` to an image and
+command. Note the classes without their own federate yet: `pv` and `battery` map to the
+`house` image because that physics still lives inside the house simulator — declaring
+them directly under a grid raises `NotImplementedError` rather than starting a broken
+container. `hems`/`controller` are real standalone federates.
+
+`federates/template/` is the starting point for a new federate.
+`federates/grid-pypsa/` and `federates/forecasting/` are not wired into tree mode —
+they have no entry in `map_params_to_class` and would fall through to the default image.
+
+Federates never construct their HELICS keys; they discover them from the CST federation
+config at startup (`_find_pub_key` / `_find_sub_key`, or the key scan in
+`house_player/src/load_player.py`), because composegen derives key names from the tree,
+not from a federate's own name.
+
+### Data flow at runtime
+
+- Grid nets: infdb → `custom_metadata` → `federates/grid/main.py:load_net_from_metadata`.
+- House exogenous datasets: composegen reads the CSV and stores its text in
+  `custom_metadata/<house federate>`; the house materializes it at startup. Load-player
+  CSVs are the exception — they are passed as a `--timeseries` path.
+- Results: written by CST into the timeseries DB, tagged with the run's own timestamped
+  scenario name (`<name>_YYYYMMDD_HHMMSS`). There is no `data/output` export path any more.
+- Run provenance (git commit, experiment path, full experiment YAML) is merged into the
+  scenario document *after* `federation.write_config`, which overwrites it.
+
+## Conventions
+
+### Code
+
+- **Each federate directory is self-contained**: its own Dockerfile, its own
+  `requirements.txt`, its own environment. The entry point is invoked by the generated
+  compose command, so no packaging metadata is involved — `federates/grid/pyproject.toml`
+  is a leftover no build reads, and it declares a different Python version than the image
+  it supposedly describes. Exception: `controller` builds from the repo root and reuses
+  `federates/house/requirements.txt` and the `house/` package.
+- **Dependencies are pinned on purpose** in everything that runs today — `grid`,
+  `house`, `house_player`, `broker`, composegen — including EnergySim to a commit. An
+  unpinned rebuild would change the simulation without a commit on this side, which makes
+  the `git_commit` stored with each run a lie. Bump deliberately. `recorder`, `template`,
+  `forecasting` and `grid-pypsa` are still unpinned; pin them before making any of them
+  part of a run.
+- Code is typed, formatted with black, broken into small functions, and kept free of
+  repetition. Prefer library functions over hand-rolled logic.
+- **Comments explain why, not what.** Non-obvious decisions carry the incident or
+  measurement that motivated them; keep that when editing nearby code.
+
+### Failure behaviour
+
+**Fail loudly over silently defaulting.** Most of the validation in `transform.py` and
+`load.py` exists because a run that "succeeded" with stale, zero, or substituted data is
+the failure mode this project keeps hitting. Never paper over a missing value with a
+fallback that lets the federation run — raise where the problem is, and name it.
+
+### Configuration
+
+Anything that changes per experiment belongs in the experiment YAML, stated once;
+anything static belongs in the federate's own folder or in code. In legacy configs,
+reference a value with OmegaConf interpolation (`${..path.to.value}`) rather than
+repeating it — but see the note above: this does not work in tree configs.
+
+### Git
+
+- Branch off `main` as `<issue-number>-<slug>` (e.g. `54-fix-small-issues-for-mvp`);
+  never commit to `main` directly.
+- Merge through pull requests. Pull before pushing.
+- Run black and ruff before committing.
+- Open work is tracked in GitHub issue #56. `docs/archive/issues-to-mvp.md` is a closed,
+  archived punch list — read it for context on past fixes, do not add to it.
+- `generated/` must stay owned by the invoking user; `run.sh` checks this and prints the
+  fix, because containers that once ran as root left files nothing could rewrite.

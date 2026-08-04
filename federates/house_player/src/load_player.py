@@ -23,6 +23,7 @@ class LoadPlayerFederate(Federate):
     """
 
     def __init__(self, federate_name: str, timeseries: pd.DataFrame) -> None:
+        """Bind this federate to the profile it replays."""
         super().__init__(federate_name)
         self.timeseries = timeseries
         # Mapping built after create_federate()
@@ -34,10 +35,10 @@ class LoadPlayerFederate(Federate):
     # ------------------------------------------------------------------
 
     def _build_pub_keys(self) -> None:
-        """Discover active_power / reactive_power publication keys.
+        """Discover this federate's power keys, one pair per load index.
 
-        Called once after ``create_federate()`` has populated
-        ``data_to_federation``.
+        Scanned from the CST config rather than built by name, because composegen
+        derives the keys from the experiment tree, not from a federate's own name.
         """
         pubs = self.data_to_federation.get("publications", {})
         self._pub_p_keys = sorted(
@@ -102,25 +103,10 @@ class LoadPlayerFederate(Federate):
 
 
 def load_timeseries(csv_path: str) -> pd.DataFrame:
-    """Load and validate a timeseries CSV file.
+    """Read a load profile and put it on simulation-relative time.
 
-    Expected columns:
-    - ``timestamp``: Unix epoch seconds (int/float) or ISO-8601 string
-    - ``base_load``: Active power in watts
-
-    Optional columns:
-    - ``reactive_power``: Reactive power in VAr (defaults to 0)
-
-    Args:
-        csv_path: Path to the CSV file.
-
-    Returns:
-        DataFrame sorted by ``timestamp`` (epoch seconds) with at
-        least ``timestamp`` and ``base_load`` columns.
-
-    Raises:
-        FileNotFoundError: If csv_path does not exist.
-        ValueError: If required columns are missing.
+    Requires ``timestamp`` (epoch seconds or ISO-8601) and ``base_load`` (W) columns;
+    ``reactive_power`` (VAr) is optional and defaults to zero.
     """
     df = pd.read_csv(csv_path)
 
@@ -156,18 +142,11 @@ def load_timeseries(csv_path: str) -> pd.DataFrame:
 def lookup_power(
     timeseries: pd.DataFrame, sim_time: float
 ) -> tuple[float, float]:
-    """Look up active and reactive power for a given simulation time.
+    """Read (active power in W, reactive power in VAr) at a simulation time.
 
-    Uses the nearest-previous timestamp (sample-and-hold).  If
-    ``sim_time`` is before the first record, returns the first row.
-
-    Args:
-        timeseries: DataFrame with ``timestamp``, ``base_load``,
-            and ``reactive_power`` columns.
-        sim_time: Current simulation time in seconds since epoch.
-
-    Returns:
-        Tuple of (active_power_W, reactive_power_VAr).
+    Holds the nearest previous sample, and the first row for anything before it.
+    ``sim_time`` is seconds since the scenario start, which is what
+    ``load_timeseries`` normalised the CSV's own timestamps onto.
     """
     timestamps = timeseries["timestamp"].values
     idx = int(np.searchsorted(timestamps, sim_time, side="right")) - 1

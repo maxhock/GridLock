@@ -1,4 +1,5 @@
-# common_config.py
+"""Device configurations shared by every simulated house."""
+
 from energysim.core.shared.data_structs import (
     BatteryConfig, RewardConfig, HeatPumpConfig, AirConditionerConfig,
     ThermalStorageConfig, PVConfig
@@ -19,6 +20,7 @@ def create_common_configs(dt_seconds: float):
     }
 '''
 def create_common_configs(dt_seconds: float):
+    """Assemble the EnergySim device configs every house in an experiment shares."""
     t_config = create_2_room_house()
     return {
         "dt_seconds": dt_seconds,

@@ -1,3 +1,5 @@
+"""Client for the external forecasting API, with a plain-sum fallback."""
+
 from typing import List
 from dataclasses import dataclass
 import requests
@@ -6,14 +8,14 @@ import os
 
 @dataclass
 class ForecastInput:
-    """Input data for forecasting"""
+    """What the forecaster is asked to predict from: the loads and where in time."""
 
     current_loads: List[float]  # Current house loads [MW]
     current_time: float  # Simulation time [seconds]
     time_step: float  # Time step size [seconds]
 
     def to_dict(self):
-        """Convert to dictionary for JSON serialization"""
+        """Render as JSON-serialisable fields for the API request."""
         return {
             "current_loads": self.current_loads,
             "current_time": self.current_time,
@@ -23,19 +25,21 @@ class ForecastInput:
 
 @dataclass
 class ForecastOutput:
+    """A predicted total load and the time it applies to."""
+
     total_load_forecast: float  # Predicted total load [MW]
     predict_time: float
 
 
 def predict_agg_load(forecast_input: ForecastInput) -> ForecastOutput:
-
+    """Predict the aggregate load one step ahead."""
     forecast_output = fast_api(forecast_input)
 
     return forecast_output
 
 
 def fast_api(forecast_input: ForecastInput) -> ForecastOutput:
-    """Call external FastAPI server for forecasting"""
+    """Ask the forecasting service, falling back to a sum if it is unreachable."""
 
     api_host = os.getenv("FASTAPI_HOST", "fastapi_server")  # Default to container name
     api_port = os.getenv("FASTAPI_PORT", "8000")  # Default port
@@ -73,7 +77,7 @@ def fast_api(forecast_input: ForecastInput) -> ForecastOutput:
 
 
 def _fallback_forecast(forecast_input: ForecastInput) -> ForecastOutput:
-    """Fallback if API is unavailable"""
+    """Stand in for the service by assuming next step's load equals this step's."""
     print("🔄 Using fallback: simple sum")
     total = sum(forecast_input.current_loads)
     return ForecastOutput(

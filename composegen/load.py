@@ -1,4 +1,5 @@
-# composegen/load.py
+"""ETL stage 3: write the CST federation and `generated/docker-compose.yaml`."""
+
 from __future__ import annotations
 
 import json
@@ -55,6 +56,7 @@ DEFAULT_COMMAND_TEMPLATES = {
 # ---------------------------------------------------------------------------
 
 def _runner_write(path: Path, name: str, federates: list[dict]) -> None:
+    """Write one legacy `helics run` runner file."""
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(path, "w") as f:
@@ -71,6 +73,7 @@ def _runner_write(path: Path, name: str, federates: list[dict]) -> None:
 
 
 def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
+    """Resolve a legacy federate's placement, defaulting to every node in the grid."""
     num_nodes = int(conf.federates.grid.num_nodes)
     fed_cfg = conf.federates.get(fed_key)
 
@@ -86,6 +89,7 @@ def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
 
 
 def create_broker_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy runner starting the broker for the expected federate count."""
     total = int(conf.federates.broker.total_federates)
     broker_name = conf.federates.broker.name
 
@@ -107,6 +111,7 @@ def create_broker_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_grid_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy runner for the single grid federate."""
     grid_file = conf.federates.grid.grid_file
 
     federates = [
@@ -122,6 +127,7 @@ def create_grid_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_grid_config(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy grid federate's HELICS settings, including its timing flags."""
     grid_config = {
         "name": conf.federates.grid.name,
         "loglevel": conf.general.get("loglevel", "warning"),
@@ -144,6 +150,7 @@ def create_grid_config(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_house_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy runner holding one house instance per placed node."""
     nodes = _get_nodes_for_fed(conf, "house")
     config_file = conf.federates.house.get("config_file", "/config/house_config.yaml")
     scenario_name = conf.federates.grid.get("name", "GridLock")
@@ -169,6 +176,7 @@ def create_house_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_controller_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy controller runner, following the houses' placement."""
     if (
         conf.federates.controller.get("placement", None) is None
         and "house" in conf.federates
@@ -202,6 +210,7 @@ def create_controller_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_house_player_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy runner holding one load-player instance per placed node."""
     nodes = _get_nodes_for_fed(conf, "house_player")
     stop_time = float(conf.general.end_time - conf.general.start_time)
     dt = int(conf.general.time_step)
@@ -227,6 +236,7 @@ def create_house_player_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_recorder_runner(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy runner for a `helics_recorder` capturing one target federate."""
     target = conf.federates.recorder.get("target", "grid")
     output_file = conf.federates.recorder.get(
         "output_file",
@@ -255,6 +265,11 @@ def create_recorder_runner(conf: DictConfig, output_path: Path) -> None:
 
 
 def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
+    """Write the legacy compose file, one service per federate class.
+
+    Note that `run.sh` never brings this file up - stage 4 only ever starts
+    `generated/docker-compose.yaml`, which `monkeypatch.define_yaml` writes.
+    """
     compose = {
         "networks": {
             "helics-net": {
@@ -319,6 +334,7 @@ def create_docker_compose(conf: DictConfig, output_path: Path) -> None:
 
 
 def load_legacy_outputs(transformed: TransformedConfig) -> None:
+    """Emit the legacy artefacts: runner files, grid config and a compose file."""
     conf = transformed.conf
     output_dir = Path(transformed.output_path)
 
@@ -406,6 +422,7 @@ def _create_metadata_manager(
     use_meta_db: str,
     meta_store_path: str = "generated",
 ):
+    """Open the CST metadata store, pointing `json` at the output directory."""
     from cosim_toolbox.dbms import create_metadata_manager
 
     kwargs = {"backend": use_meta_db}
@@ -417,6 +434,7 @@ def _create_metadata_manager(
 
 
 def map_params_to_class(federate_class: str) -> dict:
+    """Map a config `class` to the Docker image and entry command that implement it."""
     mapping = {
         "grid": {
             "image": "grid",
@@ -524,6 +542,7 @@ def normalize_federation_keys(
     use_meta_db: str,
     meta_store_path: str = "generated",
 ) -> None:
+    """Rewrite the dots CST puts in HELICS keys as the slashes federates parse."""
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         config = mgr.read_federation(federation_name)
 
@@ -563,6 +582,11 @@ def discover_grid_federates(
     meta_store_path: str = "generated",
     location: list[dict] | None = None,
 ) -> list[str]:
+    """Find the grid federates the infdb stage created for a location query.
+
+    A query giving only a `plz` can resolve to many nets, so those are found by scanning
+    `custom_metadata` for the prefix rather than being named up front.
+    """
     if not location:
         print(f"Warning: No location list provided for grid '{grid_id}'.")
         return []
@@ -610,6 +634,7 @@ def _read_load_list(
     use_meta_db: str,
     meta_store_path: str = "generated",
 ) -> list[tuple[int, str, int]]:
+    """Read a grid's `(load index, name, bus)` triples out of the net infdb stored."""
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         meta_data = mgr.read("custom_metadata", grid_fed_name)
 
@@ -665,6 +690,7 @@ def _resolve_placement(
     all_loads: list[tuple[int, str, int]],
     exclude: set[int] | None = None,
 ) -> list[int]:
+    """Turn a `placement` value - an index, a list, or `"fill"` - into load indices."""
     valid_indices = {idx for idx, _, _ in all_loads}
 
     if placement == "fill":
@@ -793,6 +819,7 @@ def _add_group(
     dtype: str = "double",
     unit: str = "W",
 ) -> None:
+    """Register one global HELICS key with a single publisher and subscriber."""
     key_format = {
         "src": {
             "from_fed": pub_fed,
@@ -916,6 +943,7 @@ def _add_sink_only_group(
 # (helicsFederateRequestTimeIterative) is the change that would remove both
 # and lift the multi-grid restriction; it belongs in the CST federate loop.
 def _grid_waits_for_current_time(grid_fed_count: int) -> bool:
+    """Decide whether the grid may claim the one ordering slot (see above)."""
     return grid_fed_count == 1
 
 
@@ -1008,6 +1036,10 @@ def _wire_grid_child(
     load_indices: list[int] | None = None,
     control_publisher: str | None = None,
 ) -> list[str]:
+    """Register every HELICS key between a grid and one of its children.
+
+    Returns the child's publication keys.
+    """
     child_pub_keys: list[str] = []
 
     # Any child that occupies pandapower load indices - a load player *or* a
@@ -1193,6 +1225,7 @@ def _add_generic_tree_pubsub_groups(
     tree: Tree,
     handled_nodes: set[str],
 ) -> None:
+    """Register groups for topics `wire_pub_sub` left on unhandled nodes."""
     topic_map: dict[str, dict] = {}
 
     for node in tree.all_nodes():
@@ -1282,6 +1315,11 @@ def _add_generic_tree_pubsub_groups(
 
 
 def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
+    """Build the whole federation: place every federate, wire it, and write it out.
+
+    Phase 1 handles the grids and their children, where placement resolves onto
+    pandapower load indices; phase 2 registers whatever the tree holds beyond them.
+    """
     try:
         from cosim_toolbox.sims import (
             FederationConfig,
@@ -1627,6 +1665,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 # ---------------------------------------------------------------------------
 
 def load(transformed: TransformedConfig) -> None:
+    """Dispatch to the tree or legacy output writer for a transformed config."""
     if transformed.mode == "legacy":
         load_legacy_outputs(transformed)
         return

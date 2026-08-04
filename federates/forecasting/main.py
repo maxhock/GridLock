@@ -1,6 +1,7 @@
-"""
-Forecasting federate using CoSim Toolbox (CST).
-Collects house load data, calls external FastAPI for forecasting, publishes results via HELICS.
+"""Forecasting federate: aggregates the houses' loads and publishes a predicted total.
+
+Not wired into tree mode - it has no entry in `composegen/load.py:map_params_to_class`,
+and its dependencies are unpinned. Pin them before making it part of a run.
 """
 
 from cosim_toolbox.sims import Federate
@@ -16,6 +17,7 @@ class ForecastingFederate(Federate):
     """Forecasting federate that calls external FastAPI for load predictions."""
 
     def __init__(self, federate_name, grid_path):
+        """Bind this federate to the grid workbook naming the houses it forecasts."""
         super().__init__(federate_name)
         self.net = None
         self.load_indices = []  # List of house indices to subscribe to
@@ -146,6 +148,7 @@ class ForecastingFederate(Federate):
 
 
 def parse_args():
+    """Read the grid workbook and forecasting API address from the CLI."""
     parser = argparse.ArgumentParser(description="Forecasting federate using CST")
     parser.add_argument(
         "--grid_file",
@@ -167,6 +170,7 @@ def parse_args():
 
 
 def main():
+    """Run the forecasting federate through CST's lifecycle."""
     args = parse_args()
 
     # Set environment variables for API configuration

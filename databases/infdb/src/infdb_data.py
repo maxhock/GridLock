@@ -1,9 +1,4 @@
-"""InfDB data access functions for the data setup resolver.
-
-Provides query helpers to fetch pandapower grids from the InfDB
-pylovo schema and resolve experiment location queries into named
-(federate_name, net) tuples.
-"""
+"""Queries against InfDB's pylovo schema, turning location queries into named nets."""
 
 import json
 import pandas as pd
@@ -17,19 +12,7 @@ def get_pylovo_grid(
     kcid: Optional[int] = None,
     bcid: Optional[int] = None,
 ) -> pd.DataFrame:
-    """Query pandapower grids from InfDB pylovo schema.
-
-    Args:
-        infdb: InfDB client instance.
-        log: Logger instance.
-        plz: Postcode to query.
-        kcid: Optional k-means cluster ID filter.
-        bcid: Optional building cluster ID filter.
-
-    Returns:
-        DataFrame with columns [kcid, bcid, grid] where grid
-        is a JSON string representing a pandapower net.
-    """
+    """Fetch every grid InfDB holds for a postcode, narrowed by cluster ids if given."""
     sql = f"SELECT kcid, bcid, grid FROM pylovo.grid_result WHERE plz={plz}"
     if kcid is not None and bcid is not None:
         sql += f" AND kcid={kcid} AND bcid={bcid}"
@@ -47,18 +30,9 @@ def get_pylovo_grid(
 
 
 def _net_table_count(net_json: dict | str, table: str) -> int:
-    """Count rows in a pandapower DataFrame table from its serialised JSON.
+    """Count a net's buses, loads or ext_grids straight from its JSON.
 
-    Pandapower serialises each DataFrame as
-    ``{"_object": {"<table>": {"_object": "<json-encoded DataFrame>"}}}``.
-    We read the index length directly without importing pandapower.
-
-    Args:
-        net_json: Pandapower net serialised as a dict or JSON string.
-        table: Table name (e.g. 'bus', 'load', 'ext_grid').
-
-    Returns:
-        Number of rows, or 0 if the table is absent or empty.
+    Read out of the serialised form so this container needs no pandapower dependency.
     """
     d = json.loads(net_json) if isinstance(net_json, str) else net_json
     inner = d.get("_object", {}).get(table, {}).get("_object", None)
@@ -74,23 +48,12 @@ def resolve_grid_queries(
     grid_id: str,
     queries: list[dict],
 ) -> list[tuple[str, str]]:
-    """Resolve location queries into named pandapower net JSON strings.
+    """Name every net a location query resolves to `{grid_id}_{plz}_{kcid}_{bcid}`.
 
-    Each query dict must contain 'plz' and may optionally contain
-    'kcid' and 'bcid' for further filtering. Federate names follow
-    the pattern ``{grid_id}_{plz}_{kcid}_{bcid}``.
-
-    The raw grid JSON from InfDB is passed through without deserialising
-    into a pandapower object, avoiding the heavy pandapower dependency.
-
-    Args:
-        infdb: InfDB client instance.
-        log: Logger instance.
-        grid_id: Base identifier prefix (e.g. "lv-grid").
-        queries: List of query dicts from experiment.yml location.
-
-    Returns:
-        List of (federate_name, net_json_str) tuples.
+    That name is the grid federate's name, and the key its net is stored under, which is
+    how composegen finds the nets a postcode-only query expanded into. The grid JSON
+    is passed through untouched rather than deserialised, so this module needs no
+    pandapower.
     """
     net_list: list[tuple[str, str]] = []
     seen_federate_names: set[str] = set()
@@ -152,27 +115,10 @@ def get_demand_timeseries(
     plz: int,
     profile_type: str = "H0",
 ) -> pd.DataFrame:
-    """Query annual demand timeseries from InfDB for a given location.
+    """Fetch a standard load profile for a postcode.
 
-    TODO: Implement actual InfDB query once the timeseries table is
-    available.  For now this is a placeholder that returns an empty
-    DataFrame with the expected schema.
-
-    The returned DataFrame has one row per timestep (e.g. 15-min
-    resolution, 35 040 rows for one year).  Columns:
-
-    * ``timestamp`` – UNIX epoch seconds (int)
-    * ``active_power_kw`` – electrical demand in kW (float)
-    * ``reactive_power_kvar`` – reactive demand in kVAr (float)
-
-    Args:
-        infdb: InfDB client instance.
-        log: Logger instance.
-        plz: Postcode to query timeseries for.
-        profile_type: Standard load profile identifier (e.g. "H0", "H25").
-
-    Returns:
-        DataFrame with columns [timestamp, active_power_kw, reactive_power_kvar].
+    Stub: returns an empty frame with the intended columns until InfDB has a timeseries
+    table. Nothing calls it - load profiles come from CSVs in `data/input/` today.
     """
     # Placeholder SQL – adapt once the InfDB timeseries table exists
     # sql = (

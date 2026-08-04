@@ -1,4 +1,5 @@
-# composegen/transform.py
+"""ETL stage 2: validate the extracted config and wire the federates' HELICS topics."""
+
 from __future__ import annotations
 
 import copy
@@ -22,6 +23,8 @@ ConfigMode = Literal["legacy", "tree"]
 
 @dataclass
 class TransformedConfig:
+    """A validated federation, ready for `load.py` to write out."""
+
     mode: ConfigMode
     conf: DictConfig | None = None
     tree: Tree | None = None
@@ -56,6 +59,7 @@ SUPPORTED_TREE_CLASSES = {
 # ---------------------------------------------------------------------------
 
 def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
+    """Resolve a legacy federate's placement, defaulting to every node in the grid."""
     num_nodes = int(conf.federates.grid.num_nodes)
     fed_cfg = conf.federates.get(fed_key)
 
@@ -71,6 +75,7 @@ def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
 
 
 def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
+    """Fill in the defaults and instance counts a legacy config leaves implicit."""
     conf: DictConfig = extracted.raw_config
 
 
@@ -128,6 +133,7 @@ def _clone_subtree_with_new_root(
     new_root_id: str,
     placement_bus: int,
 ) -> Tree:
+    """Copy a federate subtree onto one bus, rewriting every id under a new root."""
     new_tree = Tree()
     id_map: dict[str, str] = {}
 
@@ -165,6 +171,11 @@ def _clone_subtree_with_new_root(
 
 
 def expand_grid_nodes(tree: Tree, grid_nodes: dict[str, list[int] | None]) -> Tree:
+    """Replicate each grid child onto the buses it is placed on.
+
+    Dead code: `extract` sets every `grid_nodes` entry to `None`, so the loop below
+    always skips. Placement is resolved on load indices in `load.py` - change it there.
+    """
     for grid_id, buses in grid_nodes.items():
         if not tree.contains(grid_id):
             continue
@@ -247,6 +258,7 @@ def expand_grid_nodes(tree: Tree, grid_nodes: dict[str, list[int] | None]) -> Tr
 
 
 def add_pub_sub(node, topic: str, unit: str, kind: str = "publication") -> None:
+    """Record one HELICS topic and its unit on a tree node."""
     key = "publications" if kind == "publication" else "subscriptions"
 
     if key not in node.data:
@@ -256,6 +268,11 @@ def add_pub_sub(node, topic: str, unit: str, kind: str = "publication") -> None:
 
 
 def validate_tree(tree: Tree) -> None:
+    """Report every missing or unsupported field at once, then refuse to run.
+
+    Collected rather than raised one at a time so a misconfigured experiment is fixed in
+    one pass instead of one container start per mistake.
+    """
     validation_errors: list[str] = []
 
     for node in tree.all_nodes():
@@ -479,6 +496,7 @@ def validate_timeseries_coverage(
 
 
 def process_general_config(general_cfg: dict) -> dict:
+    """Normalise the `general:` block to ISO timestamps and an integer time step."""
     if "end_time" not in general_cfg or general_cfg["end_time"] is None:
         raise ValueError("[General] Missing required field 'end_time'.")
 
@@ -532,6 +550,11 @@ def process_general_config(general_cfg: dict) -> dict:
 
 
 def wire_pub_sub(tree: Tree) -> None:
+    """Derive every HELICS topic from the parent/child pairs in the tree.
+
+    Topics are named after the child's node id, which is why a federate discovers
+    its keys from the CST config at startup instead of building them by name.
+    """
     for node in tree.all_nodes():
         node.data.pop("publications", None)
         node.data.pop("subscriptions", None)
@@ -586,6 +609,7 @@ def wire_pub_sub(tree: Tree) -> None:
 
 
 def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
+    """Validate a tree config, normalise its `general:` block, and wire its topics."""
     if extracted.tree is None:
         raise ValueError("Tree config expected, but extracted.tree is None.")
 
@@ -648,6 +672,7 @@ def generate_run_metadata(experiment_path: str, general_cfg: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def transform(extracted: ExtractedConfig) -> TransformedConfig:
+    """Dispatch to the tree or legacy transform for an extracted config."""
     if extracted.mode == "legacy":
         return _transform_legacy_config(extracted)
 

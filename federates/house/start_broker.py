@@ -1,3 +1,5 @@
+"""Start a standalone HELICS broker for debugging federates outside Docker."""
+
 import helics as h
 import time
 

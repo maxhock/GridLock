@@ -1,20 +1,12 @@
-"""
-Template for creating a HELICS federate using CoSim Toolbox (CST).
+"""Starting point for a new federate class: the minimum a CST federate has to provide.
 
-This template demonstrates the minimal structure for a CST-based federate:
-1. Subclass cosim_toolbox.Federate
-2. Override create_federate() for custom initialization (optional)
-3. Override update_internal_model() for your simulation logic (required)
-4. Call create_federate(), run_cosim_loop(), destroy_federate() in main()
+CST owns the HELICS lifecycle, the time loop and the data exchange. A new federate
+subclasses `Federate`, must override `update_internal_model`, and may override
+`create_federate` for setup. Copy this directory and register the class in
+`composegen/load.py:map_params_to_class`.
 
-CST handles:
-- HELICS federate lifecycle (create/destroy)
-- Time loop management and time requests
-- Data exchange via data_from_federation/data_to_federation dicts
-
-You customize:
-- Domain-specific simulation logic in update_internal_model()
-- Any dynamic HELICS interface registration in create_federate()
+See README.md in this directory for the walkthrough, including the three other places
+composegen has to learn about a new class.
 """
 
 from cosim_toolbox import Federate
@@ -22,41 +14,18 @@ import argparse
 
 
 class ExampleFederate(Federate):
-    """
-    Example federate showing CST Federate class usage.
-
-    Attributes:
-        custom_state: Example of custom state for your simulation
-    """
+    """Example federate: counts its steps and prints them."""
 
     def __init__(self, federate_name):
-        """
-        Initialize the federate.
-
-        Args:
-            federate_name: Name of this federate in the federation
-        """
+        """Hold whatever state the simulation needs across steps."""
         super().__init__(federate_name)
         self.custom_state = None
 
     def create_federate(self, scenario_name, use_meta_db=False, use_data_db=False):
-        """
-        Override this method for custom initialization.
+        """Set up anything the simulation needs once the HELICS interfaces exist.
 
-        CST's base create_federate():
-        - Reads HELICS config from grid_config.json (or metadata DB)
-        - Creates HELICS federate object (self.hfed)
-        - Registers static publications/subscriptions from config
-
-        Override to add:
-        - Custom initialization logic
-        - Dynamic interface registration (subscriptions/publications)
-        - Load simulation-specific data files
-
-        Args:
-            scenario_name: Scenario name for metadata lookup
-            use_meta_db: Use CST metadata database (default: False, uses local config)
-            use_data_db: Use CST timeseries database for logging (default: False, uses CSV)
+        The base call reads the federation config and registers this federate's
+        publications and subscriptions; override to load data or add dynamic interfaces.
         """
         # Call parent to create HELICS federate from config
         super().create_federate(scenario_name, use_meta_db, use_data_db)
@@ -73,28 +42,10 @@ class ExampleFederate(Federate):
         # )
 
     def update_internal_model(self):
-        """
-        REQUIRED: Override this method with your simulation logic.
+        """Advance the simulation by one step - the one method a federate must provide.
 
-        This is called every simulation timestep after data is received.
-
-        Workflow:
-        1. Read inputs from self.data_from_federation dict
-           - Keys are subscription/input names from HELICS config
-           - Values are the received data
-
-        2. Run your simulation logic
-           - Update internal model state
-           - Perform calculations, solve equations, etc.
-
-        3. Write outputs to self.data_to_federation dict
-           - Keys are publication/endpoint names from HELICS config
-           - Values are the data to send
-
-        Example:
-            input_value = self.data_from_federation.get("input_topic", 0.0)
-            result = input_value * 2  # Your logic here
-            self.data_to_federation["output_topic"] = result
+        Read `self.data_from_federation`, update the model, write
+        `self.data_to_federation`. Called every step once inputs have arrived.
         """
         # Example: Read from federation
         # input_value = self.data_from_federation.get("example/input", 0.0)
@@ -112,7 +63,7 @@ class ExampleFederate(Federate):
 
 
 def parse_args():
-    """Parse command line arguments."""
+    """Read the scenario name and backend choices from the CLI."""
     parser = argparse.ArgumentParser(description="Example CST-based HELICS federate")
     parser.add_argument(
         "--scenario",
@@ -135,15 +86,7 @@ def parse_args():
 
 
 def main():
-    """
-    Main execution function.
-
-    CST federate lifecycle:
-    1. Create federate instance
-    2. create_federate() - Initialize HELICS and your simulation
-    3. run_cosim_loop() - Run main simulation loop until stop time
-    4. destroy_federate() - Clean up and disconnect
-    """
+    """Run the federate through CST's lifecycle: create, loop to stop time, destroy."""
     args = parse_args()
 
     # Step 1: Create federate instance

@@ -78,10 +78,12 @@ class GridFederate(Federate):
     """Pandapower grid federate. Overrides only ``update_internal_model``."""
 
     def __init__(self, federate_name: str, net: pp.pandapowerNet) -> None:
+        """Bind this federate to the net it solves."""
         super().__init__(federate_name)
         self.net = net
 
     def update_internal_model(self) -> None:
+        """Apply this step's loads, solve the power flow, publish voltages."""
         # 1. Apply received load values (filter out HELICS sentinel -1e+49)
         for key, value in self.data_from_federation.get("inputs", {}).items():
             idx = _parse_load_index(key)
@@ -142,11 +144,7 @@ class GridFederate(Federate):
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Namespace with scenario and federate_name.
-    """
+    """Read the scenario and federate name composegen put on the command line."""
     parser = argparse.ArgumentParser(description="Grid federate using CST")
     parser.add_argument(
         "--scenario",
@@ -182,21 +180,7 @@ def load_net_from_metadata(
     federate_name: str,
     use_meta_db: str = "json",
 ) -> pp.pandapowerNet:
-    """Load a pandapower net from the CST metadata store.
-
-    The infdb data setup container writes each grid's JSON
-    representation into the "custom_metadata" collection, keyed
-    by the federate name.
-
-    Args:
-        federate_name: Name of the federate (matches metadata key).
-
-    Returns:
-        pandapower network object.
-
-    Raises:
-        FileNotFoundError: If no custom_metadata entry exists for this name.
-    """
+    """Read this grid's pandapower net out of `custom_metadata`, where infdb put it."""
     md_kwargs = {"backend": use_meta_db}
     if use_meta_db == "json":
         md_kwargs["location"] = "meta_store"
@@ -230,18 +214,7 @@ def run_grid_federate(
     use_meta_db: str,
     use_data_db: str,
 ) -> None:
-    """Run a single GridFederate lifecycle.
-
-    Uses CST's built-in ``run()`` which calls
-    ``create_federate`` → ``run_cosim_loop`` → ``destroy_federate``.
-
-    Args:
-        federate_name: Unique HELICS federate name.
-        net: pandapower network object for this grid.
-        scenario_name: CST scenario name to look up in meta_store.
-        use_meta_db: Metadata backend type.
-        use_data_db: Data backend type.
-    """
+    """Run one grid federate: CST's ``run()`` does create, loop, destroy."""
     federate = GridFederate(federate_name, net)
     federate.run(
         scenario_name,
@@ -254,12 +227,7 @@ def main(
     scenario_name: str | None = None,
     federate_name: str | None = None,
 ) -> None:
-    """Load net from CST metadata store and run grid federate.
-
-    Args:
-        scenario_name: CST scenario name. If None, parsed from CLI.
-        federate_name: Federate name. If None, parsed from CLI.
-    """
+    """Fetch this grid's net and run it, taking the names from the CLI unless given."""
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario

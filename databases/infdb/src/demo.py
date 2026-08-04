@@ -1,9 +1,4 @@
-"""
-Demo module for database operations with InfDB.
-
-This module provides example functions for connecting to and querying
-the InfDB database using both the InfDB client and direct SQLAlchemy connections.
-"""
+"""Examples of connecting to and querying InfDB. Not used by any stage of a run."""
 
 import os
 
@@ -12,19 +7,11 @@ from sqlalchemy import create_engine
 
 
 def sql_demo(infdb):
-    """
-    Demonstrate SQL script execution using InfDB.
+    """Rebuild the output schema by running the `sql/` scripts in order.
 
-    Drops and recreates the output schema, then executes all SQL scripts
-    from the sql/ directory in alphabetical order. Format parameters are
-    passed to allow dynamic schema names in SQL templates.
-
-    Args:
-        infdb: InfDB client instance with database connection.
-
-    Note:
-        - SQL files can use placeholders like {output_schema}, {input_schema}
-        - Scripts are executed in alphabetical order (use prefixes: 01_, 02_)
+    Scripts run alphabetically, so they are prefixed `01_`, `02_`, and may use
+    `{input_schema}` / `{output_schema}` placeholders. No `sql/` directory exists
+    in this repo, so calling this as it stands would fail.
     """
     # Schema configuration
     format_params = {
@@ -42,18 +29,7 @@ def sql_demo(infdb):
 
 
 def database_demo(infdb):
-    """
-    Demonstrate database querying using InfDB client.
-
-    Retrieves building heat demand data from the kwp schema using
-    the InfDB database engine and loads it into a GeoDataFrame.
-
-    Args:
-        infdb: InfDB client instance with database connection.
-
-    Returns:
-        GeoDataFrame: Buildings with heat demand data and geometry.
-    """
+    """Read building geometries into a GeoDataFrame through the InfDB client."""
     engine = infdb.get_db_engine()
     sql = "SELECT * FROM opendata.buildings_lod2"
     gdf_buildings = gpd.read_postgis(sql, engine)
@@ -63,16 +39,9 @@ def database_demo(infdb):
 
 
 def database_demo_sqlalchemy(infdb):
-    """
-    Demonstrate direct SQLAlchemy database connection without using InfDB client
-    (not recommended - configs from infDB are not considered automatically).
+    """Run the same query straight through SQLAlchemy.
 
-    Creates a direct database connection using SQLAlchemy engine
-    and queries building heat demand data from the kwp schema.
-    Uses hardcoded connection parameters suitable for Docker environments.
-
-    Returns:
-        GeoDataFrame: Buildings with heat demand data and geometry.
+    Discouraged: bypassing the client also bypasses the InfDB config.
     """
     # Database connection parameters
     user = "infdb_user"
@@ -100,13 +69,5 @@ def database_demo_sqlalchemy(infdb):
 
 
 def get_env_variables(infdb):
-    """
-    Retrieve environment variables for the InfDB tool.
-
-    Args:
-        infdb: InfDB client instance with database connection.
-
-    Returns:
-        dict: Environment variables for the InfDB tool.
-    """
+    """Read the environment variables the InfDB tool was configured with."""
     return infdb.get_env_variables_dict()

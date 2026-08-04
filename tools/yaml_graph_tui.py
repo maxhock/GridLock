@@ -283,6 +283,7 @@ def flatten_visible_nodes(root: GraphNode) -> list[GraphNode]:
     visible: list[GraphNode] = []
 
     def visit(node: GraphNode) -> None:
+        """Collect a node, then everything below it."""
         visible.append(node)
         if node.children:
             for child in node.children:
@@ -305,6 +306,7 @@ def render_plain_tree(root: GraphNode) -> str:
     lines: list[str] = []
 
     def visit(node: GraphNode, prefix_parts: list[bool]) -> None:
+        """Emit one line per node, drawing the branch characters from its ancestry."""
         connector = ""
         if prefix_parts:
             leading = "".join(
@@ -471,6 +473,7 @@ def layout_graph(root: GraphNode) -> GraphLayout:
     child_ids_by_node: dict[str, list[str]] = {}
 
     def shift_subtree(node: GraphNode, delta_x: int) -> None:
+        """Move a node and its subtree sideways, keeping them together."""
         if delta_x == 0:
             return
         box = boxes[node.node_id]
@@ -489,6 +492,7 @@ def layout_graph(root: GraphNode) -> GraphLayout:
             shift_subtree_by_id(child, delta_x)
 
     def shift_subtree_by_id(node_id: str, delta_x: int) -> None:
+        """Same shift, reached by id - children are only known by id during layout."""
         if delta_x == 0:
             return
         box = boxes[node_id]
@@ -507,6 +511,7 @@ def layout_graph(root: GraphNode) -> GraphLayout:
             shift_subtree_by_id(child_id, delta_x)
 
     def place(node: GraphNode, left_x: int, top_y: int) -> int:
+        """Lay a node out above its children and return the x it is centred on."""
         width, height, title, detail = measure_node_box(node)
         node_y = top_y
         lines = detail.splitlines() if detail else []
