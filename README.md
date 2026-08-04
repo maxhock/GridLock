@@ -185,6 +185,7 @@ Every timeseries CSV must cover the full simulated duration — composegen check
 > The topology — which federates exist, where they sit on the grid, and what data they read — is fully config-driven; the device sizing is not.
 
 [`docs/experiment-reference.md`](docs/experiment-reference.md) is the full reference: every key, the required CSV columns per federate class, and the HELICS keys a run writes.
+[`docs/troubleshooting.md`](docs/troubleshooting.md) explains what a run's error messages mean, stage by stage — and which wrong results it will not warn you about.
 
 `tools/yaml_graph_tui.py` renders an experiment file as a browsable tree:
 
@@ -212,7 +213,7 @@ composegen/    Federation and compose-file generator (extract → transform → 
 config/        Experiment YAMLs and the preflight environment file
 data/input/    Grid workbooks and timeseries CSVs
 databases/     CST database stack (cstdb) and the InfDB grid resolver (infdb)
-docs/          Experiment reference and archived issue lists
+docs/          Experiment reference, troubleshooting, archived issue lists
 federates/     One directory per federate class, each with its own Dockerfile
 generated/     Generated compose file and metadata (git-ignored)
 tools/         Standalone helper scripts
