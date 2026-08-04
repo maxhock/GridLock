@@ -73,7 +73,8 @@ Under a house they are accepted and skipped with a note; directly under a grid t
 
 ### Grid source
 
-A grid names exactly one source. Naming both, or neither, is an error.
+A grid names exactly one source.
+Naming both, or neither, is an error.
 
 ```yaml
 config:

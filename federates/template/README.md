@@ -28,22 +28,29 @@ A federate directory is self-contained: its own `Dockerfile`, its own `requireme
 No packaging metadata is involved — the generated compose file invokes your entry point directly.
 
 **Pin your dependencies.** Everything that runs today is pinned, including EnergySim to a commit, because an unpinned rebuild changes the simulation without a commit on this side and makes the `git_commit` stored with each run a lie.
-This template is not pinned, and its `Dockerfile` installs only `helics[cli]` — it never installs `requirements.txt`, so `cosim_toolbox` is missing from the image as it stands. Fix both before your class is part of a run.
+This template is not pinned, and its `Dockerfile` installs only `helics[cli]` — it never installs `requirements.txt`, so `cosim_toolbox` is missing from the image as it stands.
+Fix both before your class is part of a run.
 
 `config.json` and the `helics run --path=runner.json` command in the `Dockerfile` are leftovers of the legacy config format.
-There is no `runner.json` here, the generated compose file overrides the command anyway, and a tree-mode federate gets its HELICS configuration from the CST metadata store rather than a static file. Delete them.
+There is no `runner.json` here, the generated compose file overrides the command anyway, and a tree-mode federate gets its HELICS configuration from the CST metadata store rather than a static file.
+Delete them.
 
 ### 2. Implement the federate
 
-Subclass `Federate`. Exactly one method is mandatory:
+Subclass `Federate`.
+Exactly one method is mandatory:
 
 - **`update_internal_model()`** — advance one step. Read `self.data_from_federation`, update your state, write `self.data_to_federation`. `self.granted_time` is the current simulation time in seconds.
 - **`create_federate()`** — optional. Call `super()` first, which reads the federation config and registers your publications and subscriptions, then do setup that needs those interfaces to exist.
 - **`on_enter_executing_mode()`** — optional. Publish an initial state at `t=0`, so the rest of the federation does not start from nothing. The grid and the load player both use it.
 
-**Do not construct your HELICS keys.** composegen derives key names from the experiment tree, not from a federate's own name, so a federate that builds `f"{self.federate_name}/active_power"` will register a key nobody publishes to. Discover them instead: `federates/house/main.py` looks up single interfaces by suffix (`_find_pub_key` / `_find_sub_key`), `house_player` scans for a whole family of them (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given.
+**Do not construct your HELICS keys.**
+composegen derives key names from the experiment tree, not from a federate's own name, so a federate that builds `f"{self.federate_name}/active_power"` will register a key nobody publishes to.
+Discover them instead: `federates/house/main.py` looks up single interfaces by suffix (`_find_pub_key` / `_find_sub_key`), `house_player` scans for a whole family of them (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given.
 
-**Fail loudly.** If a value you need is missing, raise and name it. Most of the validation in this project exists because a run that "succeeded" with stale, zero, or substituted data is the failure mode it keeps hitting.
+**Fail loudly.**
+If a value you need is missing, raise and name it.
+Most of the validation in this project exists because a run that "succeeded" with stale, zero, or substituted data is the failure mode it keeps hitting.
 
 ### 3. Register the class in composegen
 
@@ -62,7 +69,8 @@ Missing the `map_params_to_class` entry is the quiet one: the lookup falls throu
 If your federate injects or draws power, add it to `LOAD_PLACED_CLASSES` in `composegen/load.py` as well.
 The grid identifies incoming power purely by the `load_<idx>` segment of the HELICS key, so a federate wired onto a bare `active_power` key is silently dropped from the power flow — it will run, publish, and move no power.
 
-New validation belongs in `transform.py`, new output in `load.py`. Extract and transform never write and never touch the CST store, which is what makes a bad experiment fail before there is anything to clean up.
+New validation belongs in `transform.py`, new output in `load.py`.
+Extract and transform never write and never touch the CST store, which is what makes a bad experiment fail before there is anything to clean up.
 
 ## What the generated container gives you
 
