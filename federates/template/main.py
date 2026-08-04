@@ -4,6 +4,9 @@ CST owns the HELICS lifecycle, the time loop and the data exchange. A new federa
 subclasses `Federate`, must override `update_internal_model`, and may override
 `create_federate` for setup. Copy this directory and register the class in
 `composegen/load.py:map_params_to_class`.
+
+See README.md in this directory for the walkthrough, including the three other places
+composegen has to learn about a new class.
 """
 
 from cosim_toolbox import Federate
