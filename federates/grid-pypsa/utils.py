@@ -1,3 +1,5 @@
+"""Translate a pandapower-style Excel workbook into a PyPSA network."""
+
 import pandas as pd
 import pypsa
 import numpy as np
@@ -16,6 +18,7 @@ class PyPSANetworkBuilder:
     """
 
     def __init__(self, file_path: str) -> None:
+        """Read the workbook and check it holds the sheets a network needs."""
         self.network_file: str = file_path
         self._load_data_from_excel()
         # Check for required sheets using original (user-facing) sheet names
@@ -29,22 +32,26 @@ class PyPSANetworkBuilder:
         self.net: pypsa.Network = pypsa.Network()
 
     def _load_data_from_excel(self):
+        """Expose every sheet as an `input_<sheet>` attribute."""
         self.data = pd.read_excel(self.network_file, sheet_name=None)
         for sheet, df in self.data.items():
             clean_name = "input_" + sheet.strip().replace(" ", "_")
             setattr(self, clean_name, df)
 
     def _add_buses(self):
+        """Add every bus at its nominal voltage."""
         for row in self.input_bus.itertuples():
             self.net.add("Bus", name=str(row.Index), v_nom=row.vn_kv)
 
     def _add_ext_grid(self):
+        """Model the external grid as the network's slack generator."""
         bus = str(self.input_ext_grid.bus[0])
         self.net.add("Generator", name="Slack", bus=bus, control="Slack")
         self.net.buses.loc[bus, "v_mag_pu_set"] = self.input_ext_grid.vm_pu[0]
         self.ext_grid_idx = bus
 
     def _add_trafos(self):
+        """Add each transformer, converting its percentages to impedances."""
         for row in self.input_trafo.itertuples():
             bus_from = str(row.hv_bus)
             bus_to = str(row.lv_bus)
@@ -60,6 +67,7 @@ class PyPSANetworkBuilder:
             )
 
     def _add_lines(self):
+        """Add each line, scaling its per-km impedance by its length."""
         for row in self.input_line.itertuples():
             self.net.add(
                 "Line", name=str(row.Index),
@@ -71,6 +79,7 @@ class PyPSANetworkBuilder:
             )
 
     def _add_loads(self):
+        """Add each load at its workbook setpoint; HELICS overwrites these per step."""
         for row in self.input_load.itertuples():
             self.net.add(
                 "Load", name=str(row.Index),
@@ -79,6 +88,7 @@ class PyPSANetworkBuilder:
             )
 
     def _add_gens(self):
+        """Add each voltage-controlled generator and set its bus's voltage target."""
         for row in self.input_gen.itertuples():
             self.net.add(
                 "Generator", name=str(row.Index),
@@ -90,6 +100,7 @@ class PyPSANetworkBuilder:
                                "v_mag_pu_set"] = row.vm_pu
 
     def _add_sgens(self):
+        """Add each static generator, prefixed so it cannot clash with a generator."""
         for row in self.input_sgen.itertuples():
             self.net.add(
                 "Generator", name=f"s_gen{str(row.Index)}",
@@ -98,6 +109,7 @@ class PyPSANetworkBuilder:
             )
 
     def _add_shunts(self):
+        """Add each shunt, converting its power rating to an admittance."""
         for row in self.input_shunt.itertuples():
             self.net.add(
                 "ShuntImpedance", name=str(row.Index),
@@ -130,6 +142,7 @@ class PyPSANetworkBuilder:
         return self.net.generators
 
     def create_network(self):
+        """Build the network, adding the optional components only where sheets exist."""
         self._add_buses()
         self._add_ext_grid()
         self._add_lines()
@@ -144,14 +157,14 @@ class PyPSANetworkBuilder:
             self._add_sgens()
 
     def run_pf(self):
+        """Solve the power flow."""
         self.net.pf()
 
     def res_ext_grid(self) -> float:
-        """
-        Returns the power at the external grid bus after power flow calculation.
-        If there are loads at the ext_grid bus, their setpoint is added to the bus power.
-        Returns:
-            float: Power at the external grid bus (MW)
+        """Report the power drawn through the external grid connection, in MW.
+
+        Any load sitting on the slack bus is added back in, since the bus result nets it
+        off against the infeed.
         """
         if self.net.buses_t.p.empty:
             raise RuntimeError(

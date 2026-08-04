@@ -1,3 +1,5 @@
+"""Run the house simulator standalone, without HELICS, to check its physics."""
+
 import jax
 import jax.numpy as jnp
 import pandas as pd
@@ -12,6 +14,7 @@ import tools.sample_data_generator as sample_data_generator
 from build_my_house import create_2_room_house
 
 def run():
+    """Simulate ten days under a thermostat controller and write the history to CSV."""
     # 1. Setup Data & Config
     sample_data_generator.create_sample_data(n_days=10)
     dataset = SimulationDataset(sample_data_generator.FILE_NAME, sample_data_generator.DT_SECONDS)
@@ -41,8 +44,10 @@ def run():
     # 2. Define the Compiled Scan Loop
     @jax.jit
     def run_simulation(sim_carry, exo_sequence):
-        
+        """Compile the whole run into one JAX scan over the exogenous trace."""
+
         def scan_step(carry, exo_step):
+            """Advance one step: thermostat decides, simulator steps."""
             (current_sim, )  = carry
             assert isinstance(current_sim, JAXSimulator)
 

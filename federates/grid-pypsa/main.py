@@ -1,6 +1,7 @@
-"""
-Grid federate using CoSim Toolbox (CST).
-Loads pandapower network, runs power flow, exchanges data via HELICS.
+"""Grid federate backed by PyPSA instead of pandapower.
+
+Not wired into tree mode - it has no entry in `composegen/load.py:map_params_to_class`,
+and its dependencies are unpinned. Pin them before making it part of a run.
 """
 
 from cosim_toolbox.sims import Federate
@@ -13,9 +14,10 @@ from utils import PyPSANetworkBuilder
 
 
 class GridFederate(Federate):
-    """Grid federate with pandapower power flow simulation."""
+    """Grid federate that solves its power flow with PyPSA."""
 
     def __init__(self, federate_name, grid_path):
+        """Bind this federate to the workbook its network is built from."""
         super().__init__(federate_name)
         self.net = None
         self.pypsa_net = None  # PyPSANetworkBuilder instance
@@ -105,6 +107,7 @@ class GridFederate(Federate):
 
 
 def parse_args():
+    """Read the grid workbook path from the CLI."""
     parser = argparse.ArgumentParser(description="Grid federate using CST")
     parser.add_argument(
         "--grid_file",
@@ -117,6 +120,7 @@ def parse_args():
 
 
 def main():
+    """Run the PyPSA grid federate through CST's lifecycle."""
     args = parse_args()
     grid_path = os.path.join("/data", "input", args.grid_file)
     federate = GridFederate(

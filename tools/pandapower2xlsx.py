@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+"""Export pandapower's stock Kerber grids to `data/input/` for use as local layouts."""
+
 import os
 import pandapower as pp
 import pandapower.networks as pn
-
-# File: tools/pandapower2xlsx.py
-# Purpose: load a pandapower default network and export it to ../data/input
 
 net = pn.create_kerber_landnetz_freileitung_1()
 excel_path = os.path.join(

@@ -1,4 +1,8 @@
-# house/main.py
+"""House federate entry point: simulates one building and publishes its grid exchange.
+
+Usage:
+    python house/main.py --scenario TestGrid_20260804_120000 --federate_name house_4
+"""
 
 from dataclasses import asdict, is_dataclass
 import logging
@@ -37,12 +41,10 @@ logger = logging.getLogger(__name__)
 
 
 class NumpyJSONEncoder(json.JSONEncoder):
-    """
-    A JSON encoder that can handle NumPy/JAX data types.
-    Converts arrays to lists, and numpy/jax floats/ints to python native types.
-    """
+    """JSON encoder for the NumPy/JAX types EnergySim returns."""
 
     def default(self, obj):
+        """Convert an array to a list and a NumPy/JAX scalar to a float or int."""
         if isinstance(obj, np.ndarray) or isinstance(obj, jnp.ndarray):
             return obj.tolist()
         if isinstance(obj, (np.float16, np.float32, np.float64)) or isinstance(
@@ -60,9 +62,7 @@ class NumpyJSONEncoder(json.JSONEncoder):
 
 
 def serialize_system_state(state: SystemState) -> dict:
-    """
-    SystemState -> pure python dict for controller consumption.
-    """
+    """Reduce the simulator state to the fields the HEMS reads off the `state` topic."""
     return {
         "thermal": {
             "T_vector": np.array(state.thermal.T_vector).tolist(),
@@ -92,6 +92,7 @@ def serialize_system_state(state: SystemState) -> dict:
 
 
 def serialize_exogenous_data(exo: Any) -> dict:
+    """Flatten one row of the exogenous dataset into a dict for the published record."""
     if is_dataclass(exo):
         return asdict(exo)
     if hasattr(exo, "__dict__"):
@@ -100,6 +101,7 @@ def serialize_exogenous_data(exo: Any) -> dict:
 
 
 def setup_simulator(config_path: str, dt_seconds: int) -> tuple:
+    """Build the EnergySim simulator for this house and report its room count."""
     t_config = create_2_room_house()
     n_rooms = int(len(t_config.room_air_indices))
 
@@ -143,6 +145,7 @@ def get_action(action_value: Any) -> Dict[str, Any]:
 
 
 def dict_to_system_actions(action_dict: Dict[str, Any], n_rooms: int) -> SystemActions:
+    """Turn a HEMS control message into simulator actions, idling whatever it omits."""
     if not isinstance(action_dict, dict):
         logger.warning(
             f"dict_to_system_actions received non-dict ({type(action_dict)}): "
@@ -170,6 +173,7 @@ class HouseFederate(Federate):
         federate_name: str,
         config_path: str,
     ):
+        """Record the config path; the simulator is built in `create_federate`."""
         super().__init__(federate_name)
         self.config_path = config_path
         self.simulator: JAXSimulator | None = None
@@ -403,11 +407,7 @@ class HouseFederate(Federate):
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Namespace with scenario and federate_name.
-    """
+    """Read the scenario, federate name and config path composegen put on the CLI."""
     parser = argparse.ArgumentParser(description="House federate using CST")
     parser.add_argument(
         "--scenario",
@@ -450,13 +450,7 @@ def main(
     federate_name: str | None = None,
     config_path: str | None = None,
 ) -> None:
-    """Run house federate using CST lifecycle.
-
-    Args:
-        scenario_name: CST scenario name. If None, parsed from CLI.
-        federate_name: Federate name. If None, parsed from CLI.
-        config_path: Path to house config YAML. If None, parsed from CLI.
-    """
+    """Run one house federate, taking the names from the CLI unless given."""
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario

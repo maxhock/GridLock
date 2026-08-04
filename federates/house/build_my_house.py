@@ -1,10 +1,10 @@
+"""The RC thermal network the house federate simulates."""
+
 import jax.numpy as jnp
 from energysim.core.network_builder import RCNetworkBuilder
 
 def create_2_room_house():
-    """
-    Creates a simple 2-room house configuration (Living Room + Bedroom).
-    """
+    """Build the RC thermal network every house simulates: two coupled rooms."""
     # 1. Initialize builder
     builder = RCNetworkBuilder(n_rooms=2)
 

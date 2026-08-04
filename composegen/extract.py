@@ -1,4 +1,5 @@
-# composegen/extract.py
+"""ETL stage 1: read an experiment YAML into an ExtractedConfig, tree or legacy."""
+
 from __future__ import annotations
 
 import yaml
@@ -17,6 +18,8 @@ ConfigMode = Literal["legacy", "tree"]
 
 @dataclass
 class ExtractedConfig:
+    """The experiment YAML as read from disk, plus the paths the later stages need."""
+
     mode: ConfigMode
     raw_config: Any
     config_path: Path
@@ -32,6 +35,7 @@ class ExtractedConfig:
 # ---------------------------------------------------------------------------
 
 def get_num_nodes(grid_file_path: Path) -> int:
+    """Count a workbook's loads, so legacy mode knows how many federates to place."""
     if not grid_file_path.exists():
         raise FileNotFoundError(f"Grid file not found: {grid_file_path}")
 
@@ -49,6 +53,7 @@ def _extract_legacy_config(
     data_input_path: Path,
     output_path: Path,
 ) -> ExtractedConfig:
+    """Read a legacy `federates:` config with OmegaConf, resolving interpolations."""
     conf: DictConfig = OmegaConf.load(config_path)
 
     if "federates" not in conf:
@@ -81,6 +86,7 @@ def _extract_legacy_config(
 # ---------------------------------------------------------------------------
 
 def validate_location_queries(location: list, grid_id: str) -> None:
+    """Reject InfDB location queries that infdb would only fail on much later."""
     if not isinstance(location, list):
         raise ValueError(
             f"Location for grid '{grid_id}' must be a list of query dicts, "
@@ -110,6 +116,7 @@ def validate_location_queries(location: list, grid_id: str) -> None:
 
 
 def add_to_tree(tree: Tree, node_dict: dict, parent: str | None = None) -> None:
+    """Insert a federate and its `sub_federates` under a dotted node id."""
     node_id = f"{parent}.{node_dict.get('id')}" if parent else node_dict.get("id")
 
     if not node_id:
@@ -140,6 +147,11 @@ def add_to_tree(tree: Tree, node_dict: dict, parent: str | None = None) -> None:
 
 
 def _read_layout_buses(layout_path: Path) -> list[int]:
+    """List the buses a workbook's loads sit on.
+
+    Dead code: `_extract_tree_config` always records `grid_nodes[grid_id] = None`, so no
+    caller reaches this. Placement runs on load indices in `load.py`, not on buses.
+    """
     if not layout_path.exists():
         raise FileNotFoundError(f"Grid layout file not found: {layout_path}")
 
@@ -156,6 +168,11 @@ def _extract_tree_config(
     data_input_path: Path,
     output_path: Path,
 ) -> ExtractedConfig:
+    """Parse a `federation:` config into a treelib tree and check every grid's source.
+
+    Read with `yaml.safe_load` rather than OmegaConf, so `${...}` interpolation does not
+    resolve in tree configs.
+    """
     print(f"Loading tree-based federation config from {config_path}")
 
     with open(config_path, "r") as f:
@@ -224,6 +241,7 @@ def extract(
     data_input_path: Path,
     output_path: Path,
 ) -> ExtractedConfig:
+    """Dispatch on the top-level key: `federation:` is tree mode, `federates:` old."""
     with open(config_path, "r") as f:
         raw = yaml.safe_load(f)
 

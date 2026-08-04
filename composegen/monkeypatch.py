@@ -1,3 +1,9 @@
+"""Replacements for the CST DockerRunner and FederateConfig methods that emit compose.
+
+Everything that changes the shape of `generated/docker-compose.yaml` belongs here rather
+than in the upstream CoSim Toolbox.
+"""
+
 from typing import Optional
 from pathlib import Path
 

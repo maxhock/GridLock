@@ -1,3 +1,5 @@
+"""Bring a house's exogenous dataset onto the simulation's own time step."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +14,8 @@ from pandas.api.types import is_numeric_dtype
 
 @dataclass(frozen=True)
 class AlignedTimeseries:
+    """A dataset ready for the simulator, and what alignment did to get it there."""
+
     path: str
     source_dt_seconds: int
     target_dt_seconds: int
@@ -38,6 +42,7 @@ def _write_csv_atomic(df: pd.DataFrame, output_path: Path) -> None:
 
 
 def _infer_source_dt_seconds(timestamps: pd.Series) -> int:
+    """Infer a CSV's own time step from the most common gap between its timestamps."""
     deltas = timestamps.sort_values().diff().dropna().dt.total_seconds()
     positive_deltas = deltas[deltas > 0]
     if positive_deltas.empty:
@@ -65,6 +70,11 @@ def prepare_aligned_timeseries(
     target_dt_seconds: int,
     timestamp_column: str = "timestamp",
 ) -> AlignedTimeseries:
+    """Resample a dataset to the federation's time step, caching the result on disk.
+
+    A dataset already on the target step is used as it is. Otherwise coarser steps are
+    averaged and finer ones interpolated, so a house reads one row per simulation step.
+    """
     source = Path(source_path)
     if not source.exists():
         raise FileNotFoundError(f"Exogenous dataset not found: {source}")

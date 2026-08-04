@@ -1,4 +1,9 @@
-# controller/main.py
+"""HEMS federate entry point: runs an MPC over one house's battery.
+
+Usage:
+    python controller/main.py --scenario TestGrid_20260804_120000 \
+        --federate_name house_4.hems_0 --house_federate local-grid.house_4
+"""
 
 import json
 import logging
@@ -31,7 +36,7 @@ DEFAULT_MPC_HORIZON_STEPS = 24
 
 
 def setup_mpc_and_data(dt_seconds: int, exogenous_csv_path: str, horizon: int):
-    """Setup MPC solver and aligned exogenous data.
+    """Build the MPC solver and the forecast dataset it optimises against.
 
     ``exogenous_csv_path`` must be the dataset of the house this controller
     drives. The MPC optimises against a load/PV/price forecast, so reading a
@@ -86,6 +91,7 @@ class ControllerFederate(Federate):
         house_federate_name: str,
         horizon: int = DEFAULT_MPC_HORIZON_STEPS,
     ):
+        """Record which house this drives; the MPC is built in `create_federate`."""
         super().__init__(federate_name)
         self.house_federate_name = house_federate_name
         self.horizon = horizon
@@ -265,11 +271,7 @@ class ControllerFederate(Federate):
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Namespace with scenario and federate_name.
-    """
+    """Read the scenario, federate names and MPC horizon composegen put on the CLI."""
     parser = argparse.ArgumentParser(description="HEMS controller federate using CST")
     parser.add_argument(
         "--scenario",
@@ -326,15 +328,7 @@ def main(
     house_federate_name: str | None = None,
     horizon: int | None = None,
 ) -> None:
-    """Run the HEMS controller federate using CST lifecycle.
-
-    Args:
-        scenario_name: CST scenario name. If None, parsed from CLI.
-        federate_name: Federate name. If None, parsed from CLI.
-        house_federate_name: Federate name of the controlled house. If None,
-            parsed from CLI.
-        horizon: Steps the MPC optimises over. If None, parsed from CLI.
-    """
+    """Run one HEMS federate, taking the names and horizon from the CLI unless given."""
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario

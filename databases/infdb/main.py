@@ -1,12 +1,7 @@
-"""data setup data resolver for GridLock.
+"""Grid resolver: turns an experiment's grid source into nets in the CST metadata store.
 
-Reads experiment.yml grid sources, fetches location-based grids from InfDB,
-and writes resolved data into CST stores so all federates can read it at
-runtime without needing InfDB access themselves.
-
-Grid nets → CST metadata store (collection "custom_metadata")
-Timeseries → CST timeseries store (preloaded TSRecords)  [future]
-Manifest   → generated/manifest.json (federate names for composegen)
+Each net is written to `custom_metadata` under its grid federate's name, so this
+is the only stage needing InfDB access - federates read the net back from CST.
 """
 
 import argparse
@@ -54,11 +49,7 @@ def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[st
     host and port configurable from the shared preflight env file, we
     materialize a temporary config file with the env values written in.
 
-    Args:
-        config_dir: Directory containing ``config-infdb.yml``.
-
-    Returns:
-        Tuple of ``(config_dir_to_use, temp_dir_to_cleanup)``.
+    Returns ``(config dir to use, temp dir to clean up or None)``.
     """
     config_path = Path(config_dir) / "config-infdb.yml"
     with open(config_path) as handle:
@@ -95,11 +86,7 @@ def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[st
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments.
-
-    Returns:
-        Namespace with experiment_path and meta_store_path.
-    """
+    """Read the experiment path and meta store location `run.sh` put on the CLI."""
     parser = argparse.ArgumentParser(
         description="data setup data resolver: InfDB → CST stores"
     )
@@ -120,19 +107,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def extract_grid_config(experiment_path: str) -> dict:
-    """Extract grid federation config from experiment YAML.
+    """Read where the grid comes from: an InfDB location or a local layout.
 
-    Reads the top-level federation node and returns its id and grid source.
-
-    Args:
-        experiment_path: Path to experiment YAML file.
-
-    Returns:
-        Dict with grid_id (str), source type, source value, and use_meta_db.
-
-    Raises:
-        FileNotFoundError: If experiment file doesn't exist.
-        ValueError: If neither a location query nor local layout is defined.
+    Returns a dict tagged by `source`: `"infdb"` carries `location`, `"layout"`
+    carries `layout`. Both carry `grid_id` and `use_meta_db`.
     """
     path = Path(experiment_path)
     if not path.exists():
@@ -182,21 +160,7 @@ def write_grid_to_metadata(
     meta_store_path: str,
     use_meta_db: str,
 ) -> list[str]:
-    """Write resolved pandapower net JSON strings to CST metadata store.
-
-    Each net is stored as a JSON string in the "custom_metadata"
-    collection, keyed by its federate name.  Counts are extracted
-    directly from the raw JSON without importing pandapower.
-
-    Args:
-        grid_id: Base grid identifier (e.g. "lv-grid").
-        net_list: List of (federate_name, net_json_str) tuples.
-        meta_store_path: Path to meta_store directory.
-        use_meta_db: Metadata backend type from experiment config.
-
-    Returns:
-        List of federate names that were written.
-    """
+    """Store each net under its grid federate's name, and report those names."""
     from src.infdb_data import _net_table_count
 
     md_kwargs = {"backend": use_meta_db}
@@ -241,12 +205,7 @@ def main(
     experiment_path: str | None = None,
     meta_store_path: str | None = None,
 ) -> None:
-    """Resolve InfDB data and write to CST stores.
-
-    Args:
-        experiment_path: Path to experiment YAML. Parsed from CLI if None.
-        meta_store_path: Path to meta_store dir. Parsed from CLI if None.
-    """
+    """Resolve the experiment's grid and store it for the rest of the run to read."""
     if experiment_path is None:
         args = parse_args()
         experiment_path = args.experiment

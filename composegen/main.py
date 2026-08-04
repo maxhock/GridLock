@@ -1,3 +1,5 @@
+"""Entry point of the composegen container: run the extract → transform → load ETL."""
+
 import argparse
 import os
 from pathlib import Path
@@ -7,6 +9,7 @@ from transform import transform
 from load import load
 
 def main() -> None:
+    """Turn the experiment YAML into a CST federation and a docker-compose file."""
     parser = argparse.ArgumentParser(description="Generate federation configuration.")
     parser.add_argument(
         "--config", "-c", type=str,

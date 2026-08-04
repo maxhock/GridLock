@@ -1,5 +1,4 @@
-# energysim/cosim/fake_controller_federate.py
-# (Keep imports and class definition as before)
+"""Debugging stand-in for the HEMS: publishes a random battery action every step."""
 
 import helics as h
 import random
@@ -11,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def setup_federate_and_publication(time_delta: int, action_topic: str) -> tuple:
-
+    """Create a value federate publishing on one action topic."""
     logging.info("Creating HELICS federate.")
     fed_info = h.helicsCreateFederateInfo()
     h.helicsFederateInfoSetCoreTypeFromString(fed_info, "zmq")
@@ -37,6 +36,7 @@ def publish_action(pub: h.HelicsPublication, action: dict):
 
 
 def run_federate(fed, pub, stop_time):
+    """Publish an action every step until stop time, then disconnect."""
     logging.info("Entering HELICS execution mode.")
     h.helicsFederateEnterExecutingMode(fed)
 
