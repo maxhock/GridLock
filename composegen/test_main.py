@@ -479,7 +479,7 @@ def test_service_omits_depends_on_when_none() -> None:
 
 
 def test_federate_docker_points_broker_address_at_compose_service_name() -> None:
-    calls = {}
+    calls: dict[str, str] = {}
     stub = SimpleNamespace(
         helics=SimpleNamespace(config=lambda key, value: calls.setdefault(key, value))
     )

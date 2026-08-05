@@ -40,9 +40,7 @@ def test_prepare_aligned_timeseries_rejects_non_positive_target_step(tmp_path) -
     path = _write_csv(
         tmp_path,
         "hourly.csv",
-        "timestamp,base_load\n"
-        "2024-01-01 00:00:00,100\n"
-        "2024-01-01 01:00:00,200\n",
+        "timestamp,base_load\n" "2024-01-01 00:00:00,100\n" "2024-01-01 01:00:00,200\n",
     )
 
     with pytest.raises(ValueError, match="target_dt_seconds"):
@@ -102,9 +100,7 @@ def test_prepare_aligned_timeseries_upsamples_by_interpolating(tmp_path) -> None
     path = _write_csv(
         tmp_path,
         "two_hourly.csv",
-        "timestamp,base_load\n"
-        "2024-01-01 00:00:00,100\n"
-        "2024-01-01 02:00:00,300\n",
+        "timestamp,base_load\n" "2024-01-01 00:00:00,100\n" "2024-01-01 02:00:00,300\n",
     )
 
     result = prepare_aligned_timeseries(path, 3600)

@@ -86,7 +86,7 @@ def test_extract_grid_config_uses_declared_use_meta_db(tmp_path) -> None:
 
 
 def _net_json(bus_rows: int = 0, load_rows: int = 0) -> dict:
-    net = {"_object": {}}
+    net: dict = {"_object": {}}
     if bus_rows:
         net["_object"]["bus"] = {
             "_object": json.dumps({"index": list(range(bus_rows))})
@@ -145,8 +145,8 @@ class _StubConnection:
     def __enter__(self):
         return _StubDB(self._infdb)
 
-    def __exit__(self, *exc) -> bool:
-        return False
+    def __exit__(self, *exc) -> None:
+        return None
 
 
 class _StubInfDB:

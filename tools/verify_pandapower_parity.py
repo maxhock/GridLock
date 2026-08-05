@@ -13,19 +13,44 @@ from __future__ import annotations
 
 import argparse
 import glob
+import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pandapower as pp
 import psycopg2
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "federates" / "house_player"))
-sys.path.insert(0, str(REPO_ROOT / "federates" / "grid"))
 
-from src.load_player import load_timeseries, lookup_power  # noqa: E402
-from main import sanitize_net_for_power_flow  # noqa: E402
+
+def _load_module(name: str, path: Path) -> ModuleType:
+    """Load a component's script-style module by exact path.
+
+    Every federate directory is self-contained and unpackaged (see AGENTS.md),
+    so `federates/grid/main.py` and `federates/house_player/src/load_player.py`
+    can't both be reached with a plain `import` without their bare module
+    names ("main", "src") colliding with the same-named modules other
+    components already carry. Loading by path sidesteps that entirely.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_grid_main = _load_module(
+    "gridlock_tools_grid_main", REPO_ROOT / "federates" / "grid" / "main.py"
+)
+_load_player = _load_module(
+    "gridlock_tools_load_player",
+    REPO_ROOT / "federates" / "house_player" / "src" / "load_player.py",
+)
+sanitize_net_for_power_flow = _grid_main.sanitize_net_for_power_flow
+load_timeseries = _load_player.load_timeseries
+lookup_power = _load_player.lookup_power
 
 
 TOLERANCE_PU = 1e-6
@@ -92,7 +117,7 @@ def _recorded_voltages(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f'SELECT sim_time, data_name, data_value '
+                f"SELECT sim_time, data_name, data_value "
                 f'FROM "{analysis_name}Analysis".hdt_double '
                 f"WHERE scenario = %s AND federate = %s AND data_name LIKE %s",
                 (scenario, grid_fed_name, f"{grid_fed_name}/load_%/voltage"),

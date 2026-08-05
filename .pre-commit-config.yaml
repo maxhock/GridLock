@@ -5,7 +5,16 @@ repos:
       - id: mypy
         args: [--ignore-missing-imports, --explicit-package-bases]
         additional_dependencies: [types-PyYAML, types-requests]
-        exclude: '\.ipynb$'
+        # test_main.py exists once per component (grid, house, house_player,
+        # composegen, infdb) and each imports its own sibling `main`/`house`
+        # module by its plain, unqualified name (matching how the component
+        # actually runs - see AGENTS.md "Each federate directory is
+        # self-contained"). mypy resolves module names globally across a
+        # single run, so more than one same-named top-level module collides
+        # once more than one test file imports it - unrelated to whether any
+        # individual file type-checks cleanly. These files are already
+        # verified by pytest inside each component's Docker `test` stage.
+        exclude: '(\.ipynb$|(^|/)test_main\.py$)'
 
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.12.5
