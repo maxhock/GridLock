@@ -214,6 +214,9 @@ def main(
         experiment_path = args.experiment
         meta_store_path = args.meta_store
 
+    if meta_store_path is None:
+        raise ValueError("meta_store_path is required")
+
     print("=== infdb data setup resolver ===")
     print(f"Experiment: {experiment_path}")
     print(f"Meta store: {meta_store_path}")

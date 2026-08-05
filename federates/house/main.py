@@ -88,7 +88,7 @@ def serialize_system_state(state: SystemState) -> dict:
 
 def serialize_exogenous_data(exo: Any) -> dict:
     """Flatten one row of the exogenous dataset into a dict for the published record."""
-    if is_dataclass(exo):
+    if is_dataclass(exo) and not isinstance(exo, type):
         return asdict(exo)
     if hasattr(exo, "__dict__"):
         return dict(exo.__dict__)
@@ -288,6 +288,7 @@ class HouseFederate(Federate):
 
     def on_enter_executing_mode(self) -> None:
         """Reset and publish the initial t=0 state."""
+        assert self.simulator is not None, "create_federate must run first"
         self.simulator.reset()
         state = self.simulator.state
         result = {
@@ -450,8 +451,8 @@ def main(
         federate_name = args.federate_name
         config_path = args.config
 
-    if scenario_name is None or federate_name is None:
-        raise ValueError("scenario_name and federate_name are required")
+    if scenario_name is None or federate_name is None or config_path is None:
+        raise ValueError("scenario_name, federate_name and config_path are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 

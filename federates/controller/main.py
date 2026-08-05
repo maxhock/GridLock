@@ -222,6 +222,10 @@ class ControllerFederate(Federate):
 
     def update_internal_model(self) -> None:
         """Advance the controller by one CST-controlled time step."""
+        assert self.mpc is not None, "create_federate must run first"
+        assert self.dataset is not None, "create_federate must run first"
+        assert self.sim_template is not None, "create_federate must run first"
+
         dt_seconds = int(self.period)
         step_idx = int(self.granted_time // dt_seconds)
 

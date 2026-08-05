@@ -761,7 +761,9 @@ def _report_unclaimed_loads(
     if not unclaimed:
         return
 
-    shown = unclaimed if len(unclaimed) <= 20 else unclaimed[:20] + ["..."]
+    shown: list[int | str] = list(unclaimed[:20])
+    if len(unclaimed) > 20:
+        shown.append("...")
     print(
         f"  {len(unclaimed)} of {len(all_loads)} load(s) in '{grid_fed_name}' "
         f"are not driven by any federate and stay at 0 W: {shown}"
@@ -1270,7 +1272,7 @@ def _add_generic_tree_pubsub_groups(
             continue
 
         for pub_fed in publishers:
-            key_format = {
+            key_format: dict[str, Any] = {
                 "src": {
                     "from_fed": pub_fed,
                     "keys": ["", ""],

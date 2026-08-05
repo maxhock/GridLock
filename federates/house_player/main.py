@@ -84,6 +84,11 @@ def main(
         federate_name = args.federate_name
         timeseries_path = args.timeseries
 
+    if scenario_name is None or federate_name is None or timeseries_path is None:
+        raise ValueError(
+            "scenario_name, federate_name and timeseries_path are required"
+        )
+
     use_meta_db, use_data_db = get_db_backends_from_env()
 
     run_load_player(
