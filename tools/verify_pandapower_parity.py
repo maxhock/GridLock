@@ -12,7 +12,6 @@ environment the repo's .venv already provides (pandapower, psycopg2).
 from __future__ import annotations
 
 import argparse
-import glob
 import importlib.util
 import sys
 from pathlib import Path
@@ -61,22 +60,13 @@ def _load_experiment(config_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def _latest_scenario_file(analysis_name: str) -> Path:
-    """Find the scenario JSON the run just wrote (use_meta_db: "json" for this
-    experiment keeps this a local file read instead of a Mongo query)."""
-    pattern = str(REPO_ROOT / "generated" / "scenarios" / f"{analysis_name}_*.json")
-    matches = sorted(glob.glob(pattern))
-    if not matches:
-        raise FileNotFoundError(f"No scenario files found matching {pattern}")
-    return Path(matches[-1])
-
-
 def _independent_pandapower_run(
     layout_path: Path,
     csv_path: Path,
     load_indices: list[int],
     time_step: int,
-    duration: int,
+    start_time: int,
+    end_time: int,
 ) -> dict[float, dict[int, float]]:
     """Replay the same timeseries directly against pandapower, bypassing HELICS/CST."""
     raw_net = pp.from_excel(layout_path)
@@ -90,7 +80,7 @@ def _independent_pandapower_run(
     timeseries = load_timeseries(str(csv_path))
 
     voltages: dict[float, dict[int, float]] = {}
-    for sim_time in range(0, duration + time_step, time_step):
+    for sim_time in range(start_time, end_time + time_step, time_step):
         p_w, q_var = lookup_power(timeseries, float(sim_time))
 
         # Mirrors grid/main.py:update_internal_model's unit conversion exactly.
@@ -139,6 +129,16 @@ def main() -> int:
         "--experiment",
         default=str(REPO_ROOT / "config" / "experiment-e2e-kerber-parity.yml"),
     )
+    parser.add_argument(
+        "--scenario",
+        required=True,
+        help=(
+            "Exact scenario name the run wrote (e.g. from a before/after diff "
+            "of generated/scenarios/), not guessed - two runs can both leave "
+            "a KerberParity_* scenario behind, and guessing the newest by "
+            "sort order can silently compare against a stale one."
+        ),
+    )
     parser.add_argument("--pg-host", default="localhost")
     parser.add_argument("--pg-port", type=int, default=5432)
     parser.add_argument("--pg-db", required=True)
@@ -152,7 +152,13 @@ def main() -> int:
 
     analysis_name = general["name"]
     time_step = int(general["time_step"])
-    duration = int(general["duration"])
+    # `duration:` is accepted by the schema but read by nothing in composegen
+    # (see docs/experiment-reference.md) - the run length actually comes from
+    # end_time - start_time. Matching that here, rather than the dead key,
+    # keeps this script correct if the experiment's start/end ever diverge
+    # from its duration.
+    start_time = int(general.get("start_time") or 0)
+    end_time = int(general["end_time"])
     grid_fed_name = federation["id"]
     layout_path = REPO_ROOT / "data" / "input" / federation["config"]["layout"]
 
@@ -164,11 +170,10 @@ def main() -> int:
 
     print(f"Replaying {csv_path.name} against {layout_path.name} in pure pandapower...")
     expected = _independent_pandapower_run(
-        layout_path, csv_path, load_indices, time_step, duration
+        layout_path, csv_path, load_indices, time_step, start_time, end_time
     )
 
-    scenario_file = _latest_scenario_file(analysis_name)
-    scenario = scenario_file.stem
+    scenario = args.scenario
     print(f"Comparing against scenario '{scenario}' recorded by the real run...")
 
     dsn = {

@@ -11,11 +11,23 @@ cd "$(dirname "$0")"
 # replica of the same network and load timeseries - catching wiring/
 # unit-conversion bugs that "the containers didn't crash" cannot.
 EXPERIMENT="config/experiment-e2e-kerber-parity.yml"
+SCENARIOS_DIR="generated/scenarios"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 ENV_FILE="${PREFLIGHT_ENV_FILE:-config/preflight.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing env file: $ENV_FILE" >&2; exit 1; }
 set -a; source "$ENV_FILE"; set +a
+
+# Guessing "the newest scenario file" is stale-prone the same way e2e-test.sh's
+# row-count check was (see that commit): two runs of this experiment can both
+# leave a KerberParity_* file behind. Snapshot the directory before the run
+# and diff it after, so the scenario handed to the verifier is provably the
+# one this run just wrote, not an older leftover.
+mkdir -p "$SCENARIOS_DIR"
+BEFORE_LIST="$(mktemp)"
+AFTER_LIST="$(mktemp)"
+trap 'rm -f "$BEFORE_LIST" "$AFTER_LIST"' EXIT
+ls "$SCENARIOS_DIR" 2>/dev/null | sort > "$BEFORE_LIST"
 
 echo "=== Running $EXPERIMENT through run.sh ==="
 ./run.sh --timeout 300 "$EXPERIMENT"
@@ -27,9 +39,22 @@ if [[ "$RUN_STATUS" -ne 0 ]]; then
   exit "$RUN_STATUS"
 fi
 
+ls "$SCENARIOS_DIR" 2>/dev/null | sort > "$AFTER_LIST"
+NEW_FILES="$(comm -13 "$BEFORE_LIST" "$AFTER_LIST")"
+NEW_COUNT="$(printf '%s\n' "$NEW_FILES" | grep -c . || true)"
+
+if [[ "$NEW_COUNT" -ne 1 ]]; then
+  echo "Expected exactly one new scenario file in $SCENARIOS_DIR after the run, found $NEW_COUNT: $NEW_FILES" >&2
+  docker compose -f generated/docker-compose.yaml down --remove-orphans >/dev/null 2>&1 || true
+  exit 1
+fi
+
+SCENARIO="${NEW_FILES%.json}"
+
 echo "=== Comparing against an independent pandapower replica ==="
 "$PYTHON_BIN" tools/verify_pandapower_parity.py \
   --experiment "$EXPERIMENT" \
+  --scenario "$SCENARIO" \
   --pg-host localhost \
   --pg-port "$CST_POSTGRES_PORT" \
   --pg-db "$CST_POSTGRES_DB" \
