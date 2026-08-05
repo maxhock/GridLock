@@ -233,6 +233,17 @@ Each federate/component's unit tests live in its own `test_main.py`, run via `do
 The two `e2e-*.sh` scripts run a real experiment through `run.sh` and then check the result independently (Postgres row counts, or a pandapower cross-check) rather than trusting a zero exit code alone.
 CI (`.github/workflows/ci.yml`) runs all three, gated in that order, on every push and pull request.
 
+`e2e-test-pandapower-parity.sh` is the one exception to "no host Python required": it runs `tools/verify_pandapower_parity.py` on the host, alongside the rest of `tools/`.
+Build the venv it uses once, from the pinned `tools/requirements.txt` (matching the versions the federates it checks against actually run — see that file's own comment):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r tools/requirements.txt
+```
+
+`e2e-test-pandapower-parity.sh` picks up `.venv` automatically if it exists; no need to activate it or pass anything.
+
 ## Contributing
 
 Branch off `main` as `<issue-number>-<slug>` and merge through a pull request.

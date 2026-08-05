@@ -12,7 +12,17 @@ cd "$(dirname "$0")"
 # unit-conversion bugs that "the containers didn't crash" cannot.
 EXPERIMENT="config/experiment-e2e-kerber-parity.yml"
 SCENARIOS_DIR="generated/scenarios"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+# Prefer the repo's own .venv (built from tools/requirements.txt) over
+# whatever "python3" resolves to on PATH, so this works out of the box once
+# that venv exists instead of requiring a separate one just for this script.
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x .venv/bin/python3 ]]; then
+    PYTHON_BIN=".venv/bin/python3"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
 
 ENV_FILE="${PREFLIGHT_ENV_FILE:-config/preflight.env}"
 [[ -f "$ENV_FILE" ]] || { echo "Missing env file: $ENV_FILE" >&2; exit 1; }
