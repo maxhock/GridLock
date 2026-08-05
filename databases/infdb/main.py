@@ -5,7 +5,6 @@ is the only stage needing InfDB access - federates read the net back from CST.
 """
 
 import argparse
-import json
 import os
 from pathlib import Path
 import shutil
@@ -40,7 +39,9 @@ def _first_env_value(*names: str) -> str | None:
     return None
 
 
-def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[str, str | None]:
+def prepare_infdb_config(
+    config_dir: str = DEFAULT_INFDB_CONFIG_DIR,
+) -> tuple[str, str | None]:
     """Create a runtime InfDB config directory with env overrides applied.
 
     The upstream InfDB package hardcodes ``host.docker.internal`` when
@@ -55,8 +56,10 @@ def prepare_infdb_config(config_dir: str = DEFAULT_INFDB_CONFIG_DIR) -> tuple[st
     with open(config_path) as handle:
         config = yaml.safe_load(handle)
 
-    postgres_config = config.setdefault("infdb", {}).setdefault("hosts", {}).setdefault(
-        "postgres", {}
+    postgres_config = (
+        config.setdefault("infdb", {})
+        .setdefault("hosts", {})
+        .setdefault("postgres", {})
     )
     overrides = {
         "user": ("INFDB_USER",),
@@ -211,7 +214,7 @@ def main(
         experiment_path = args.experiment
         meta_store_path = args.meta_store
 
-    print(f"=== infdb data setup resolver ===")
+    print("=== infdb data setup resolver ===")
     print(f"Experiment: {experiment_path}")
     print(f"Meta store: {meta_store_path}")
 
@@ -262,7 +265,9 @@ def main(
         use_meta_db,
     )
 
-    print(f"=== data setup complete: {len(federate_names)} grid federate(s) resolved ===")
+    print(
+        f"=== data setup complete: {len(federate_names)} grid federate(s) resolved ==="
+    )
 
 
 if __name__ == "__main__":

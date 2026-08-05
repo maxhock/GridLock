@@ -123,8 +123,7 @@ def main():
     """Run the PyPSA grid federate through CST's lifecycle."""
     args = parse_args()
     grid_path = os.path.join("/data", "input", args.grid_file)
-    federate = GridFederate(
-        "grid", grid_path)
+    federate = GridFederate("grid", grid_path)
 
     try:
         federate.create_federate()

@@ -134,7 +134,11 @@ def build_graph(
 
     if isinstance(value, dict):
         for child_key, child_value in value.items():
-            if depth == 0 and child_key == "federation" and isinstance(child_value, dict):
+            if (
+                depth == 0
+                and child_key == "federation"
+                and isinstance(child_value, dict)
+            ):
                 child_path = f"{path}.{child_key}"
                 node.children.append(
                     build_graph(
@@ -166,7 +170,9 @@ def build_graph(
     return node
 
 
-def inline_value(node: GraphNode, key: str, value: Any, prefix: str | None = None) -> None:
+def inline_value(
+    node: GraphNode, key: str, value: Any, prefix: str | None = None
+) -> None:
     """Fold arbitrary nested values into one node as dotted inline fields."""
     field_name = f"{prefix}.{key}" if prefix else key
     kind = classify_node(value)
@@ -207,7 +213,9 @@ def apply_node_titles(node: GraphNode) -> None:
         (field for field in node.inline_fields if field.startswith("name: ")),
         None,
     )
-    id_field = next((field for field in node.inline_fields if field.startswith("id: ")), None)
+    id_field = next(
+        (field for field in node.inline_fields if field.startswith("id: ")), None
+    )
     if name_field is not None:
         node.label = name_field.split(": ", 1)[1]
     elif id_field is not None:
@@ -236,14 +244,21 @@ def semantic_node_type(node: GraphNode) -> str:
 def preferred_config_field(node: GraphNode) -> str | None:
     """Return the most informative single config line for a node."""
     node_type = semantic_node_type(node)
-    preferred_prefixes = ["config.layout"] if node_type == "grid" else ["config.placement"]
+    preferred_prefixes = (
+        ["config.layout"] if node_type == "grid" else ["config.placement"]
+    )
 
     for prefix in preferred_prefixes:
-        field = next((item for item in node.inline_fields if item.startswith(f"{prefix}: ")), None)
+        field = next(
+            (item for item in node.inline_fields if item.startswith(f"{prefix}: ")),
+            None,
+        )
         if field is not None:
             return field
 
-    return next((item for item in node.inline_fields if item.startswith("config.")), None)
+    return next(
+        (item for item in node.inline_fields if item.startswith("config.")), None
+    )
 
 
 def config_fields(node: GraphNode) -> list[str]:
@@ -259,7 +274,11 @@ def display_config_field(field: str) -> str:
 def placement_field(node: GraphNode) -> str | None:
     """Return the placement field for a node if present."""
     return next(
-        (field for field in node.inline_fields if field.startswith("config.placement: ")),
+        (
+            field
+            for field in node.inline_fields
+            if field.startswith("config.placement: ")
+        ),
         None,
     )
 
@@ -313,12 +332,14 @@ def render_plain_tree(root: GraphNode) -> str:
                 "│  " if has_more else "   " for has_more in prefix_parts[:-1]
             )
             connector = leading + ("├─ " if prefix_parts[-1] else "└─ ")
-        branch_icon = "v" if node.children and node.expanded else ">" if node.children else "*"
+        branch_icon = (
+            "v" if node.children and node.expanded else ">" if node.children else "*"
+        )
         line = f"{connector}{branch_icon} {node.label}"
         line += f" [{node.value_preview}]"
         lines.append(line)
-        for field in node.inline_fields:
-            lines.append(f"{connector}   · {field}")
+        for inline_field in node.inline_fields:
+            lines.append(f"{connector}   · {inline_field}")
         if node.children and node.expanded:
             last_index = len(node.children) - 1
             for index, child in enumerate(node.children):
@@ -444,8 +465,12 @@ def draw_legend(
 
     safe_addnstr(stdscr, origin_y, origin_x, "+" + "-" * (width - 2) + "+", width)
     for row in range(1, height - 1):
-        safe_addnstr(stdscr, origin_y + row, origin_x, "|" + " " * (width - 2) + "|", width)
-    safe_addnstr(stdscr, origin_y + height - 1, origin_x, "+" + "-" * (width - 2) + "+", width)
+        safe_addnstr(
+            stdscr, origin_y + row, origin_x, "|" + " " * (width - 2) + "|", width
+        )
+    safe_addnstr(
+        stdscr, origin_y + height - 1, origin_x, "+" + "-" * (width - 2) + "+", width
+    )
 
     for index, line in enumerate(lines, start=1):
         if index >= height - 1:
@@ -522,7 +547,9 @@ def layout_graph(root: GraphNode) -> GraphLayout:
             child_centers: list[int] = []
             for child in node.children:
                 child_centers.append(place(child, 0, child_y))
-            desired_x = int(round((child_centers[0] + child_centers[-1]) / 2 - width / 2))
+            desired_x = int(
+                round((child_centers[0] + child_centers[-1]) / 2 - width / 2)
+            )
         else:
             desired_x = next_x_by_depth.get(node.depth, 0)
 
@@ -664,7 +691,9 @@ def draw_box(
             box.width,
             attr,
         )
-    safe_addnstr(stdscr, origin_y + screen_y + box.height - 1, screen_x, bottom, box.width, attr)
+    safe_addnstr(
+        stdscr, origin_y + screen_y + box.height - 1, screen_x, bottom, box.width, attr
+    )
 
     safe_addnstr(
         stdscr,
@@ -715,7 +744,9 @@ def draw_edge(
 
     vertical_start = sy + 1
     vertical_end = mid_y
-    for y in range(min(vertical_start, vertical_end), max(vertical_start, vertical_end) + 1):
+    for y in range(
+        min(vertical_start, vertical_end), max(vertical_start, vertical_end) + 1
+    ):
         if 0 <= y < viewport_height and 0 <= sx < viewport_width:
             safe_addch(stdscr, origin_y + y, sx, vertical_char)
 
@@ -772,7 +803,7 @@ def draw_screen(stdscr: Any, root: GraphNode, source_path: Path) -> None:
         selected_index = max(0, min(selected_index, len(visible) - 1))
         selected_node = visible[selected_index]
         layout = layout_graph(root)
-        selected_box = layout.boxes[selected_node.node_id]
+        layout.boxes[selected_node.node_id]
 
         viewport_x, viewport_y = viewport_for_selection(
             layout,
@@ -787,7 +818,9 @@ def draw_screen(stdscr: Any, root: GraphNode, source_path: Path) -> None:
         help_text = "j/k move  h/l collapse-expand config  space toggle  w/a/s/d pan  g/G top-bottom  q quit"
         safe_addnstr(stdscr, header_y, 0, title, width, curses.A_REVERSE)
         safe_addnstr(stdscr, footer_y, 0, help_text, width, curses.A_REVERSE)
-        safe_addnstr(stdscr, detail_y, 0, node_summary(selected_node), width, curses.A_DIM)
+        safe_addnstr(
+            stdscr, detail_y, 0, node_summary(selected_node), width, curses.A_DIM
+        )
 
         for edge in layout.edges:
             draw_edge(
@@ -858,7 +891,9 @@ def draw_screen(stdscr: Any, root: GraphNode, source_path: Path) -> None:
         elif key == ord("w"):
             viewport_y = max(0, viewport_y - 3)
         elif key == ord("s"):
-            viewport_y = min(max(0, layout.canvas_height - canvas_height), viewport_y + 3)
+            viewport_y = min(
+                max(0, layout.canvas_height - canvas_height), viewport_y + 3
+            )
         elif key == ord("a"):
             viewport_x = max(0, viewport_x - 6)
         elif key == ord("d"):

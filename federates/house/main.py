@@ -17,11 +17,6 @@ from energysim.core.shared.data_structs import (
     SystemActions,
     ThermalConfig,
     SystemState,
-    ThermalState,
-    BatteryState,
-    ThermalStorageState,
-    HeatPumpState,
-    AirConditionerState,
 )
 from energysim.sim.simulator import JAXSimulator
 from energysim.core.data.dataset import SimulationDataset
@@ -392,9 +387,7 @@ class HouseFederate(Federate):
                 "battery_power_w": battery_w,
                 "heat_pump_power_w": np.array(action.heat_pump_power_w).tolist(),
                 "ac_power_w": np.array(action.ac_power_w).tolist(),
-                "storage_discharge_w": np.array(
-                    action.storage_discharge_w
-                ).tolist(),
+                "storage_discharge_w": np.array(action.storage_discharge_w).tolist(),
             },
             "state": serialize_system_state(state),
             "exogenous": serialize_exogenous_data(exo),

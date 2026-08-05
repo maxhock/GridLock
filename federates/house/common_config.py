@@ -1,11 +1,16 @@
 """Device configurations shared by every simulated house."""
 
 from energysim.core.shared.data_structs import (
-    BatteryConfig, RewardConfig, HeatPumpConfig, AirConditionerConfig,
-    ThermalStorageConfig, PVConfig
+    BatteryConfig,
+    RewardConfig,
+    HeatPumpConfig,
+    AirConditionerConfig,
+    ThermalStorageConfig,
+    PVConfig,
 )
 from house.build_my_house import create_2_room_house
-'''
+
+"""
 def create_common_configs(dt_seconds: float):
     t_config = create_2_room_house()
     return {
@@ -18,7 +23,9 @@ def create_common_configs(dt_seconds: float):
         "ts_config": ThermalStorageConfig(),
         "s_config": SolarConfig(),
     }
-'''
+"""
+
+
 def create_common_configs(dt_seconds: float):
     """Assemble the EnergySim device configs every house in an experiment shares."""
     t_config = create_2_room_house()
@@ -27,8 +34,12 @@ def create_common_configs(dt_seconds: float):
         "t_config": t_config,
         "r_config": RewardConfig(),
         "b_config": BatteryConfig(capacity_kwh=13.0),
-        "hp_config": HeatPumpConfig(model_type="ramping", max_electrical_power_w=4000.0),
-        "ac_config": AirConditionerConfig(model_type="ramping", max_electrical_power_w=4000.0),
+        "hp_config": HeatPumpConfig(
+            model_type="ramping", max_electrical_power_w=4000.0
+        ),
+        "ac_config": AirConditionerConfig(
+            model_type="ramping", max_electrical_power_w=4000.0
+        ),
         "ts_config": ThermalStorageConfig(),
         "pv_config": PVConfig(),
     }

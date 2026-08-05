@@ -63,9 +63,7 @@ def resolve_grid_queries(
         kcid = query.get("kcid")
         bcid = query.get("bcid")
 
-        net_df = get_pylovo_grid(
-            infdb=infdb, log=log, plz=plz, kcid=kcid, bcid=bcid
-        )
+        net_df = get_pylovo_grid(infdb=infdb, log=log, plz=plz, kcid=kcid, bcid=bcid)
         log.info(
             f"Query plz={plz}"
             + (f", kcid={kcid}, bcid={bcid}" if kcid is not None else "")
@@ -99,7 +97,7 @@ def resolve_grid_queries(
                 query_details.append(f"PLZ {plz}, KCID {kcid}, BCID {bcid}")
             else:
                 query_details.append(f"PLZ {plz}")
-        
+
         raise ValueError(
             f"No grids found in InfDB pylovo.grid_result for location queries: "
             f"{', '.join(query_details)}. "
@@ -135,4 +133,3 @@ def get_demand_timeseries(
         f"(plz={plz}, profile_type={profile_type})"
     )
     return pd.DataFrame(columns=["timestamp", "active_power_kw", "reactive_power_kvar"])
-

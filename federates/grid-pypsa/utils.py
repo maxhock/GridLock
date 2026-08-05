@@ -55,14 +55,16 @@ class PyPSANetworkBuilder:
         for row in self.input_trafo.itertuples():
             bus_from = str(row.hv_bus)
             bus_to = str(row.lv_bus)
-            r_pu = row.vkr_percent/100
-            x_pu = np.sqrt(row.vk_percent**2 -
-                           row.vkr_percent**2)/100
+            r_pu = row.vkr_percent / 100
+            x_pu = np.sqrt(row.vk_percent**2 - row.vkr_percent**2) / 100
             self.net.add(
-                "Transformer", name=str(row.Index),
-                bus0=bus_from, bus1=bus_to,
+                "Transformer",
+                name=str(row.Index),
+                bus0=bus_from,
+                bus1=bus_to,
                 s_nom=row.sn_mva,
-                r=r_pu, x=x_pu,
+                r=r_pu,
+                x=x_pu,
                 model="t",
             )
 
@@ -70,7 +72,8 @@ class PyPSANetworkBuilder:
         """Add each line, scaling its per-km impedance by its length."""
         for row in self.input_line.itertuples():
             self.net.add(
-                "Line", name=str(row.Index),
+                "Line",
+                name=str(row.Index),
                 bus0=str(row.from_bus),
                 bus1=str(row.to_bus),
                 length=row.length_km,
@@ -82,40 +85,46 @@ class PyPSANetworkBuilder:
         """Add each load at its workbook setpoint; HELICS overwrites these per step."""
         for row in self.input_load.itertuples():
             self.net.add(
-                "Load", name=str(row.Index),
+                "Load",
+                name=str(row.Index),
                 bus=str(row.bus),
-                p_set=row.p_mw,  q_set=-row.q_mvar
+                p_set=row.p_mw,
+                q_set=-row.q_mvar,
             )
 
     def _add_gens(self):
         """Add each voltage-controlled generator and set its bus's voltage target."""
         for row in self.input_gen.itertuples():
             self.net.add(
-                "Generator", name=str(row.Index),
+                "Generator",
+                name=str(row.Index),
                 bus=str(row.bus),
-                control="PV", p_set=row.p_mw
+                control="PV",
+                p_set=row.p_mw,
             )
             # voltage is a bus property so it is set there
-            self.net.buses.loc[str(row.bus),
-                               "v_mag_pu_set"] = row.vm_pu
+            self.net.buses.loc[str(row.bus), "v_mag_pu_set"] = row.vm_pu
 
     def _add_sgens(self):
         """Add each static generator, prefixed so it cannot clash with a generator."""
         for row in self.input_sgen.itertuples():
             self.net.add(
-                "Generator", name=f"s_gen{str(row.Index)}",
+                "Generator",
+                name=f"s_gen{str(row.Index)}",
                 bus=str(row.bus),
-                control="PV", p_set=row.p_mw
+                control="PV",
+                p_set=row.p_mw,
             )
 
     def _add_shunts(self):
         """Add each shunt, converting its power rating to an admittance."""
         for row in self.input_shunt.itertuples():
             self.net.add(
-                "ShuntImpedance", name=str(row.Index),
+                "ShuntImpedance",
+                name=str(row.Index),
                 bus=str(row.bus),
-                g=row.p_mw/row.vn_kv**2,
-                b=-row.q_mvar/row.vn_kv**2
+                g=row.p_mw / row.vn_kv**2,
+                b=-row.q_mvar / row.vn_kv**2,
             )
 
     # Properties for convenient access to PyPSA network components.
@@ -167,14 +176,14 @@ class PyPSANetworkBuilder:
         off against the infeed.
         """
         if self.net.buses_t.p.empty:
-            raise RuntimeError(
-                "Power flow must be run before accessing results.")
+            raise RuntimeError("Power flow must be run before accessing results.")
 
         if not self.net.loads[self.net.loads.bus == str(self.ext_grid_idx)].empty:
             return (
                 self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
-                + self.net.loads[self.net.loads.bus ==
-                                 str(self.ext_grid_idx)]["p_set"].sum()
+                + self.net.loads[self.net.loads.bus == str(self.ext_grid_idx)][
+                    "p_set"
+                ].sum()
             )
         else:
             return self.net.buses_t.p[str(self.ext_grid_idx)].iloc[0]
