@@ -1,0 +1,58 @@
+name: CI
+
+on: [push]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run pre-commit
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
+
+  unit:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test every component
+        run: ./test.sh
+
+  e2e:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure preflight env
+        run: cp config/preflight.env.example config/preflight.env
+
+      - name: Run experiment-local-grid.yml end to end
+        run: ./e2e-test.sh
+
+  e2e-parity:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install verification script dependencies
+        run: pip install pandapower psycopg2-binary pyyaml
+
+      - name: Configure preflight env
+        run: cp config/preflight.env.example config/preflight.env
+
+      - name: Run the Kerber pandapower parity check
+        run: ./e2e-test-pandapower-parity.sh
