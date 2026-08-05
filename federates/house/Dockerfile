@@ -32,6 +32,10 @@ RUN pytest house/test_main.py --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
+# base's directory-wide `COPY federates/house/ /app/house/` (needed so the
+# test stage can see test_main.py) also picks it up here; drop it so it
+# doesn't ship in the production image.
+RUN rm -f house/test_main.py
 CMD ["helics", "run", "--path=/config/tmp/house_runner.json", "--no-log-files"]
 
 # --- Usage ---

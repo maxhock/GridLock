@@ -20,6 +20,9 @@ RUN pytest --maxfail=1 --disable-warnings -v
 
 # --- Final image ---
 FROM base AS final
+# base's blanket `COPY . .` (needed so the test stage can see test_main.py)
+# also picks it up here; drop it so it doesn't ship in the production image.
+RUN rm -f test_main.py
 # Inform users: /config must be mounted at runtime
 ENTRYPOINT ["python", "main.py"]
 
