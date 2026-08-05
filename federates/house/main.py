@@ -322,8 +322,11 @@ class HouseFederate(Federate):
         self.data_to_federation["publications"][self.reactive_power_key] = 0.0
         self.send_data_to_federation(reset=True)
 
-    def update_internal_model(self):
+    def update_internal_model(self) -> None:
         """Advance the house simulation by one CST-controlled time step."""
+        assert self.simulator is not None, "create_federate must run first"
+        assert self.dataset is not None, "create_federate must run first"
+
         dt_seconds = int(self.period)
         step_idx = int(self.granted_time // dt_seconds)
 
