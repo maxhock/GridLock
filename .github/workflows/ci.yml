@@ -49,7 +49,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install verification script dependencies
-        run: pip install pandapower psycopg2-binary pyyaml
+        run: pip install -r tools/requirements-verify-parity.txt
 
       - name: Configure preflight env
         run: cp config/preflight.env.example config/preflight.env
