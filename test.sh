@@ -29,6 +29,10 @@ run_component house_player federates/house_player federates/house_player/Dockerf
 run_component house . federates/house/Dockerfile
 run_component composegen composegen composegen/Dockerfile
 run_component infdb databases/infdb databases/infdb/Dockerfile
+# No experiment routes to the template, so nothing else would notice it rotting
+# against a CST release. Building it here is what keeps `cp -r federates/template`
+# a working starting point rather than one that fails on its first import.
+run_component template federates/template federates/template/Dockerfile
 
 echo "=== Summary ==="
 FAILED=0

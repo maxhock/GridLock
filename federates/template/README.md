@@ -12,9 +12,11 @@ The CoSim Toolbox `Federate` base class owns the HELICS federate lifecycle, the 
 You write the physics.
 
 `federate.run(scenario_name, use_meta_db=..., use_data_db=...)` does the whole run: it creates the federate, loops until stop time, and destroys it.
-`main.py` spells the three calls out separately (`create_federate` → `run_cosim_loop` → `destroy_federate`) because seeing them once is useful; the federates in this repo call `run()` and let CST sequence them.
+That is what `main.py` calls, and what every federate in this repo calls.
+Reach for the three underlying calls (`create_federate` → `run_cosim_loop` → `destroy_federate`) only if you need to do something between them.
 
-Each step, CST fills `self.data_from_federation`, calls your `update_internal_model()`, and publishes whatever you left in `self.data_to_federation`.
+Each step, CST requests and is granted a time, fills `self.data_from_federation["inputs"]`, calls your `update_internal_model()`, and publishes whatever you left in `self.data_to_federation["publications"]`.
+Both are dicts keyed by the full HELICS key — not flat value dicts, and not attributes on the federate.
 
 ## The three steps
 
@@ -27,29 +29,31 @@ cp -r federates/template federates/<class>
 A federate directory is self-contained: its own `Dockerfile`, its own `requirements.txt`, its own environment.
 No packaging metadata is involved — the generated compose file invokes your entry point directly.
 
-**Pin your dependencies.** Everything that runs today is pinned, including EnergySim to a commit, because an unpinned rebuild changes the simulation without a commit on this side and makes the `git_commit` stored with each run a lie.
-This template is not pinned, and its `Dockerfile` installs only `helics[cli]` — it never installs `requirements.txt`, so `cosim_toolbox` is missing from the image as it stands.
-Fix both before your class is part of a run.
+**Keep the dependencies pinned.**
+`requirements.txt` here pins `cosim-toolbox` and `helics[cli]` to the versions the rest of the repo runs against; pin whatever you add the same way.
+An unpinned rebuild changes the simulation without a commit on this side, which makes the `git_commit` stored with each run a lie.
 
-`config.json` and the `helics run --path=runner.json` command in the `Dockerfile` are leftovers of the legacy config format.
-There is no `runner.json` here, the generated compose file overrides the command anyway, and a tree-mode federate gets its HELICS configuration from the CST metadata store rather than a static file.
-Delete them.
+The `Dockerfile` has a `test` stage that runs `pytest` during the build, so a failing test fails the build.
+`test.sh` builds this directory along with every other component, which is the only thing standing between the template and silent rot — no experiment routes to it, so nothing else would notice it breaking against a new CST release.
+Keep the stage when you copy the directory, and add your component to `test.sh`.
 
 ### 2. Implement the federate
 
-Subclass `Federate`.
+Subclass `Federate` (from `cosim_toolbox.sims`).
 Exactly one method is mandatory:
 
-- **`update_internal_model()`** — advance one step. Read `self.data_from_federation`, update your state, write `self.data_to_federation`. `self.granted_time` is the current simulation time in seconds.
-- **`create_federate()`** — optional. Call `super()` first, which reads the federation config and registers your publications and subscriptions, then do setup that needs those interfaces to exist.
-- **`on_enter_executing_mode()`** — optional. Publish an initial state at `t=0`, so the rest of the federation does not start from nothing. The grid and the load player both use it.
+- **`update_internal_model()`** — advance one step. Read `self.data_from_federation["inputs"]`, update your state, write `self.data_to_federation["publications"]`. `self.granted_time` is the current simulation time in seconds, `self.period` the time step.
+- **`create_federate()`** — optional. Call `super()` first, which reads the federation config from the CST metadata store and registers your publications and subscriptions, then do setup that needs those interfaces to exist.
+- **`on_enter_executing_mode()`** — optional, but usually not. Publish an initial state at `t=0`, so the rest of the federation does not start from nothing. An unpublished `double` input reads as `0.0`, which no subscriber can tell apart from a real zero — so without this, whoever depends on you spends the first step simulating against a value it invented. The grid and the load player both do this.
 
 **Do not construct your HELICS keys.**
 composegen derives key names from the experiment tree, not from a federate's own name, so a federate that builds `f"{self.federate_name}/active_power"` will register a key nobody publishes to.
-Discover them instead: `federates/house/main.py` looks up single interfaces by suffix (`_find_pub_key` / `_find_sub_key`), `house_player` scans for a whole family of them (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given.
+Discover them instead.
+`main.py:find_interface_key` is the one-interface version of this, the same pattern as `federates/house/main.py`'s `_find_pub_key` / `_find_sub_key`; `house_player` scans for a whole family of keys at once (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given.
 
 **Fail loudly.**
 If a value you need is missing, raise and name it.
+`find_interface_key` and `read_db_backends` in `main.py` are both written this way, and both name what *was* found in the error.
 Most of the validation in this project exists because a run that "succeeded" with stale, zero, or substituted data is the failure mode it keeps hitting.
 
 ### 3. Register the class in composegen
@@ -84,7 +88,16 @@ Every federate container gets:
 - `data/` mounted at `/data`, and `generated/` at `/app/meta_store`.
 - The broker reachable as the Compose service name `helics`.
 
-Your entry point is invoked with whatever `map_params_to_class` puts in `command`, plus the arguments composegen appends — at minimum `--scenario` and `--federate_name`.
+### Which arguments you actually get
+
+Your entry point is invoked with whatever `map_params_to_class` puts in `command`, plus arguments composegen appends — but *which* ones depends on where your federate sits in the tree, and this is worth checking before you debug a federate that dies on startup.
+
+A federate declared **under a grid** is built in `load.py` phase 1, which appends `--scenario` and `--federate_name` for every class, whatever its image.
+That is the normal case, and it is what `main.py` here expects.
+
+Any **other** tree node falls through to the generic phase 2, which appends those two arguments only for images on a hardcoded list (`grid`, `house_player`, `house`).
+A new image is not on that list and gets **no arguments at all** — so `parse_args` raises on the missing `--federate_name`.
+If your class is not a grid child, add your image to that branch.
 
 ## Running one federate by hand
 
@@ -92,7 +105,9 @@ You do not need the whole federation to debug a federate.
 Point it at a JSON metadata store from a previous `composegen` run:
 
 ```bash
-CST_USE_META_DB=json python3 main.py --scenario <name>_<timestamp> --federate_name <dotted.federate.name>
+CST_USE_META_DB=json CST_USE_DATA_DB=json \
+  python3 main.py --scenario <name>_<timestamp> --federate_name <dotted.federate.name>
 ```
 
+Both environment variables are required — `main.py` raises rather than picking a store for you.
 `.vscode/launch.json` has working argument sets for the existing federates.
