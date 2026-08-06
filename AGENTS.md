@@ -239,9 +239,9 @@ not from a federate's own name.
 - **Dependencies are pinned on purpose** in everything that runs today — `grid`,
   `house`, `house_player`, `broker`, composegen — including EnergySim to a commit. An
   unpinned rebuild would change the simulation without a commit on this side, which makes
-  the `git_commit` stored with each run a lie. Bump deliberately. `recorder`, `template`,
-  `forecasting` and `grid-pypsa` are still unpinned; pin them before making any of them
-  part of a run.
+  the `git_commit` stored with each run a lie. Bump deliberately. `template` is pinned
+  too, since it is what a new federate is copied from. `recorder`, `forecasting` and
+  `grid-pypsa` are still unpinned; pin them before making any of them part of a run.
 - Code is typed, formatted with black, broken into small functions, and kept free of
   repetition. Prefer library functions over hand-rolled logic.
 - **Comments explain why, not what.** Non-obvious decisions carry the incident or

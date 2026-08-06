@@ -1,2 +1,10 @@
-cosim_toolbox
-helics
+# Pinned to the versions this federate is known to run against. Bump
+# deliberately rather than by rebuilding: an unpinned rebuild can change the
+# simulation with no commit on this side, which makes the git_commit stored
+# with each run a misleading description of what actually ran.
+
+# CoSim Toolbox - HELICS federate base class
+cosim-toolbox==1.0.1
+
+# HELICS
+helics[cli]==3.6.1
