@@ -24,12 +24,6 @@ Without the check this surfaces as a bare `Permission denied` from deep inside a
 
 ## Stage 1 — CST databases
 
-**The `database` container exits 3 on a fresh clone**, logging `ERROR: database "copper" already exists`.
-`databases/cstdb/init-db.sql` runs `CREATE DATABASE copper`, but the Postgres entrypoint has already created `POSTGRES_DB=${CST_POSTGRES_DB}` — and init SQL runs under `ON_ERROR_STOP=1`.
-Existing installs survive only because their `cst_postgres` volume predates the file, so this hits precisely the case of someone cloning the repository.
-Drop the `CREATE DATABASE` line, or set `CST_POSTGRES_DB` to something other than `copper`.
-Tracked as N1 in issue #56.
-
 **You changed the credentials in `preflight.env` and every federate dies on connect.**
 Those values configure the database *servers*.
 The federates authenticate through CST's own `CST_USER` / `CST_PASSWORD` / `CST_DB`, which the generated compose file does not set — so they still use `worker` / `worker` / `copper`.

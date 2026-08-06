@@ -91,17 +91,31 @@ if [[ "$CLEANUP_DBS" == "1" ]]; then
 fi
 
 echo "=== Stage 2: infdb ==="
+# Build as a separate step rather than `up --build --quiet-build`: the flag that
+# keeps a build quiet during `up` only exists from Compose 2.39, and CI's runner
+# image ships 2.38.2, so `up` there died on an unknown flag. `build --quiet` has
+# been there forever, still prints build errors on stderr and still exits non-zero.
+# Pass the same service name to both, so `build` covers exactly what `up` starts.
+#
 # --exit-code-from pins whose status this stage returns. --abort-on-container-exit
 # alone happens to propagate it on current Compose, but that is undocumented and
 # this stage is the gate that stops a bad grid resolution from reaching stage 3,
 # so it should not rest on it. Same form as stage 3.
-$DC up --build --quiet-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb
+$DC build --quiet infdb
+$DC up --no-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb
 
 echo "=== Stage 3: composegen ==="
-$DC up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
+$DC build --quiet composegen
+$DC up --no-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
 
 echo "=== Stage 4: simulation ==="
 SIM_DC="docker compose -f generated/docker-compose.yaml"
+
+# Building here rather than inside `up` (see stage 2) also keeps image builds out
+# of --timeout's budget, which is documented as a limit on the simulation. On a
+# cold machine the federate images take longer to build than most federations take
+# to run, so the two were competing for the same seconds.
+$SIM_DC build --quiet
 
 # --abort-on-container-failure (not --abort-on-container-exit) tears the whole
 # federation down as soon as any federate exits *non-zero*. Federates that
@@ -112,10 +126,10 @@ SIM_DC="docker compose -f generated/docker-compose.yaml"
 set +e
 if [[ "$SIM_TIMEOUT" -gt 0 ]]; then
   timeout --foreground "${SIM_TIMEOUT}" \
-    $SIM_DC up --build --quiet-build --remove-orphans --abort-on-container-failure
+    $SIM_DC up --no-build --remove-orphans --abort-on-container-failure
   SIM_STATUS=$?
 else
-  $SIM_DC up --build --quiet-build --remove-orphans --abort-on-container-failure
+  $SIM_DC up --no-build --remove-orphans --abort-on-container-failure
   SIM_STATUS=$?
 fi
 set -e
