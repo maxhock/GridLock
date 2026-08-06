@@ -8,15 +8,11 @@ exposes `Federate` where this template imports it from.
 import pytest
 from cosim_toolbox.sims import Federate
 
-from main import (
-    TemplateFederate,
-    find_interface_key,
-    read_db_backends,
-)
+from main import TemplateFederate, _find_interface_key, get_db_backends_from_env
 
 
 # ---------------------------------------------------------------------------
-# find_interface_key - the "discover your keys, never construct them" invariant
+# _find_interface_key - the "discover your keys, never construct them" invariant
 # ---------------------------------------------------------------------------
 
 
@@ -24,7 +20,7 @@ def test_find_interface_key_matches_suffix_after_slash() -> None:
     interfaces = {"local-grid/template_0/output": 0.0, "local-grid/grid/voltage": 0.0}
 
     assert (
-        find_interface_key(interfaces, "output", "template_0", "publication")
+        _find_interface_key(interfaces, "output", "template_0", "publication")
         == "local-grid/template_0/output"
     )
 
@@ -32,7 +28,7 @@ def test_find_interface_key_matches_suffix_after_slash() -> None:
 def test_find_interface_key_matches_bare_key() -> None:
     interfaces = {"output": 0.0}
 
-    assert find_interface_key(interfaces, "output", "template_0", "publication") == (
+    assert _find_interface_key(interfaces, "output", "template_0", "publication") == (
         "output"
     )
 
@@ -42,14 +38,14 @@ def test_find_interface_key_does_not_match_partial_segment() -> None:
     interfaces = {"local-grid/template_0/throughput": 0.0}
 
     with pytest.raises(ValueError, match="No publication ending in 'output'"):
-        find_interface_key(interfaces, "output", "template_0", "publication")
+        _find_interface_key(interfaces, "output", "template_0", "publication")
 
 
 def test_find_interface_key_raises_when_missing() -> None:
     interfaces = {"local-grid/template_0/state": 0.0}
 
     with pytest.raises(ValueError, match="No subscription ending in 'input'"):
-        find_interface_key(interfaces, "input", "template_0", "subscription")
+        _find_interface_key(interfaces, "input", "template_0", "subscription")
 
 
 def test_find_interface_key_missing_names_the_registered_interfaces() -> None:
@@ -57,25 +53,26 @@ def test_find_interface_key_missing_names_the_registered_interfaces() -> None:
     interfaces = {"local-grid/template_0/state": 0.0}
 
     with pytest.raises(ValueError, match="local-grid/template_0/state"):
-        find_interface_key(interfaces, "input", "template_0", "subscription")
+        _find_interface_key(interfaces, "input", "template_0", "subscription")
 
 
 def test_find_interface_key_raises_when_ambiguous() -> None:
     interfaces = {"a/output": 0.0, "b/output": 0.0}
 
     with pytest.raises(ValueError, match="Multiple publications"):
-        find_interface_key(interfaces, "output", "template_0", "publication")
+        _find_interface_key(interfaces, "output", "template_0", "publication")
 
 
 # ---------------------------------------------------------------------------
-# read_db_backends - fail loudly rather than defaulting to another store
+# get_db_backends_from_env - fail loudly rather than defaulting to another store
 # ---------------------------------------------------------------------------
 
 
-def test_read_db_backends_returns_both() -> None:
-    env = {"CST_USE_META_DB": "mongo", "CST_USE_DATA_DB": "postgres"}
+def test_get_db_backends_from_env_returns_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CST_USE_META_DB", "mongo")
+    monkeypatch.setenv("CST_USE_DATA_DB", "postgres")
 
-    assert read_db_backends(env) == ("mongo", "postgres")
+    assert get_db_backends_from_env() == ("mongo", "postgres")
 
 
 @pytest.mark.parametrize(
@@ -87,9 +84,16 @@ def test_read_db_backends_returns_both() -> None:
         {"CST_USE_META_DB": "", "CST_USE_DATA_DB": "postgres"},
     ],
 )
-def test_read_db_backends_raises_when_incomplete(env: dict) -> None:
+def test_get_db_backends_from_env_raises_when_incomplete(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    monkeypatch.delenv("CST_USE_META_DB", raising=False)
+    monkeypatch.delenv("CST_USE_DATA_DB", raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
     with pytest.raises(ValueError, match="CST_USE_META_DB"):
-        read_db_backends(env)
+        get_db_backends_from_env()
 
 
 # ---------------------------------------------------------------------------

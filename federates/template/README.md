@@ -43,17 +43,17 @@ Subclass `Federate` (from `cosim_toolbox.sims`).
 Exactly one method is mandatory:
 
 - **`update_internal_model()`** — advance one step. Read `self.data_from_federation["inputs"]`, update your state, write `self.data_to_federation["publications"]`. `self.granted_time` is the current simulation time in seconds, `self.period` the time step.
-- **`create_federate()`** — optional. Call `super()` first, which reads the federation config from the CST metadata store and registers your publications and subscriptions, then do setup that needs those interfaces to exist.
+- **`create_federate()`** — optional. Call `super()` first, which reads the federation config from the CST metadata store and registers your publications and subscriptions, then do setup that needs those interfaces to exist. The grid does not override it at all; the template does, only to resolve its interface keys.
 - **`on_enter_executing_mode()`** — optional, but usually not. Publish an initial state at `t=0`, so the rest of the federation does not start from nothing. An unpublished `double` input reads as `0.0`, which no subscriber can tell apart from a real zero — so without this, whoever depends on you spends the first step simulating against a value it invented. The grid and the load player both do this.
 
 **Do not construct your HELICS keys.**
 composegen derives key names from the experiment tree, not from a federate's own name, so a federate that builds `f"{self.federate_name}/active_power"` will register a key nobody publishes to.
 Discover them instead.
-`main.py:find_interface_key` is the one-interface version of this, the same pattern as `federates/house/main.py`'s `_find_pub_key` / `_find_sub_key`; `house_player` scans for a whole family of keys at once (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given.
+`main.py:_find_interface_key` is the one-interface version of this, the same pattern as `federates/house/main.py`'s `_find_pub_key` / `_find_sub_key`; `house_player` scans for a whole family of keys at once (`_build_pub_keys`), and the grid matches the `load_<idx>` segment of every key it was given (`_parse_load_index`).
 
 **Fail loudly.**
 If a value you need is missing, raise and name it.
-`find_interface_key` and `read_db_backends` in `main.py` are both written this way, and both name what *was* found in the error.
+`_find_interface_key` and `get_db_backends_from_env` in `main.py` are both written this way, and the first names what *was* registered in the error.
 Most of the validation in this project exists because a run that "succeeded" with stale, zero, or substituted data is the failure mode it keeps hitting.
 
 ### 3. Register the class in composegen
@@ -109,5 +109,11 @@ CST_USE_META_DB=json CST_USE_DATA_DB=json \
   python3 main.py --scenario <name>_<timestamp> --federate_name <dotted.federate.name>
 ```
 
-Both environment variables are required — `main.py` raises rather than picking a store for you.
+Both environment variables are required — `get_db_backends_from_env` raises rather than picking a store for you.
 `.vscode/launch.json` has working argument sets for the existing federates.
+
+## Where to look when the template is not enough
+
+`federates/grid/main.py` is the closest thing to this file at full size, and the shape here follows it: module docstring with a `Usage:` line, a private key helper and the federate class, then `parse_args` / `get_db_backends_from_env` / `run_<x>_federate` / `main` under a `Helpers` banner.
+`get_db_backends_from_env` is byte-for-byte the same function in grid, house, house_player and controller — copy it, do not reinvent it.
+`house_player` is the smallest complete federate; `controller` shows a federate that reads another federate's data out of the CST store.
