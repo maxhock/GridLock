@@ -1,0 +1,74 @@
+name: CI
+
+# AGENTS.md: "Merge through pull requests" - the PR is the only thing worth
+# gating, and a push to a branch with an open PR already fires a
+# pull_request event, so adding a push trigger just runs every Docker-heavy
+# job twice per commit. cancel-in-progress avoids piling up redundant runs
+# when a branch gets pushed to repeatedly.
+on: pull_request
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run pre-commit
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files
+
+  unit:
+    needs: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test every component
+        run: ./test.sh
+
+  e2e:
+    needs: unit
+    # run.sh builds the images before starting its own --timeout 600 clock, so
+    # this cap has to cover both: ~3m20s of pulls and builds plus a full 600s
+    # simulation is ~13m20s. At 15 the job cap could fire first, which kills the
+    # federation without run.sh's teardown or its "exceeded 600s" message.
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure preflight env
+        run: cp config/preflight.env.example config/preflight.env
+
+      - name: Run experiment-local-grid.yml end to end
+        run: ./e2e-test.sh
+
+  e2e-parity:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install verification script dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Configure preflight env
+        run: cp config/preflight.env.example config/preflight.env
+
+      - name: Run the Kerber pandapower parity check
+        run: ./e2e-test-pandapower-parity.sh

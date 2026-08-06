@@ -115,13 +115,15 @@ def prepare_aligned_timeseries(
         pieces = []
         if numeric_cols:
             pieces.append(
-                data[numeric_cols].resample(target_freq, label="left", closed="left").mean()
+                data[numeric_cols]
+                .resample(target_freq, label="left", closed="left")
+                .mean()
             )
         if non_numeric_cols:
             pieces.append(
-                data[non_numeric_cols].resample(
-                    target_freq, label="left", closed="left"
-                ).first()
+                data[non_numeric_cols]
+                .resample(target_freq, label="left", closed="left")
+                .first()
             )
         aligned = pd.concat(pieces, axis=1)
     else:
@@ -135,7 +137,9 @@ def prepare_aligned_timeseries(
         aligned = pd.concat(pieces, axis=1)
 
     aligned = aligned.dropna(how="all").reset_index()
-    aligned[timestamp_column] = aligned[timestamp_column].dt.strftime("%Y-%m-%d %H:%M:%S")
+    aligned[timestamp_column] = aligned[timestamp_column].dt.strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
     cache_dir = Path("/tmp/gridlock_aligned")
     cache_dir.mkdir(parents=True, exist_ok=True)

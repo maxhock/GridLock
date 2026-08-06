@@ -55,6 +55,7 @@ DEFAULT_COMMAND_TEMPLATES = {
 # Legacy composegen output
 # ---------------------------------------------------------------------------
 
+
 def _runner_write(path: Path, name: str, federates: list[dict]) -> None:
     """Write one legacy `helics run` runner file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,7 +344,7 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
 
     # Generate and store run metadata for legacy mode
     from transform import generate_run_metadata
-    
+
     # Legacy configs are not run through `process_general_config`, so the
     # times here are still the raw numeric offsets from the YAML. Keep them
     # numeric: `_to_iso_wallclock` passes strings through untouched, so
@@ -355,14 +356,13 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
         "use_meta_db": "json",
         "use_data_db": "postgres",
     }
-    
+
     run_metadata = generate_run_metadata(
-        experiment_path=transformed.config_path,
-        general_cfg=general_cfg
+        experiment_path=transformed.config_path, general_cfg=general_cfg
     )
-    
+
     scenario_name = run_metadata["scenario_name"]
-    
+
     start_time_iso = _to_iso_wallclock(general_cfg.get("start_time", 0))
     end_time_iso = _to_iso_wallclock(general_cfg.get("end_time", 0))
 
@@ -379,7 +379,7 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
         "experiment_path": run_metadata["experiment_path"],
         "experiment_yaml_raw": run_metadata["experiment_yaml_raw"],
     }
-    
+
     # Write to metadata store (JSON backend for legacy mode)
     md_mgr = create_metadata_manager(backend="json", location=str(output_dir))
     md_mgr.connect()
@@ -390,7 +390,7 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
         md_mgr.disconnect()
         raise RuntimeError(f"Failed to store run metadata: {e}")
     md_mgr.disconnect()
-    
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     create_docker_compose(conf, output_dir / "docker-compose.yml")
@@ -417,6 +417,7 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
 # ---------------------------------------------------------------------------
 # Tree/CST output
 # ---------------------------------------------------------------------------
+
 
 def _create_metadata_manager(
     use_meta_db: str,
@@ -473,7 +474,6 @@ def map_params_to_class(federate_class: str) -> dict:
             "command": "helics_recorder",
         },
     }
-
 
     return mapping.get(
         federate_class,
@@ -652,9 +652,7 @@ def _read_load_list(
 
     net_json_raw = meta_data.get("net_json")
     net_json_str = (
-        json.dumps(net_json_raw)
-        if isinstance(net_json_raw, dict)
-        else net_json_raw
+        json.dumps(net_json_raw) if isinstance(net_json_raw, dict) else net_json_raw
     )
 
     if not net_json_str:
@@ -679,10 +677,7 @@ def _read_load_list(
     name_col = columns.index("name")
     bus_col = columns.index("bus")
 
-    return [
-        (idx, row[name_col], int(row[bus_col]))
-        for idx, row in zip(indices, data)
-    ]
+    return [(idx, row[name_col], int(row[bus_col])) for idx, row in zip(indices, data)]
 
 
 def _resolve_placement(
@@ -766,7 +761,9 @@ def _report_unclaimed_loads(
     if not unclaimed:
         return
 
-    shown = unclaimed if len(unclaimed) <= 20 else unclaimed[:20] + ["..."]
+    shown: list[int | str] = list(unclaimed[:20])
+    if len(unclaimed) > 20:
+        shown.append("...")
     print(
         f"  {len(unclaimed)} of {len(all_loads)} load(s) in '{grid_fed_name}' "
         f"are not driven by any federate and stay at 0 W: {shown}"
@@ -1108,9 +1105,7 @@ def _wire_grid_child(
                 "W",
             )
 
-            child_pub_keys.append(
-                f"{child_fed_name.replace('.', '/')}/active_power"
-            )
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/active_power")
 
             _add_group(
                 federation,
@@ -1121,9 +1116,7 @@ def _wire_grid_child(
                 "VAr",
             )
 
-            child_pub_keys.append(
-                f"{child_fed_name.replace('.', '/')}/reactive_power"
-            )
+            child_pub_keys.append(f"{child_fed_name.replace('.', '/')}/reactive_power")
 
     # Control and state are independent of how the child's power is wired:
     # a house needs them whether it sits on pandapower load indices or not.
@@ -1136,9 +1129,7 @@ def _wire_grid_child(
         #
         # When the grid publishes instead, every child's control topic comes
         # from the same federate, so the child id is what keeps them apart.
-        control_group = (
-            "control" if control_publisher else f"{child_local_id}/control"
-        )
+        control_group = "control" if control_publisher else f"{child_local_id}/control"
 
         _add_group(
             federation,
@@ -1215,7 +1206,10 @@ def _store_house_exogenous_data(
         mgr.write(
             "custom_metadata",
             child_fed_name,
-            {"exogenous_data_csv": csv_path.read_text(), "source_file": str(exogenous_data)},
+            {
+                "exogenous_data_csv": csv_path.read_text(),
+                "source_file": str(exogenous_data),
+            },
             overwrite=True,
         )
 
@@ -1278,7 +1272,7 @@ def _add_generic_tree_pubsub_groups(
             continue
 
         for pub_fed in publishers:
-            key_format = {
+            key_format: dict[str, Any] = {
                 "src": {
                     "from_fed": pub_fed,
                     "keys": ["", ""],
@@ -1303,7 +1297,7 @@ def _add_generic_tree_pubsub_groups(
             group_name = normalized_topic
 
             if normalized_topic.startswith(normalized_pub_fed + "/"):
-                group_name = normalized_topic[len(normalized_pub_fed) + 1:]
+                group_name = normalized_topic[len(normalized_pub_fed) + 1 :]
 
             federation.add_group(
                 group_name,
@@ -1329,6 +1323,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
         try:
             from monkeypatch import apply_monkeypatches
+
             apply_monkeypatches()
         except ImportError:
             print("No monkeypatch module found. Continuing without monkeypatches.")
@@ -1663,6 +1658,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def load(transformed: TransformedConfig) -> None:
     """Dispatch to the tree or legacy output writer for a transformed config."""

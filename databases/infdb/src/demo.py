@@ -15,12 +15,18 @@ def sql_demo(infdb):
     """
     # Schema configuration
     format_params = {
-        "input_schema": infdb.get_config_value([infdb.get_toolname(), "data", "input_schema"]),
-        "output_schema": infdb.get_config_value([infdb.get_toolname(), "data", "output_schema"]),
+        "input_schema": infdb.get_config_value(
+            [infdb.get_toolname(), "data", "input_schema"]
+        ),
+        "output_schema": infdb.get_config_value(
+            [infdb.get_toolname(), "data", "output_schema"]
+        ),
     }
 
     # Drop output schema if exists for development purposes
-    infdb.connect().execute_query("DROP SCHEMA IF EXISTS {output_schema} CASCADE".format(**format_params))
+    infdb.connect().execute_query(
+        "DROP SCHEMA IF EXISTS {output_schema} CASCADE".format(**format_params)
+    )
 
     # Execute sql scripts
     infdb.get_logger().info("Running SQL scripts ...")

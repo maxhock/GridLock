@@ -1,0 +1,21 @@
+general:
+  name: "KerberParity"
+  start_time: 0
+  end_time: 10800
+  time_step: 3600
+  duration: 10800
+  use_meta_db: "json"
+  use_data_db: "postgres"
+federation:
+  id: "kerber-grid"
+  name: "Kerber Landnetz Freileitung 1 (parity check)"
+  class: "grid"
+  config:
+    layout: "kerber_landnetz_freileitung_1.xlsx"
+  sub_federates:
+    - id: "loadplayer"
+      name: "Load profile player"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "e2e_kerber_parity_loads.csv"

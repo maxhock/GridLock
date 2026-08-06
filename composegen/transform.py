@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import copy
 import os
-import yaml
 import pandas as pd
 from datetime import datetime
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -58,6 +57,7 @@ SUPPORTED_TREE_CLASSES = {
 # Legacy transform
 # ---------------------------------------------------------------------------
 
+
 def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
     """Resolve a legacy federate's placement, defaulting to every node in the grid."""
     num_nodes = int(conf.federates.grid.num_nodes)
@@ -77,7 +77,6 @@ def _get_nodes_for_fed(conf: DictConfig, fed_key: str) -> list[int]:
 def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
     """Fill in the defaults and instance counts a legacy config leaves implicit."""
     conf: DictConfig = extracted.raw_config
-
 
     num_nodes = int(extracted.metadata["num_nodes"])
 
@@ -126,6 +125,7 @@ def _transform_legacy_config(extracted: ExtractedConfig) -> TransformedConfig:
 # ---------------------------------------------------------------------------
 # Tree/CST transform
 # ---------------------------------------------------------------------------
+
 
 def _clone_subtree_with_new_root(
     template: Tree,
@@ -279,7 +279,6 @@ def validate_tree(tree: Tree) -> None:
         data = node.data
         node_class = data.get("class")
 
-
         if not node_class:
             validation_errors.append(
                 f"[Structure] Node '{node.tag}' ({node.identifier}) is missing 'class'."
@@ -420,7 +419,9 @@ def validate_timeseries_coverage(
     start_time = general_cfg.get("start_time") or 0
     end_time = general_cfg.get("end_time")
 
-    if not isinstance(start_time, (int, float)) or not isinstance(end_time, (int, float)):
+    if not isinstance(start_time, (int, float)) or not isinstance(
+        end_time, (int, float)
+    ):
         return
 
     duration = float(end_time) - float(start_time)
@@ -504,7 +505,9 @@ def process_general_config(general_cfg: dict) -> dict:
         general_cfg["start_time"] = "2023-01-01T00:00:00"
     elif isinstance(general_cfg["start_time"], (int, float)):
         base_ts = pd.Timestamp("2023-01-01T00:00:00")
-        general_cfg["start_time"] = (base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))).isoformat()
+        general_cfg["start_time"] = (
+            base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))
+        ).isoformat()
 
     if "time_step" not in general_cfg or general_cfg["time_step"] is None:
         general_cfg["time_step"] = 1
@@ -638,6 +641,7 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
 # Run metadata generation
 # ---------------------------------------------------------------------------
 
+
 def get_git_commit() -> str:
     """Get git commit hash from environment variable."""
     return os.getenv("GIT_COMMIT", "unknown")
@@ -648,14 +652,14 @@ def generate_run_metadata(experiment_path: str, general_cfg: dict) -> dict:
     now = datetime.now()
     timestamp_iso = now.strftime("%Y%m%d_%H%M%S")
     timestamp_unix = int(now.timestamp())
-    
+
     # Read full experiment file as raw YAML string
-    with open(experiment_path, 'r') as f:
+    with open(experiment_path, "r") as f:
         experiment_yaml_raw = f.read()
-    
-    analysis_name = general_cfg.get('name', 'GridLock')
+
+    analysis_name = general_cfg.get("name", "GridLock")
     scenario_name = f"{analysis_name}_{timestamp_iso}"
-    
+
     return {
         "timestamp_iso": timestamp_iso,
         "timestamp_unix": timestamp_unix,
@@ -670,6 +674,7 @@ def generate_run_metadata(experiment_path: str, general_cfg: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def transform(extracted: ExtractedConfig) -> TransformedConfig:
     """Dispatch to the tree or legacy transform for an extracted config."""

@@ -1,5 +1,5 @@
 # house/Dockerfile
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -25,4 +25,21 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt \
 COPY federates/house/ /app/house/
 COPY tools/ /app/tools/
 
+# --- Test stage ---
+FROM base AS test
+RUN pip install --no-cache-dir pytest pytest-mock
+RUN pytest house/test_main.py --maxfail=1 --disable-warnings -v
+
+# --- Final image ---
+FROM base AS final
+# base's directory-wide `COPY federates/house/ /app/house/` (needed so the
+# test stage can see test_main.py) also picks it up here; drop it so it
+# doesn't ship in the production image.
+RUN rm -f house/test_main.py
 CMD ["helics", "run", "--path=/config/tmp/house_runner.json", "--no-log-files"]
+
+# --- Usage ---
+# To run tests during build:
+# docker build --target test -f federates/house/Dockerfile -t house-test .
+# To build production image:
+# docker build --target final -f federates/house/Dockerfile -t house-prod .

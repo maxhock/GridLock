@@ -34,6 +34,7 @@ class ExtractedConfig:
 # Legacy composegen extraction
 # ---------------------------------------------------------------------------
 
+
 def get_num_nodes(grid_file_path: Path) -> int:
     """Count a workbook's loads, so legacy mode knows how many federates to place."""
     if not grid_file_path.exists():
@@ -62,7 +63,6 @@ def _extract_legacy_config(
     if "grid" not in conf.federates:
         raise ValueError("Legacy config must contain 'federates.grid'.")
 
-
     grid_file = conf.federates.grid.grid_file
     num_nodes = get_num_nodes(data_input_path / grid_file)
 
@@ -84,6 +84,7 @@ def _extract_legacy_config(
 # ---------------------------------------------------------------------------
 # Tree/CST extraction
 # ---------------------------------------------------------------------------
+
 
 def validate_location_queries(location: list, grid_id: str) -> None:
     """Reject InfDB location queries that infdb would only fail on much later."""
@@ -131,8 +132,7 @@ def add_to_tree(tree: Tree, node_dict: dict, parent: str | None = None) -> None:
     node_config["type"] = node_config.get("type", "value")
 
     node_config = {
-        key: (value if value != "" else None)
-        for key, value in node_config.items()
+        key: (value if value != "" else None) for key, value in node_config.items()
     }
 
     tree.create_node(
@@ -235,6 +235,7 @@ def _extract_tree_config(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def extract(
     config_path: Path,

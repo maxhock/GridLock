@@ -153,12 +153,26 @@ try {
   }
 
   Write-Host "=== Stage 2: infdb ==="
-  Invoke-PreflightCompose up --build --quiet-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb
+  # Build as a separate step rather than `up --build --quiet-build`: the flag that
+  # keeps a build quiet during `up` only exists from Compose 2.39, and CI's runner
+  # image ships 2.38.2, so `up` there died on an unknown flag. `build --quiet` has
+  # been there forever, still prints build errors on stderr and still exits non-zero.
+  # Pass the same service name to both, so `build` covers exactly what `up` starts.
+  Invoke-PreflightCompose build --quiet infdb
+  Invoke-PreflightCompose up --no-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb
 
   Write-Host "=== Stage 3: composegen ==="
-  Invoke-PreflightCompose up --build --quiet-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
+  Invoke-PreflightCompose build --quiet composegen
+  Invoke-PreflightCompose up --no-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen
 
   Write-Host "=== Stage 4: simulation ==="
+  # Building here rather than inside `up` (see stage 2) also keeps image builds out
+  # of -Timeout's budget, which is documented as a limit on the simulation. On a
+  # cold machine the federate images take longer to build than most federations take
+  # to run, so the two were competing for the same seconds.
+  & docker compose -f $ComposeFile build --quiet
+  if ($LASTEXITCODE -ne 0) { throw "docker compose build failed with exit code $LASTEXITCODE" }
+
   # --abort-on-container-failure (not --abort-on-container-exit) tears the whole
   # federation down as soon as any federate exits *non-zero*. Federates that
   # finish normally still get to flush their final timeseries writes, so this
@@ -167,7 +181,7 @@ try {
   # forever.
   $SimArgs = @(
     "compose", "-f", $ComposeFile,
-    "up", "--build", "--quiet-build", "--remove-orphans", "--abort-on-container-failure"
+    "up", "--no-build", "--remove-orphans", "--abort-on-container-failure"
   )
 
   # PowerShell has no `timeout`, so run compose as a child process and stop it

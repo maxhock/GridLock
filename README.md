@@ -219,9 +219,35 @@ generated/     Generated compose file and metadata (git-ignored)
 tools/         Standalone helper scripts
 ```
 
+## Testing
+
+```bash
+./test.sh                          # unit tests: builds every component's Docker `test` stage
+./e2e-test.sh                      # runs experiment-local-grid.yml and checks it wrote data
+./e2e-test-pandapower-parity.sh    # runs the grid+load federates and diffs them against
+                                    # an independent pure-pandapower replica
+```
+
+Each federate/component's unit tests live in its own `test_main.py`, run via `docker build --target test` — the test itself is a build step, so a passing build already means passing tests.
+`test.sh` loops that over every component.
+The two `e2e-*.sh` scripts run a real experiment through `run.sh` and then check the result independently (Postgres row counts, or a pandapower cross-check) rather than trusting a zero exit code alone.
+CI (`.github/workflows/ci.yml`) runs all three, gated in that order, on every push and pull request.
+
+`e2e-test-pandapower-parity.sh` is the one exception to "no host Python required": it runs `tools/verify_pandapower_parity.py` on the host, alongside the rest of `tools/`.
+Build the venv it uses once, from the pinned `tools/requirements.txt` (matching the versions the federates it checks against actually run — see that file's own comment):
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r tools/requirements.txt
+```
+
+`e2e-test-pandapower-parity.sh` picks up `.venv` automatically if it exists; no need to activate it or pass anything.
+
 ## Contributing
 
 Branch off `main` as `<issue-number>-<slug>` and merge through a pull request.
 Format with black and ruff (line length 88) before committing; `.pre-commit-config.yaml` has the exact hooks.
+CI runs the same lint plus the test suite above on every PR.
 
 Architecture details, invariants, and conventions for working in this codebase are in [`AGENTS.md`](AGENTS.md).

@@ -1,0 +1,5 @@
+timestamp,base_load,reactive_power
+0,500,150
+3600,800,240
+7200,300,90
+10800,650,195

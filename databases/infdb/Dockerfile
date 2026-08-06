@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim AS base
 
 WORKDIR /app
 
@@ -23,5 +23,19 @@ COPY main.py main.py
 # application files already here still cannot be modified by that user.
 RUN chmod 1777 /app
 
+# --- Test stage ---
+FROM base AS test
+RUN uv pip install pytest pytest-mock
+COPY test_main.py .
+RUN pytest --maxfail=1 --disable-warnings -v
+
+# --- Final image ---
+FROM base AS final
 # Run the app from the pre-built virtual environment
 CMD ["python", "main.py"]
+
+# --- Usage ---
+# To run tests during build:
+# docker build --target test -t infdb-test .
+# To build production image:
+# docker build --target final -t infdb-prod .

@@ -1,0 +1,24 @@
+# One requirements file for every script in tools/ - the one place a host
+# Python env is expected (see README's "Requirements" section). Pinned to
+# match the versions the federates being verified actually run against
+# (federates/grid/requirements.txt, databases/infdb/pyproject.toml), not
+# whatever pip resolves as "latest": an unpinned pandapower here would turn
+# tools/verify_pandapower_parity.py into a pandapower-version diff instead of
+# a check on GridLock's own wiring. openpyxl and numba are pandapower
+# optional extras ("fileio" and "performance") that pandapower does not
+# install on its own; a partially-populated ad hoc venv can paper over a
+# missing one, which is how this file grew one dependency at a time - build
+# your venv from this file (`pip install -r tools/requirements.txt`) rather
+# than accreting packages by hand, so what you have locally matches CI.
+#
+# cosim-toolbox and helics[cli] are needed because
+# verify_pandapower_parity.py loads federates/grid/main.py by path to reuse
+# sanitize_net_for_power_flow, and that module does `from cosim_toolbox.sims
+# import Federate` at import time even though this script never calls it.
+cosim-toolbox==1.0.1
+helics[cli]==3.6.1
+pandapower==3.3.2
+numba==0.66.0
+openpyxl==3.1.5
+psycopg2-binary==2.9.11
+pyyaml==6.0.3

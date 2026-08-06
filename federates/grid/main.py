@@ -65,10 +65,7 @@ def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
     net.load["q_mvar"] = 0.0
 
     if added_columns:
-        print(
-            "Sanitized net.load by adding columns: "
-            + ", ".join(added_columns)
-        )
+        print("Sanitized net.load by adding columns: " + ", ".join(added_columns))
     print("Reset imported net.load active/reactive powers to zero for co-simulation.")
 
     return net
@@ -203,7 +200,9 @@ def load_net_from_metadata(
         raise ValueError(f"Grid metadata for '{federate_name}' has no net_json.")
     net = cast(pp.pandapowerNet, pp.from_json_string(net_json))
     sanitize_net_for_power_flow(net)
-    print(f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads")
+    print(
+        f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads"
+    )
     return net
 
 

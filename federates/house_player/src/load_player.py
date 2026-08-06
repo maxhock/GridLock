@@ -45,12 +45,10 @@ class LoadPlayerFederate(Federate):
             k for k in pubs if k.endswith("/active_power") or k == "active_power"
         )
         self._pub_q_keys = sorted(
-            k for k in pubs
-            if k.endswith("/reactive_power") or k == "reactive_power"
+            k for k in pubs if k.endswith("/reactive_power") or k == "reactive_power"
         )
         print(
-            f"Pub keys built: {len(self._pub_p_keys)} P, "
-            f"{len(self._pub_q_keys)} Q"
+            f"Pub keys built: {len(self._pub_p_keys)} P, " f"{len(self._pub_q_keys)} Q"
         )
 
     # ------------------------------------------------------------------
@@ -78,9 +76,7 @@ class LoadPlayerFederate(Federate):
 
         self.send_data_to_federation()
 
-        print(
-            f"t=0s (initial)  P={p_value:.2f} W  Q={q_value:.2f} VAr"
-        )
+        print(f"t=0s (initial)  P={p_value:.2f} W  Q={q_value:.2f} VAr")
 
     def update_internal_model(self) -> None:
         """Look up the current time step in the timeseries and publish."""
@@ -92,9 +88,7 @@ class LoadPlayerFederate(Federate):
         for key in self._pub_q_keys:
             self.data_to_federation["publications"][key] = q_value
 
-        print(
-            f"t={current_time:.0f}s  P={p_value:.2f} W  Q={q_value:.2f} VAr"
-        )
+        print(f"t={current_time:.0f}s  P={p_value:.2f} W  Q={q_value:.2f} VAr")
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +133,7 @@ def load_timeseries(csv_path: str) -> pd.DataFrame:
     return df
 
 
-def lookup_power(
-    timeseries: pd.DataFrame, sim_time: float
-) -> tuple[float, float]:
+def lookup_power(timeseries: pd.DataFrame, sim_time: float) -> tuple[float, float]:
     """Read (active power in W, reactive power in VAr) at a simulation time.
 
     Holds the nearest previous sample, and the first row for anything before it.

@@ -17,11 +17,6 @@ from energysim.core.shared.data_structs import (
     SystemActions,
     ThermalConfig,
     SystemState,
-    ThermalState,
-    BatteryState,
-    ThermalStorageState,
-    HeatPumpState,
-    AirConditionerState,
 )
 from energysim.sim.simulator import JAXSimulator
 from energysim.core.data.dataset import SimulationDataset
@@ -93,7 +88,7 @@ def serialize_system_state(state: SystemState) -> dict:
 
 def serialize_exogenous_data(exo: Any) -> dict:
     """Flatten one row of the exogenous dataset into a dict for the published record."""
-    if is_dataclass(exo):
+    if is_dataclass(exo) and not isinstance(exo, type):
         return asdict(exo)
     if hasattr(exo, "__dict__"):
         return dict(exo.__dict__)
@@ -293,6 +288,7 @@ class HouseFederate(Federate):
 
     def on_enter_executing_mode(self) -> None:
         """Reset and publish the initial t=0 state."""
+        assert self.simulator is not None, "create_federate must run first"
         self.simulator.reset()
         state = self.simulator.state
         result = {
@@ -326,8 +322,11 @@ class HouseFederate(Federate):
         self.data_to_federation["publications"][self.reactive_power_key] = 0.0
         self.send_data_to_federation(reset=True)
 
-    def update_internal_model(self):
+    def update_internal_model(self) -> None:
         """Advance the house simulation by one CST-controlled time step."""
+        assert self.simulator is not None, "create_federate must run first"
+        assert self.dataset is not None, "create_federate must run first"
+
         dt_seconds = int(self.period)
         step_idx = int(self.granted_time // dt_seconds)
 
@@ -392,9 +391,7 @@ class HouseFederate(Federate):
                 "battery_power_w": battery_w,
                 "heat_pump_power_w": np.array(action.heat_pump_power_w).tolist(),
                 "ac_power_w": np.array(action.ac_power_w).tolist(),
-                "storage_discharge_w": np.array(
-                    action.storage_discharge_w
-                ).tolist(),
+                "storage_discharge_w": np.array(action.storage_discharge_w).tolist(),
             },
             "state": serialize_system_state(state),
             "exogenous": serialize_exogenous_data(exo),
@@ -457,8 +454,8 @@ def main(
         federate_name = args.federate_name
         config_path = args.config
 
-    if scenario_name is None or federate_name is None:
-        raise ValueError("scenario_name and federate_name are required")
+    if scenario_name is None or federate_name is None or config_path is None:
+        raise ValueError("scenario_name, federate_name and config_path are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 

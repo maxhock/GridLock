@@ -38,10 +38,10 @@ def _service(
     _svc += "    build:\n"
     if image in ["house", "controller"]:
         _svc += "      context: ..\n"
-        _svc += '      dockerfile: federates/' + image + '/Dockerfile\n'
+        _svc += "      dockerfile: federates/" + image + "/Dockerfile\n"
     else:
-        _svc += '      context: ../federates/' + image + '\n'
-        _svc += '      dockerfile: Dockerfile\n'
+        _svc += "      context: ../federates/" + image + "\n"
+        _svc += "      dockerfile: Dockerfile\n"
     if params[0] != "":
         _svc += "    environment:\n"
         _svc += params[0]
@@ -105,9 +105,7 @@ def define_yaml(
     with create_metadata_manager(use_meta_db) as mgr:
         scenario_def = mgr.read_scenario(scenario_name)
         if not scenario_def:
-            raise ValueError(
-                f"Scenario '{scenario_name}' not found in metadata store."
-            )
+            raise ValueError(f"Scenario '{scenario_name}' not found in metadata store.")
         analysis_name = scenario_def.get("analysis")
         if not analysis_name:
             raise ValueError(
@@ -163,11 +161,9 @@ def define_yaml(
         params = [
             cosim_env,
             f"python3 -c 'import cosim_toolbox.sims.federateLogger as datalog; "
-            f"datalog.main(\\\"FederateLogger\\\", \\\"{scenario_name}\\\", \\\"{use_meta_db}\\\", \\\"{use_data_db}\\\")'",
+            f'datalog.main(\\"FederateLogger\\", \\"{scenario_name}\\", \\"{use_meta_db}\\", \\"{use_data_db}\\")\'',
         ]
-        yaml_str += _service(
-            "cst_logger", "broker", params, cnt, depends="helics"
-        )
+        yaml_str += _service("cst_logger", "broker", params, cnt, depends="helics")
 
     # DockerRunner._network() is deliberately not appended: it emits a
     # cst_net with a hard-coded 10.5.0.0/16 subnet and gateway. Without it
@@ -188,9 +184,7 @@ def define_yaml(
         f"--global_disconnect",
     ]
     yaml_str = (
-        "services:\n"
-        + _service("helics", "broker", params, 2, depends=None)
-        + yaml_str
+        "services:\n" + _service("helics", "broker", params, 2, depends=None) + yaml_str
     )
 
     Path("./generated").mkdir(parents=True, exist_ok=True)
