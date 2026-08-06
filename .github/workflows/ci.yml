@@ -38,8 +38,12 @@ jobs:
 
   e2e:
     needs: unit
+    # run.sh builds the images before starting its own --timeout 600 clock, so
+    # this cap has to cover both: ~3m20s of pulls and builds plus a full 600s
+    # simulation is ~13m20s. At 15 the job cap could fire first, which kills the
+    # federation without run.sh's teardown or its "exceeded 600s" message.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
