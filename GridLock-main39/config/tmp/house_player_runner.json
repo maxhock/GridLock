@@ -1,0 +1,83 @@
+{
+    "name": "house_player",
+    "federates": [
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_0 --local",
+            "host": "localhost",
+            "name": "node_0"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_1 --local",
+            "host": "localhost",
+            "name": "node_1"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_2 --local",
+            "host": "localhost",
+            "name": "node_2"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_3 --local",
+            "host": "localhost",
+            "name": "node_3"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_4 --local",
+            "host": "localhost",
+            "name": "node_4"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_5 --local",
+            "host": "localhost",
+            "name": "node_5"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_6 --local",
+            "host": "localhost",
+            "name": "node_6"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_7 --local",
+            "host": "localhost",
+            "name": "node_7"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_8 --local",
+            "host": "localhost",
+            "name": "node_8"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_9 --local",
+            "host": "localhost",
+            "name": "node_9"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_10 --local",
+            "host": "localhost",
+            "name": "node_10"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_11 --local",
+            "host": "localhost",
+            "name": "node_11"
+        },
+        {
+            "directory": "/app",
+            "exec": "helics_player --input=/data/input/sample_house.csv --config-file=/config/tmp/house_player_config.json --broker=broker --name=node_12 --local",
+            "host": "localhost",
+            "name": "node_12"
+        }
+    ]
+}

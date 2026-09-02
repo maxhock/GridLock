@@ -1,0 +1,52 @@
+networks:
+  helics-net:
+    driver: bridge
+services:
+  broker:
+    build: ${PWD}/broker
+    container_name: broker
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net
+  grid:
+    build: ${PWD}/grid
+    container_name: grid
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net
+  heat:
+    build: ${PWD}/heat
+    container_name: heat
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net
+  forecasting:
+    build: ${PWD}/forecasting
+    container_name: forecasting
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net
+  house_player:
+    build: ${PWD}/house_player
+    container_name: house_player
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net
+  recorder:
+    build: ${PWD}/recorder
+    container_name: recorder
+    volumes:
+    - ${PWD}/data:/data
+    - ${PWD}/config/tmp:/config/tmp:ro
+    networks:
+    - helics-net

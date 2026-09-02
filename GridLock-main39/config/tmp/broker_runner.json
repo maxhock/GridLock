@@ -1,0 +1,11 @@
+{
+    "name": "broker",
+    "federates": [
+        {
+            "directory": "/app",
+            "exec": "helics_broker --federates=17 --name=broker --ipv4",
+            "host": "localhost",
+            "name": "broker"
+        }
+    ]
+}
