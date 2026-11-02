@@ -11,6 +11,8 @@ Usage:
 import argparse
 import os
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, cast
 
 import pandapower as pp
@@ -105,6 +107,96 @@ def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
     return net
 
 
+_ACTIVE = "/active_power"
+_REACTIVE = "/reactive_power"
+_VOLTAGE = "/voltage"
+
+# net.load column each incoming power key drives.
+_POWER_COLUMNS = {_ACTIVE: "p_mw", _REACTIVE: "q_mvar"}
+
+
+def _is_helics_sentinel(value: float | None) -> bool:
+    """Whether HELICS has delivered nothing yet (None, or its huge placeholder)."""
+    return value is None or abs(value) > 1e40
+
+
+@dataclass(frozen=True)
+class _GridKeys:
+    """What each HELICS key of one grid federate means.
+
+    The direction and suffix decide the role, so composegen needs no extra
+    config to couple a grid to a parent grid. The parent's voltage key also
+    contains ``/load_<idx>/``, so the load regex alone cannot tell it from a
+    child's power key; this classification is the single source of truth.
+    """
+
+    load_inputs: dict[str, tuple[int, str]]  # key -> (load index, net.load column)
+    voltage_pubs: dict[str, int]  # key -> load index whose bus voltage it carries
+    upstream_voltage: str | None
+    upstream_p: str | None
+    upstream_q: str | None
+
+    @property
+    def has_upstream(self) -> bool:
+        """Whether this grid hangs off a parent grid's load."""
+        return self.upstream_voltage is not None
+
+    @classmethod
+    def classify(
+        cls, federate_name: str, input_keys: Iterable[str], pub_keys: Iterable[str]
+    ) -> "_GridKeys":
+        """Sort the keys into roles, raising on any wiring that is ambiguous."""
+        input_keys, pub_keys = list(input_keys), list(pub_keys)
+        voltage_inputs = [k for k in input_keys if k.endswith(_VOLTAGE)]
+        p_pubs = [k for k in pub_keys if k.endswith(_ACTIVE)]
+        q_pubs = [k for k in pub_keys if k.endswith(_REACTIVE)]
+        for what, keys in (
+            ("upstream voltage input", voltage_inputs),
+            ("upstream active_power publication", p_pubs),
+            ("upstream reactive_power publication", q_pubs),
+        ):
+            if len(keys) > 1:
+                raise ValueError(
+                    f"Grid '{federate_name}' has {len(keys)} {what}s, expected at "
+                    f"most one: {keys}"
+                )
+        # A voltage without a reply (or a reply without a voltage) leaves the
+        # parent grid silently without this grid's demand.
+        if bool(voltage_inputs) != bool(p_pubs) or bool(p_pubs) != bool(q_pubs):
+            raise ValueError(
+                f"Grid '{federate_name}' has a partial upstream coupling; an "
+                "upstream voltage input, active_power publication and "
+                f"reactive_power publication come together. Got voltage "
+                f"{voltage_inputs}, active_power {p_pubs}, reactive_power {q_pubs}"
+            )
+        return cls(
+            load_inputs=cls._load_inputs(input_keys),
+            voltage_pubs=cls._voltage_pubs(pub_keys),
+            upstream_voltage=voltage_inputs[0] if voltage_inputs else None,
+            upstream_p=p_pubs[0] if p_pubs else None,
+            upstream_q=q_pubs[0] if q_pubs else None,
+        )
+
+    @staticmethod
+    def _load_inputs(input_keys: list[str]) -> dict[str, tuple[int, str]]:
+        loads: dict[str, tuple[int, str]] = {}
+        for key in input_keys:
+            idx = _parse_load_index(key)
+            for suffix, column in _POWER_COLUMNS.items():
+                if idx is not None and key.endswith(suffix):
+                    loads[key] = (idx, column)
+        return loads
+
+    @staticmethod
+    def _voltage_pubs(pub_keys: list[str]) -> dict[str, int]:
+        indices = {key: _parse_load_index(key) for key in pub_keys}
+        return {
+            key: idx
+            for key, idx in indices.items()
+            if idx is not None and key.endswith(_VOLTAGE)
+        }
+
+
 class GridFederate(Federate):
     """Pandapower grid federate. Overrides only ``update_internal_model``."""
 
@@ -112,24 +204,55 @@ class GridFederate(Federate):
         """Bind this federate to the net it solves."""
         super().__init__(federate_name)
         self.net = net
+        self._grid_keys: _GridKeys | None = None
+
+    @property
+    def grid_keys(self) -> _GridKeys:
+        """Key roles, classified on first use.
+
+        CST fills the input/publication dicts in ``create_federate``, after
+        ``__init__``, so they cannot be classified any earlier.
+        """
+        if self._grid_keys is None:
+            self._grid_keys = _GridKeys.classify(
+                self.federate_name,
+                self.data_from_federation.get("inputs", {}),
+                self.data_to_federation.get("publications", {}),
+            )
+            if self._grid_keys.has_upstream:
+                self._require_single_slack()
+        return self._grid_keys
+
+    def _require_single_slack(self) -> None:
+        count = len(self.net.ext_grid)
+        if count != 1:
+            raise ValueError(
+                f"Grid '{self.federate_name}' is coupled to a parent grid and "
+                f"must have exactly one ext_grid (the slack the parent's voltage "
+                f"drives), but its net has {count}."
+            )
 
     def update_internal_model(self) -> None:
-        """Apply this step's loads, solve the power flow, publish voltages."""
-        # 1. Apply received load values (filter out HELICS sentinel -1e+49)
-        for key, value in self.data_from_federation.get("inputs", {}).items():
-            idx = _parse_load_index(key)
-            if value is None or idx is None:
-                continue
-            # Skip HELICS sentinel values (no data received yet)
-            if abs(value) > 1e40:
-                continue
-            if key.endswith("/active_power"):
-                self.net.load.at[idx, "p_mw"] = float(value) / 1e6
-            elif key.endswith("/reactive_power"):
-                self.net.load.at[idx, "q_mvar"] = float(value) / 1e6
+        """Apply this step's inputs, solve the power flow, publish the results."""
+        keys = self.grid_keys
+        self._apply_inputs(keys)
+        self._solve()
+        self._publish(keys)
 
-        # 2. Run power flow
-        #
+    def _apply_inputs(self, keys: _GridKeys) -> None:
+        """Write received load powers and the parent's voltage into the net."""
+        inputs = self.data_from_federation.get("inputs", {})
+        for key, (idx, column) in keys.load_inputs.items():
+            value = inputs[key]
+            if not _is_helics_sentinel(value):
+                self.net.load.at[idx, column] = float(value) / 1e6
+        if keys.upstream_voltage is not None:
+            voltage = inputs[keys.upstream_voltage]
+            # Nothing is published yet at t=0; keep the net's own setpoint.
+            if not _is_helics_sentinel(voltage):
+                self.net.ext_grid["vm_pu"] = float(voltage)
+
+    def _solve(self) -> None:
         # A diverged power flow must fail the run. Swallowing it leaves the
         # previous step's voltages in data_to_federation, which are then
         # published as if they were current - the co-simulation completes
@@ -153,14 +276,22 @@ class GridFederate(Federate):
             f"(applied P={float(self.net.load['p_mw'].sum()) * 1e6:.1f} W)."
         )
 
-        # 3. Publish per-load bus voltages
-        for key in self.data_to_federation.get("publications", {}):
-            idx = _parse_load_index(key)
-            if idx is None or not key.endswith("/voltage"):
-                continue
+    def _publish(self, keys: _GridKeys) -> None:
+        """Publish per-load bus voltages and, if coupled, the slack's draw."""
+        publications = self.data_to_federation["publications"]
+        for key, idx in keys.voltage_pubs.items():
             bus = int(self.net.load.at[idx, "bus"])
-            v_pu = float(self.net.res_bus.at[bus, "vm_pu"])
-            self.data_to_federation["publications"][key] = v_pu
+            publications[key] = float(self.net.res_bus.at[bus, "vm_pu"])
+        if keys.upstream_p is not None and keys.upstream_q is not None:
+            # What the slack delivers is the parent's load: positive when drawn
+            # from the parent (a load's sign convention), and it includes the
+            # trafo and line losses inside this grid, not just the child loads.
+            publications[keys.upstream_p] = (
+                float(self.net.res_ext_grid.p_mw.iat[0]) * 1e6
+            )
+            publications[keys.upstream_q] = (
+                float(self.net.res_ext_grid.q_mvar.iat[0]) * 1e6
+            )
 
     def on_enter_executing_mode(self) -> None:
         """Run initial power flow at t=0 with load values published by load players."""

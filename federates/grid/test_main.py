@@ -6,6 +6,7 @@ import pytest
 import main
 from main import (
     GridFederate,
+    _GridKeys,
     _parse_load_index,
     load_net_from_metadata,
     sanitize_net_for_power_flow,
@@ -237,3 +238,180 @@ def test_load_net_from_metadata_missing_document_names_the_net_key(
 
     with pytest.raises(FileNotFoundError, match="lv-template"):
         load_net_from_metadata("lv-template")
+
+
+# ---------------------------------------------------------------------------
+# Coupling to a parent grid
+# ---------------------------------------------------------------------------
+
+_V_IN = "mv-grid_0/load_3/voltage"
+_P_OUT = "mv-grid_0/lv-grid_3/load_3/active_power"
+_Q_OUT = "mv-grid_0/lv-grid_3/load_3/reactive_power"
+_HOUSE_P = "mv-grid_0/lv-grid_3/house_0/load_0/active_power"
+_HOUSE_Q = "mv-grid_0/lv-grid_3/house_0/load_0/reactive_power"
+_OWN_V = "mv-grid_0/lv-grid_3/load_0/voltage"
+
+
+def _lv_net_behind_trafo() -> pp.pandapowerNet:
+    """10 kV slack, a 10/0.4 kV trafo and two 0.4 kV loads (indices 0 and 1)."""
+    net = pp.create_empty_network()
+    hv = pp.create_bus(net, vn_kv=10.0)
+    lv = pp.create_bus(net, vn_kv=0.4)
+    far = pp.create_bus(net, vn_kv=0.4)
+    pp.create_ext_grid(net, hv, vm_pu=1.0)
+    pp.create_transformer(net, hv, lv, std_type="0.25 MVA 10/0.4 kV")
+    pp.create_line(net, lv, far, length_km=0.1, std_type="NAYY 4x50 SE")
+    pp.create_load(net, lv, p_mw=0.0, q_mvar=0.0)
+    pp.create_load(net, far, p_mw=0.0, q_mvar=0.0)
+    sanitize_net_for_power_flow(net)
+    return net
+
+
+def _coupled_federate(
+    net: pp.pandapowerNet, voltage: float | None = None
+) -> GridFederate:
+    federate = GridFederate("mv-grid_0/lv-grid_3", net)
+    federate.data_from_federation["inputs"] = {
+        _V_IN: voltage,
+        _HOUSE_P: 20000.0,
+        _HOUSE_Q: 5000.0,
+        "mv-grid_0/lv-grid_3/house_1/load_1/active_power": 10000.0,
+    }
+    federate.data_to_federation["publications"] = {
+        _P_OUT: None,
+        _Q_OUT: None,
+        _OWN_V: None,
+        "mv-grid_0/lv-grid_3/load_1/voltage": None,
+    }
+    return federate
+
+
+def test_grid_keys_classifies_a_mixed_key_set() -> None:
+    keys = _GridKeys.classify(
+        "lv",
+        [_V_IN, _HOUSE_P, _HOUSE_Q, "lv/house_1/load_1/active_power", "lv/other"],
+        [_P_OUT, _Q_OUT, _OWN_V],
+    )
+
+    assert keys.upstream_voltage == _V_IN
+    assert keys.upstream_p == _P_OUT
+    assert keys.upstream_q == _Q_OUT
+    assert keys.voltage_pubs == {_OWN_V: 0}
+    assert keys.load_inputs == {
+        _HOUSE_P: (0, "p_mw"),
+        _HOUSE_Q: (0, "q_mvar"),
+        "lv/house_1/load_1/active_power": (1, "p_mw"),
+    }
+    assert keys.has_upstream
+
+
+def test_grid_keys_of_a_root_grid_have_no_upstream() -> None:
+    keys = _GridKeys.classify("lv", ["lv/h/load_0/active_power"], ["lv/load_0/voltage"])
+
+    assert not keys.has_upstream
+    assert keys.upstream_p is None
+    assert keys.upstream_q is None
+
+
+def test_grid_keys_reject_two_upstream_voltage_inputs() -> None:
+    with pytest.raises(ValueError, match="lv-x.*load_3/voltage.*load_4/voltage"):
+        _GridKeys.classify(
+            "lv-x",
+            ["mv/load_3/voltage", "mv/load_4/voltage"],
+            [_P_OUT, _Q_OUT],
+        )
+
+
+def test_grid_keys_reject_two_upstream_power_publications() -> None:
+    with pytest.raises(ValueError, match="active_power publication"):
+        _GridKeys.classify("lv", [_V_IN], [_P_OUT, "x/load_5/active_power", _Q_OUT])
+
+
+@pytest.mark.parametrize(
+    "input_keys, pub_keys",
+    [
+        ([_V_IN], [_OWN_V]),  # voltage without a reply
+        ([], [_P_OUT, _Q_OUT]),  # reply without a voltage
+        ([_V_IN], [_P_OUT]),  # no reactive_power
+        ([_V_IN], [_Q_OUT]),  # no active_power
+    ],
+)
+def test_grid_keys_reject_a_partial_upstream(
+    input_keys: list[str], pub_keys: list[str]
+) -> None:
+    with pytest.raises(ValueError, match="lv.*partial upstream"):
+        _GridKeys.classify("lv", input_keys, pub_keys)
+
+
+def test_upstream_voltage_drives_the_slack_and_the_bus_voltages() -> None:
+    nominal = _coupled_federate(_lv_net_behind_trafo(), voltage=1.0)
+    nominal.update_internal_model()
+    raised_net = _lv_net_behind_trafo()
+    raised = _coupled_federate(raised_net, voltage=1.03)
+
+    raised.update_internal_model()
+
+    assert raised_net.ext_grid.at[0, "vm_pu"] == pytest.approx(1.03)
+    assert raised.data_to_federation["publications"][_OWN_V] > (
+        nominal.data_to_federation["publications"][_OWN_V] + 0.02
+    )
+
+
+def test_upstream_power_is_the_slack_draw_including_losses() -> None:
+    net = _lv_net_behind_trafo()
+    federate = _coupled_federate(net, voltage=1.0)
+
+    federate.update_internal_model()
+
+    publications = federate.data_to_federation["publications"]
+    assert publications[_P_OUT] == pytest.approx(net.res_ext_grid.at[0, "p_mw"] * 1e6)
+    assert publications[_Q_OUT] == pytest.approx(net.res_ext_grid.at[0, "q_mvar"] * 1e6)
+    # Drawn from the parent (positive), and more than the children consume.
+    assert publications[_P_OUT] > 30000.0
+
+
+@pytest.mark.parametrize("voltage", [None, -1e49])
+def test_missing_upstream_voltage_keeps_the_nets_setpoint(
+    voltage: float | None,
+) -> None:
+    net = _lv_net_behind_trafo()
+    net.ext_grid.at[0, "vm_pu"] = 1.02
+
+    _coupled_federate(net, voltage=voltage).update_internal_model()
+
+    assert net.ext_grid.at[0, "vm_pu"] == pytest.approx(1.02)
+
+
+def test_upstream_voltage_key_never_drives_a_load() -> None:
+    """``.../load_3/voltage`` names the MV load, not LV load 3 (which is absent)."""
+    net = _lv_net_behind_trafo()
+    federate = _coupled_federate(net, voltage=1.01)
+
+    federate.update_internal_model()
+
+    assert _V_IN not in federate.grid_keys.load_inputs
+    assert list(net.load.index) == [0, 1]
+    assert net.load["p_mw"].tolist() == pytest.approx([0.02, 0.01])
+    assert net.load["q_mvar"].tolist() == pytest.approx([0.005, 0.0])
+
+
+def test_upstream_requires_exactly_one_ext_grid() -> None:
+    net = _lv_net_behind_trafo()
+    pp.create_ext_grid(net, int(net.trafo.at[0, "hv_bus"]))
+
+    with pytest.raises(
+        ValueError, match="mv-grid_0/lv-grid_3.*exactly one ext_grid.*2"
+    ):
+        _coupled_federate(net, voltage=1.0).update_internal_model()
+
+
+def test_root_grid_publishes_no_upstream_power() -> None:
+    net = _lv_net_behind_trafo()
+    federate = GridFederate("root", net)
+    federate.data_from_federation["inputs"] = {"root/h/load_0/active_power": 1000.0}
+    federate.data_to_federation["publications"] = {"root/load_0/voltage": None}
+
+    federate.update_internal_model()
+
+    assert list(federate.data_to_federation["publications"]) == ["root/load_0/voltage"]
+    assert net.ext_grid.at[0, "vm_pu"] == 1.0
