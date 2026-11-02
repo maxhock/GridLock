@@ -19,6 +19,7 @@ import pytest
 from grid_contract import ContractViolation, check_attach, check_attach_all
 from make_lv_variant import make_variant, smoke_test
 from make_synthetic_mv import build_net
+from mvlv_merge import build_merged_net, power_into_part
 
 INPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "input"
 STOCK_LV = ("kerber_landnetz_freileitung_1", "kerber_landnetz_kabel_1")
@@ -110,3 +111,67 @@ def test_check_attach_rejects_two_ext_grids() -> None:
 def test_check_attach_rejects_unknown_mv_load() -> None:
     with pytest.raises(ContractViolation, match="no load"):
         check_attach(build_net(), 99, _load("kerber_landnetz_freileitung_1_20kv"))
+
+
+LV_FREILEITUNG = "kerber_landnetz_freileitung_1_20kv"
+LV_KABEL = "kerber_landnetz_kabel_1_20kv"
+
+
+def _merged_like_the_parity_experiment() -> tuple:
+    mv = build_net()
+    lvs = {1: _load(LV_FREILEITUNG), 3: _load(LV_FREILEITUNG), 5: _load(LV_KABEL)}
+    return mv, lvs, build_merged_net(mv, lvs)
+
+
+def test_merged_net_has_one_slack_and_the_expected_element_counts() -> None:
+    mv, lvs, merged = _merged_like_the_parity_experiment()
+    net = merged.net
+    assert len(net.ext_grid) == 1
+    # Each LV slack bus is fused into its MV load bus, so it adds no bus.
+    assert len(net.bus) == len(mv.bus) + sum(len(lv.bus) - 1 for lv in lvs.values())
+    # The three MV loads an LV net stands in for are gone, the LV loads are in.
+    assert len(net.load) == len(mv.load) - 3 + sum(len(lv.load) for lv in lvs.values())
+    assert merged.mv_load_ids == [0, 2, 4]
+    assert sorted(merged.parts) == [1, 3, 5]
+    assert len(net.trafo) == len(mv.trafo) + 3
+
+
+def test_merged_net_is_one_connected_converging_system() -> None:
+    _, _, merged = _merged_like_the_parity_experiment()
+    pp.runpp(merged.net)
+    assert merged.net.converged
+    assert merged.net.res_bus.vm_pu.notna().all()
+    # The fused LV trafo hangs on the MV bus, not on a dangling copy of it.
+    for part in merged.parts.values():
+        assert (
+            merged.net.trafo.loc[list(part.trafo_ids), "hv_bus"] == part.fused_bus
+        ).all()
+
+
+def test_merging_leaves_its_inputs_untouched() -> None:
+    mv, lvs, _ = _merged_like_the_parity_experiment()
+    assert len(mv.load) == 6
+    assert all(len(lv.ext_grid) == 1 for lv in lvs.values())
+
+
+def test_power_into_part_is_the_lv_load_plus_losses() -> None:
+    mv = build_net()
+    lv = _load(LV_FREILEITUNG)
+    merged = build_merged_net(mv, {1: lv})
+    lv_loads = list(merged.parts[1].load_ids.values())
+    merged.net.load.loc[lv_loads, "p_mw"] = 0.006
+    pp.runpp(merged.net)
+
+    p_w, _ = power_into_part(merged, 1)
+    assert p_w > 0.006 * len(lv_loads) * 1e6  # the demand plus trafo/line losses
+
+    # Same answer from the LV net alone at the voltage the MV bus ended up at.
+    lv.load["p_mw"] = 0.006
+    lv.ext_grid["vm_pu"] = merged.net.res_bus.at[merged.parts[1].fused_bus, "vm_pu"]
+    pp.runpp(lv)
+    assert p_w == pytest.approx(lv.res_ext_grid.p_mw.iat[0] * 1e6, rel=1e-6)
+
+
+def test_merge_rejects_an_mv_load_that_does_not_exist() -> None:
+    with pytest.raises(ValueError, match="not available"):
+        build_merged_net(build_net(), {99: _load(LV_FREILEITUNG)})

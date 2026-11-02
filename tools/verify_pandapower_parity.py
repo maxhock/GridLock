@@ -12,45 +12,21 @@ environment the repo's .venv already provides (pandapower, psycopg2).
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pandapower as pp
 import psycopg2
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a component's script-style module by exact path.
-
-    Every federate directory is self-contained and unpackaged (see AGENTS.md),
-    so `federates/grid/main.py` and `federates/house_player/src/load_player.py`
-    can't both be reached with a plain `import` without their bare module
-    names ("main", "src") colliding with the same-named modules other
-    components already carry. Loading by path sidesteps that entirely.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_grid_main = _load_module(
-    "gridlock_tools_grid_main", REPO_ROOT / "federates" / "grid" / "main.py"
+from parity_common import (
+    REPO_ROOT,
+    add_postgres_arguments,
+    load_timeseries,
+    lookup_power,
+    postgres_dsn,
+    sanitize_net_for_power_flow,
 )
-_load_player = _load_module(
-    "gridlock_tools_load_player",
-    REPO_ROOT / "federates" / "house_player" / "src" / "load_player.py",
-)
-sanitize_net_for_power_flow = _grid_main.sanitize_net_for_power_flow
-load_timeseries = _load_player.load_timeseries
-lookup_power = _load_player.lookup_power
-
 
 TOLERANCE_PU = 1e-6
 
@@ -139,11 +115,7 @@ def main() -> int:
             "sort order can silently compare against a stale one."
         ),
     )
-    parser.add_argument("--pg-host", default="localhost")
-    parser.add_argument("--pg-port", type=int, default=5432)
-    parser.add_argument("--pg-db", required=True)
-    parser.add_argument("--pg-user", required=True)
-    parser.add_argument("--pg-password", required=True)
+    add_postgres_arguments(parser)
     args = parser.parse_args()
 
     experiment = _load_experiment(Path(args.experiment))
@@ -176,13 +148,7 @@ def main() -> int:
     scenario = args.scenario
     print(f"Comparing against scenario '{scenario}' recorded by the real run...")
 
-    dsn = {
-        "host": args.pg_host,
-        "port": args.pg_port,
-        "dbname": args.pg_db,
-        "user": args.pg_user,
-        "password": args.pg_password,
-    }
+    dsn = postgres_dsn(args)
     actual = _recorded_voltages(scenario, analysis_name, grid_fed_name, dsn)
 
     mismatches = []
