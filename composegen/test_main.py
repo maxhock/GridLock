@@ -542,7 +542,7 @@ def test_map_params_to_class_unknown_class_falls_back_to_default_image() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_grid_waits_for_current_time_only_with_exactly_one_grid() -> None:
+def test_grid_waits_for_current_time_only_with_exactly_one_root_grid() -> None:
     assert _grid_waits_for_current_time(1) is True
     assert _grid_waits_for_current_time(0) is False
     assert _grid_waits_for_current_time(2) is False

@@ -966,25 +966,42 @@ def _add_sink_only_group(
 # it ("Multiple federates declaring wait_for_current_time flag will result
 # in deadlock"), so it is a single federation-wide slot.
 #
-# The slot goes to the grid, because a power flow computed from last step's
-# loads is the error that matters most here. Measured on
+# The slot goes to the root grid, because a power flow computed from last
+# step's loads is the error that matters most here. Measured on
 # experiment-local-grid, with the slot vs. without:
 #   with:     t=3600 -> applies the loads published at 3600
 #   without:  t=3600 -> applies the loads published at 0
 #
-# A federation with several independent grids (a PLZ-only location query can
-# resolve to many) cannot give the slot to all of them, so it goes to none
-# and every grid lags one step uniformly, rather than one grid silently
-# behaving differently from its peers.
+# Coupled MV/LV grids are not independent grids, and only the root counts
+# towards the slot (nested grids are reached through their parent, see
+# `load_tree_cst_outputs`). The root takes it, so that its power flow uses the
+# LV aggregates published in the same step. A nested grid has no slot, so by
+# the measurement above it applies its own children's loads one step late, and
+# it takes its parent's voltage from the previous step.
+#
+# That lag compounds by one step per grid level below the root, and what
+# follows from the measurement is this: a house on an LV grid publishes at t,
+# the LV grid applies it at t+1 and publishes the aggregate then, and the MV
+# grid - which waits for the whole federation to finish a step - reads that
+# aggregate in the same step. So a house load reaches the MV power flow one
+# step late, and a house under a grid two levels down reaches it two steps
+# late. Loads placed directly on the root have no lag.
+#
+# A federation with several root grids (a PLZ-only location query can resolve
+# to many) cannot give the slot to all of them, so it goes to none and every
+# root grid lags one step uniformly, rather than one grid silently behaving
+# differently from its peers.
 #
 # What the slot does not buy: the grid publishes after everyone else, so
-# voltage reaches its children a step late (currently unread), and the
-# house/hems loop keeps a two-step round trip. HELICS iteration
-# (helicsFederateRequestTimeIterative) is the change that would remove both
-# and lift the multi-grid restriction; it belongs in the CST federate loop.
-def _grid_waits_for_current_time(grid_fed_count: int) -> bool:
-    """Decide whether the grid may claim the one ordering slot (see above)."""
-    return grid_fed_count == 1
+# voltage reaches its children a step late (houses do not read it; a nested
+# grid does, see above), and the house/hems loop keeps a two-step round trip.
+# HELICS iteration (helicsFederateRequestTimeIterative) is the change that
+# would remove those and the per-level lag, and lift the multi-root
+# restriction; it belongs in the CST federate loop (a later phase of
+# issue #65).
+def _grid_waits_for_current_time(root_grid_fed_count: int) -> bool:
+    """Decide whether the root grid may claim the one ordering slot (see above)."""
+    return root_grid_fed_count == 1
 
 
 def _wire_house_subcomponents(
@@ -1859,15 +1876,15 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                     location=node.data.get("location"),
                 )
 
-        grid_fed_count = sum(len(v) for v in grid_federates_by_node.values())
-        grid_waits = _grid_waits_for_current_time(grid_fed_count)
+        root_grid_fed_count = sum(len(v) for v in grid_federates_by_node.values())
+        grid_waits = _grid_waits_for_current_time(root_grid_fed_count)
 
-        if not grid_waits and grid_fed_count > 1:
+        if not grid_waits and root_grid_fed_count > 1:
             print(
-                f"Note: {grid_fed_count} grid federates in this federation. "
-                f"HELICS allows only one federate to wait for the current "
-                f"time update, so every grid will run its power flow on the "
-                f"previous step's published loads."
+                f"Note: {root_grid_fed_count} root grid federates in this "
+                f"federation. HELICS allows only one federate to wait for the "
+                f"current time update, so every root grid will run its power "
+                f"flow on the previous step's published loads."
             )
 
         ctx = _GridWiringContext(

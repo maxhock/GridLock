@@ -652,3 +652,48 @@ def test_registering_a_grid_federate_twice_is_refused() -> None:
         _register_grid_federate(
             ctx, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False
         )
+
+
+LOCATION_YAML = """
+general:
+  name: "TestLocation"
+  start_time: 0
+  end_time: 86400
+  time_step: 3600
+  duration: 86400
+  use_meta_db: "json"
+  use_data_db: "postgres"
+  meta_store_path: "{meta_store}"
+federation:
+  id: "loc-grid"
+  name: "Location grid"
+  class: "grid"
+  config:
+    location:
+      - plz: "80331"
+  sub_federates:
+    - id: "loadhouse_0"
+      name: "Load profile house"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "load_profile.csv"
+"""
+
+
+def test_several_root_grids_leave_the_ordering_slot_unclaimed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A plz-only query resolves to every net infdb stored for that postcode.
+    # HELICS allows one waiting federate, so with two root grids none gets it.
+    nets = {f"loc-grid_80331_1_{bcid}": _net_json(NUM_LOADS) for bcid in (1, 2)}
+
+    result = _generate(tmp_path, monkeypatch, LOCATION_YAML, nets, layouts=[])
+
+    assert {name for name in result.federates if name.count(".") == 0} == set(nets)
+    waiting = {
+        name
+        for name, fed in result.federates.items()
+        if fed["HELICS_config"].get("wait_for_current_time_update")
+    }
+    assert waiting == set()
