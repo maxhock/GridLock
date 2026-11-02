@@ -1,7 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
+# Relative experiment paths are tried against where the user ran this from first.
+INVOCATION_DIR="$PWD"
 cd "$(dirname "$0")"
+
+# The containers see only the repo's config/ directory, mounted at /config, so an
+# experiment is addressed by its path below config/ (config/private/x.yml becomes
+# /config/private/x.yml). Taking just the file name instead sent subdirectory
+# experiments to /config/x.yml, which does not exist. Prints the container path, or
+# says why the file is out of reach: the same name lookup would otherwise quietly
+# pick up a different file, or none.
+container_config_path() {
+  local arg="$1" candidate found="" candidates abs
+  if [[ "$arg" == /* ]]; then
+    candidates=("$arg")
+  else
+    # Repo root and config/ also count, so `config/x.yml` works from any directory
+    # and a bare `experiment-LV.yml` (as the help text shows it) still resolves.
+    candidates=("$INVOCATION_DIR/$arg" "$PWD/$arg" "$PWD/config/$arg")
+  fi
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then found="$candidate"; break; fi
+  done
+  if [[ -z "$found" ]]; then
+    echo "Experiment file not found: $arg" >&2
+    return 1
+  fi
+  # Logical (not -P) paths: config/private may be a symlink and must still count.
+  abs="$(cd "$(dirname "$found")" && pwd)/$(basename "$found")"
+  if [[ "$abs" != "$PWD/config/"* ]]; then
+    echo "Experiment $abs is outside $PWD/config/, which is all the containers can see." >&2
+    echo "Move it into config/ (config/private/ is gitignored) and pass that path." >&2
+    return 1
+  fi
+  printf '/config/%s\n' "${abs#"$PWD/config/"}"
+}
 
 # --- arguments -------------------------------------------------------------
 EXPERIMENT=""
@@ -15,7 +49,8 @@ while [[ $# -gt 0 ]]; do
       echo "Run the GridLock co-simulation experiment."
       echo ""
       echo "Arguments:"
-      echo "  EXPERIMENT_FILE    Path to experiment YAML (default: experiment-LV.yml)"
+      echo "  EXPERIMENT_FILE    Path to experiment YAML inside config/, subfolders included,"
+      echo "                     e.g. config/private/x.yml (default: config/experiment-LV.yml)"
       echo ""
       echo "Options:"
       echo "  --cleanup-dbs      Stop CST databases on exit (default: leave running)"
@@ -33,7 +68,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -n "$EXPERIMENT" ]]; then
-  CONFIG_PATH="/config/$(basename "$EXPERIMENT")"
+  CONFIG_PATH="$(container_config_path "$EXPERIMENT")" || exit 1
 fi
 
 # --- environment -----------------------------------------------------------
