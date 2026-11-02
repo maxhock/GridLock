@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from main import extract_grid_config
+import main as infdb_main
+from main import extract_grid_config, write_grid_to_metadata
 from src.infdb_data import _net_table_count, get_pylovo_grid, resolve_grid_queries
 
 
@@ -31,7 +32,7 @@ def test_extract_grid_config_missing_file_raises(tmp_path) -> None:
 def test_extract_grid_config_location_source(tmp_path) -> None:
     path = _write_experiment(tmp_path, {"location": [{"plz": 91359}]})
 
-    cfg = extract_grid_config(path)
+    (cfg,) = extract_grid_config(path)
 
     assert cfg == {
         "grid_id": "lv-grid",
@@ -44,7 +45,7 @@ def test_extract_grid_config_location_source(tmp_path) -> None:
 def test_extract_grid_config_layout_source(tmp_path) -> None:
     path = _write_experiment(tmp_path, {"layout": "kerber.xlsx"})
 
-    cfg = extract_grid_config(path)
+    (cfg,) = extract_grid_config(path)
 
     assert cfg == {
         "grid_id": "lv-grid",
@@ -75,9 +76,229 @@ def test_extract_grid_config_uses_declared_use_meta_db(tmp_path) -> None:
         tmp_path, {"layout": "kerber.xlsx"}, general={"use_meta_db": "mongo"}
     )
 
-    cfg = extract_grid_config(path)
+    (cfg,) = extract_grid_config(path)
 
     assert cfg["use_meta_db"] == "mongo"
+
+
+# ---------------------------------------------------------------------------
+# main.extract_grid_config: nested grids
+# ---------------------------------------------------------------------------
+
+
+def _write_tree(tmp_path, federation: dict) -> str:
+    path = tmp_path / "experiment.yml"
+    path.write_text(json.dumps({"general": {}, "federation": federation}))
+    return str(path)
+
+
+def _mv_lv_tree(lv_config: dict, lv_class: str = "grid", mv_class: str = "grid"):
+    return {
+        "id": "mv-grid_0",
+        "class": mv_class,
+        "config": {"layout": "mv.xlsx"},
+        "sub_federates": [
+            {
+                "id": "lv-grid_0",
+                "class": lv_class,
+                "config": lv_config,
+                "sub_federates": [{"id": "house_0", "class": "house", "config": {}}],
+            }
+        ],
+    }
+
+
+def test_extract_grid_config_collects_nested_layout_grid_with_dotted_id(
+    tmp_path,
+) -> None:
+    path = _write_tree(tmp_path, _mv_lv_tree({"layout": "lv.xlsx", "placement": [3]}))
+
+    configs = extract_grid_config(path)
+
+    assert [(c["grid_id"], c["source"]) for c in configs] == [
+        ("mv-grid_0", "layout"),
+        ("mv-grid_0.lv-grid_0", "layout"),
+    ]
+    assert configs[1]["layout"] == "lv.xlsx"
+
+
+def _three_level_tree() -> dict:
+    return {
+        "id": "a",
+        "class": "grid",
+        "config": {"layout": "a.xlsx"},
+        "sub_federates": [
+            {
+                "id": "b",
+                "class": "grid",
+                "config": {"layout": "b.xlsx"},
+                "sub_federates": [
+                    {"id": "c", "class": "grid", "config": {"layout": "c.xlsx"}},
+                    {"id": "house_0", "class": "house", "config": {}},
+                ],
+            }
+        ],
+    }
+
+
+def test_extract_grid_config_third_level_gets_full_dotted_id(tmp_path) -> None:
+    configs = extract_grid_config(_write_tree(tmp_path, _three_level_tree()))
+
+    assert [c["grid_id"] for c in configs] == ["a", "a.b", "a.b.c"]
+
+
+def test_extract_grid_config_dotted_ids_match_composegen_rule(tmp_path) -> None:
+    # composegen identifies tree nodes by this rule, in
+    # composegen/extract.py:add_to_tree, and reads each net back under that id:
+    #   node_id = f"{parent}.{node_dict.get('id')}" if parent else node_dict.get("id")
+    # infdb cannot import composegen (separate images), so the rule is restated here
+    # and the ids infdb writes under are pinned to it.
+    def composegen_ids(node: dict, parent: str | None = None) -> list[str]:
+        node_id = f"{parent}.{node.get('id')}" if parent else node.get("id")
+        ids = [node_id] if node.get("class") == "grid" else []
+        for sub in node.get("sub_federates", []):
+            ids.extend(composegen_ids(sub, node_id))
+        return ids
+
+    tree = _three_level_tree()
+
+    configs = extract_grid_config(_write_tree(tmp_path, tree))
+
+    assert [c["grid_id"] for c in configs] == composegen_ids(tree)
+    assert [c["grid_id"] for c in configs] == ["a", "a.b", "a.b.c"]
+
+
+def test_extract_grid_config_nested_location_is_not_implemented(tmp_path) -> None:
+    path = _write_tree(tmp_path, _mv_lv_tree({"location": [{"plz": 91359}]}))
+
+    with pytest.raises(NotImplementedError, match="mv-grid_0.lv-grid_0.*layout"):
+        extract_grid_config(path)
+
+
+def test_extract_grid_config_root_location_with_nested_layout(tmp_path) -> None:
+    tree = _mv_lv_tree({"layout": "lv.xlsx"})
+    tree["config"] = {"location": [{"plz": 91359}]}
+
+    configs = extract_grid_config(_write_tree(tmp_path, tree))
+
+    assert [c["source"] for c in configs] == ["infdb", "layout"]
+
+
+def test_extract_grid_config_grid_under_non_grid_parent_raises(tmp_path) -> None:
+    # composegen only finds grids whose ancestors are all grids, so this one would
+    # get a net and never be wired
+    tree = {
+        "id": "root",
+        "class": "grid",
+        "config": {"layout": "root.xlsx"},
+        "sub_federates": [
+            {
+                "id": "mid",
+                "class": "house",
+                "config": {},
+                "sub_federates": [
+                    {"id": "lv", "class": "grid", "config": {"layout": "lv.xlsx"}}
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(ValueError, match=r"'root\.mid\.lv'.*not a grid"):
+        extract_grid_config(_write_tree(tmp_path, tree))
+
+
+def test_extract_grid_config_nested_grid_requires_a_source(tmp_path) -> None:
+    path = _write_tree(tmp_path, _mv_lv_tree({}))
+
+    with pytest.raises(ValueError, match="No grid source.*mv-grid_0.lv-grid_0"):
+        extract_grid_config(path)
+
+
+def test_extract_grid_config_nested_grid_rejects_both_sources(tmp_path) -> None:
+    path = _write_tree(
+        tmp_path, _mv_lv_tree({"layout": "lv.xlsx", "location": [{"plz": 1}]})
+    )
+
+    with pytest.raises(ValueError, match="not both"):
+        extract_grid_config(path)
+
+
+def test_extract_grid_config_rejects_duplicate_grid_ids(tmp_path) -> None:
+    tree = _three_level_tree()
+    tree["sub_federates"].append(
+        {"id": "b", "class": "grid", "config": {"layout": "b2.xlsx"}}
+    )
+
+    with pytest.raises(ValueError, match="Duplicate grid id"):
+        extract_grid_config(_write_tree(tmp_path, tree))
+
+
+# ---------------------------------------------------------------------------
+# main.write_grid_to_metadata
+# ---------------------------------------------------------------------------
+
+
+class _StubMetaManager:
+    def __init__(self) -> None:
+        self.writes: dict[str, dict] = {}
+
+    def connect(self) -> None: ...
+    def disconnect(self) -> None: ...
+
+    def write(self, collection: str, name: str, data: dict, overwrite: bool) -> None:
+        assert collection == "custom_metadata"
+        self.writes[name] = data
+
+
+def test_write_grid_to_metadata_writes_every_grids_nets(monkeypatch) -> None:
+    manager = _StubMetaManager()
+    monkeypatch.setattr("main.create_metadata_manager", lambda **_: manager)
+    mv_net = json.dumps(_net_json(bus_rows=3))
+    lv_net = json.dumps(_net_json(bus_rows=2, load_rows=1))
+
+    names = write_grid_to_metadata(
+        {
+            "mv-grid_0": [("mv-grid_0", mv_net)],
+            "mv-grid_0.lv-grid_0": [("mv-grid_0.lv-grid_0", lv_net)],
+        },
+        "generated",
+        "json",
+    )
+
+    assert names == ["mv-grid_0", "mv-grid_0.lv-grid_0"]
+    assert manager.writes["mv-grid_0.lv-grid_0"]["grid_id"] == "mv-grid_0.lv-grid_0"
+    assert manager.writes["mv-grid_0.lv-grid_0"]["load_count"] == 1
+    assert manager.writes["mv-grid_0"]["bus_count"] == 3
+
+
+def test_main_resolves_layout_grids_without_connecting_to_infdb(
+    tmp_path, monkeypatch
+) -> None:
+    def no_infdb(*_a, **_k):
+        raise AssertionError("InfDB must only be contacted for 'location' grids")
+
+    loaded: list[str] = []
+
+    def fake_layout(grid_id: str, layout: str) -> list[tuple[str, str]]:
+        loaded.append(grid_id)
+        return [(grid_id, json.dumps(_net_json(bus_rows=1)))]
+
+    written: dict = {}
+
+    def fake_write(grids, meta_store_path, use_meta_db) -> list[str]:
+        written.update(grids)
+        return list(grids)
+
+    monkeypatch.setattr(infdb_main, "InfDB", no_infdb)
+    monkeypatch.setattr(infdb_main, "prepare_infdb_config", no_infdb)
+    monkeypatch.setattr(infdb_main, "load_local_layout", fake_layout)
+    monkeypatch.setattr(infdb_main, "write_grid_to_metadata", fake_write)
+    path = _write_tree(tmp_path, _mv_lv_tree({"layout": "lv.xlsx"}))
+
+    infdb_main.main(path, "generated")
+
+    assert loaded == ["mv-grid_0", "mv-grid_0.lv-grid_0"]
+    assert list(written) == loaded
 
 
 # ---------------------------------------------------------------------------
