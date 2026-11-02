@@ -82,6 +82,43 @@ def test_sanitize_sets_defaults_on_added_columns() -> None:
     assert bool(net.load.at[0, "in_service"]) is True
 
 
+def test_sanitize_resets_load_scaling_to_one() -> None:
+    net = _net_with_two_loads()
+    net.load["scaling"] = [0.3, 0.0]
+    net.load["p_mw"] = [0.2, 0.1]
+    net.load["q_mvar"] = [0.05, 0.02]
+
+    sanitize_net_for_power_flow(net)
+
+    assert (net.load["scaling"] == 1.0).all()
+    assert (net.load["p_mw"] == 0.0).all()
+    assert (net.load["q_mvar"] == 0.0).all()
+
+
+def test_sanitize_zeroes_static_sgens_and_keeps_in_service() -> None:
+    net = _net_with_one_load()
+    pp.create_sgen(net, 0, p_mw=1.0, q_mvar=0.2, in_service=False)
+
+    sanitize_net_for_power_flow(net)
+
+    assert net.sgen.at[0, "p_mw"] == 0.0
+    assert net.sgen.at[0, "q_mvar"] == 0.0
+    assert bool(net.sgen.at[0, "in_service"]) is False
+
+
+def test_sanitize_zeroes_sgens_in_a_net_without_loads() -> None:
+    net = pp.create_empty_network()
+    bus = pp.create_bus(net, vn_kv=20.0)
+    pp.create_ext_grid(net, bus)
+    pp.create_sgen(net, bus, p_mw=1.0, q_mvar=0.2)
+
+    sanitize_net_for_power_flow(net)
+
+    assert net.load.empty
+    assert net.sgen.at[0, "p_mw"] == 0.0
+    assert net.sgen.at[0, "q_mvar"] == 0.0
+
+
 def test_sanitize_empty_net_is_a_no_op() -> None:
     net = pp.create_empty_network()
 

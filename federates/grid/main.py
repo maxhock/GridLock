@@ -40,21 +40,13 @@ def _parse_load_index(key: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
-    """Prepare an imported pandapower net for HELICS-driven co-simulation.
+def _has_rows(table: Any) -> bool:
+    """Whether a pandapower element table exists and holds at least one row."""
+    return table is not None and not table.empty
 
-    Older or externally generated pandapower JSON payloads may omit ZIP-load
-    columns that newer pandapower releases expect during ``runpp``. Those
-    columns describe the static load model split and can safely default to zero.
 
-    Grid demand in this project is driven by HELICS load-player federates, so
-    any static load powers imported with the raw grid are cleared here. The
-    federates then write the active/reactive power values for their assigned
-    load indices before every power-flow step.
-    """
-    if not hasattr(net, "load") or net.load is None or net.load.empty:
-        return net
-
+def _zero_static_loads(net: pp.pandapowerNet) -> None:
+    """Clear imported load powers and reset every load's ``scaling`` to 1."""
     added_columns: list[str] = []
     for column_name, default_value in _LOAD_COLUMN_DEFAULTS.items():
         if column_name in net.load.columns:
@@ -62,13 +54,54 @@ def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
         net.load[column_name] = default_value
         added_columns.append(column_name)
 
+    # A federate publishes the actual power of its load, and pandapower
+    # multiplies p_mw by scaling. Anything but 1.0 would silently change the
+    # published value (0.0 would swallow it entirely).
+    rescaled = int((net.load["scaling"] != 1.0).sum())
+    net.load["scaling"] = 1.0
     net.load["p_mw"] = 0.0
     net.load["q_mvar"] = 0.0
 
     if added_columns:
         print("Sanitized net.load by adding columns: " + ", ".join(added_columns))
+    if rescaled:
+        print(
+            f"Reset net.load scaling to 1.0 on {rescaled} load(s) whose scaling "
+            "differed from 1; this changes what the imported model meant."
+        )
     print("Reset imported net.load active/reactive powers to zero for co-simulation.")
 
+
+def _zero_static_sgens(net: pp.pandapowerNet) -> None:
+    """Clear imported static generator powers, reporting what was removed."""
+    in_service = net.sgen["in_service"].astype(bool)
+    nominal_mw = float((net.sgen["p_mw"] * net.sgen["scaling"])[in_service].sum())
+    net.sgen["p_mw"] = 0.0
+    net.sgen["q_mvar"] = 0.0
+    print(
+        f"WARNING: zeroed {len(net.sgen)} static sgen(s) with {nominal_mw:.2f} MW "
+        "of nominal feed-in; only HELICS federates may drive the grid."
+    )
+
+
+def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
+    """Prepare an imported pandapower net for HELICS-driven co-simulation.
+
+    Older or externally generated pandapower JSON payloads may omit ZIP-load
+    columns that newer pandapower releases expect during ``runpp``. Those
+    columns describe the static load model split and can safely default to zero.
+
+    Only HELICS federates may drive the grid, so every imported static power
+    is cleared here: the federates write the active/reactive power values for
+    their assigned load indices before every power-flow step. Static sgens are
+    cleared for the same reason; left alone they would inject their constant
+    feed-in while every load sits at 0 W. Load ``scaling`` is reset to 1.0
+    because the published power is already the actual power.
+    """
+    if _has_rows(getattr(net, "load", None)):
+        _zero_static_loads(net)
+    if _has_rows(getattr(net, "sgen", None)):
+        _zero_static_sgens(net)
     return net
 
 
