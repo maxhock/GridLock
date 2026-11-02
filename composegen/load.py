@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import traceback
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1324,6 +1325,234 @@ def _add_generic_tree_pubsub_groups(
             )
 
 
+@dataclass
+class _GridWiringContext:
+    """What every grid in a federation shares while it is being wired."""
+
+    federation: Any
+    tree: Tree
+    scenario_name: str
+    time_step: float
+    grid_waits: bool
+    use_meta_db: str
+    meta_store_path: str
+    data_input_path: Path
+    handled_nodes: set[str]
+
+
+def _register_grid_federate(
+    ctx: _GridWiringContext, fed_name: str, net_key: str
+) -> None:
+    """Add one grid federate, with the command that points it at its net."""
+    from cosim_toolbox.sims import FederateConfig
+
+    grid_mapped = map_params_to_class("grid")
+
+    fed = FederateConfig(
+        fed_name,
+        period=ctx.time_step,
+        wait_for_current_time_update=ctx.grid_waits,
+    )
+    ctx.federation.add_federate_config(fed)
+
+    cmd = _grid_command(grid_mapped["command"], ctx.scenario_name, fed_name, net_key)
+
+    fed.config("image", grid_mapped["image"])
+    fed.config("command", cmd)
+    fed.config("federate_type", "value")
+
+    print(f"Added grid federate: {fed_name}")
+
+
+def _claim_explicit_placements(
+    children: list,
+    all_loads: list[tuple[int, str, int]],
+    fed_name: str,
+) -> set[int]:
+    """Collect the load indices the grid's children claim by explicit placement.
+
+    This is the pre-pass that lets a ``"fill"`` child take whatever is left,
+    and the place where conflicting claims are refused.
+    """
+    explicit_load_indices: set[int] = set()
+    fill_children: list[str] = []
+    for child in children:
+        if child.data.get("class") not in LOAD_PLACED_CLASSES:
+            continue
+        placement = child.data.get("placement")
+        if placement == "fill":
+            # 'fill' resolves to every load not claimed by an
+            # explicit placement, so a second one resolves to the
+            # same set and both federates would publish on the
+            # same load keys.
+            fill_children.append(child.identifier)
+            if len(fill_children) > 1:
+                raise ValueError(
+                    f"Grid '{fed_name}' has more than one child "
+                    f"with placement 'fill' "
+                    f"({', '.join(sorted(fill_children))}). Only "
+                    f"one federate can fill the remaining loads; "
+                    f"give the others explicit load indices."
+                )
+            continue
+        claimed = set(_resolve_placement(placement, all_loads))
+        overlap = explicit_load_indices & claimed
+        if overlap:
+            raise ValueError(
+                f"Load index/indices {sorted(overlap)} in grid "
+                f"'{fed_name}' are claimed by multiple federates."
+            )
+        explicit_load_indices.update(claimed)
+
+    return explicit_load_indices
+
+
+def _wire_child_instance(
+    ctx: _GridWiringContext,
+    child,
+    fed_name: str,
+    instance_id: str,
+    instance_loads: list[int] | None,
+) -> None:
+    """Create one federate of a grid child: its config, HELICS keys and command."""
+    from cosim_toolbox.sims import FederateConfig
+
+    child_data = child.data
+    child_class = child_data.get("class")
+    child_mapped = map_params_to_class(child_class)
+    child_fed_name = f"{fed_name}.{instance_id}"
+
+    child_fed = FederateConfig(
+        child_fed_name,
+        period=ctx.time_step,
+    )
+    ctx.federation.add_federate_config(child_fed)
+
+    child_fed.config("image", child_mapped["image"])
+    child_fed.config("federate_type", "value")
+
+    control_publisher = None
+
+    if child_class == "house":
+        control_publisher = _wire_house_subcomponents(
+            ctx.federation,
+            ctx.tree,
+            child,
+            child_fed_name,
+            ctx.scenario_name,
+            ctx.time_step,
+            ctx.handled_nodes,
+        )
+
+    _wire_grid_child(
+        ctx.federation,
+        fed_name,
+        child_fed_name,
+        instance_id,
+        child_class,
+        load_indices=instance_loads,
+        control_publisher=control_publisher,
+    )
+
+    child_cmd = (
+        f"{child_mapped['command']} "
+        f"--scenario {ctx.scenario_name} "
+        f"--federate_name {child_fed_name}"
+    )
+
+    if child_class == "load":
+        ts_path = _resolve_timeseries_path(child_data, child_fed_name)
+        child_cmd += f" --timeseries {ts_path}"
+
+    if child_class == "house":
+        _store_house_exogenous_data(
+            child_data,
+            child_fed_name,
+            ctx.data_input_path,
+            ctx.use_meta_db,
+            ctx.meta_store_path,
+        )
+
+    child_fed.config("command", child_cmd)
+
+    print(f"  Added child federate: {child_fed_name} ({child_class})")
+
+
+def _wire_child(
+    ctx: _GridWiringContext,
+    child,
+    fed_name: str,
+    all_loads: list[tuple[int, str, int]],
+    explicit_load_indices: set[int],
+) -> set[int]:
+    """Place one grid child and launch its federate instances.
+
+    Returns the load indices the child ended up driving.
+    """
+    child_class = child.data.get("class")
+    child_local_id = child.identifier.split(".")[-1]
+
+    load_indices: list[int] | None = None
+
+    if child_class in LOAD_PLACED_CLASSES:
+        placement = child.data.get("placement")
+        load_indices = _resolve_load_placement(
+            placement,
+            all_loads,
+            child.identifier,
+            child_class,
+            fed_name,
+            exclude=explicit_load_indices,
+        )
+
+        print(f"  Resolved placement {placement!r} to {len(load_indices)} load(s).")
+
+    if child_class in UNIMPLEMENTED_GRID_CHILD_CLASSES:
+        raise NotImplementedError(
+            f"'{child.identifier}' is a {child_class} placed "
+            f"directly in grid '{fed_name}', but no standalone "
+            f"{child_class} federate exists yet - its physics "
+            f"lives inside the house simulator, and generating "
+            f"one here would start a house image with no "
+            f"exogenous dataset. Declare it as a sub-federate "
+            f"of a house instead."
+        )
+
+    for instance_id, instance_loads in _expand_child_instances(
+        child_local_id, child_class, load_indices
+    ):
+        _wire_child_instance(ctx, child, fed_name, instance_id, instance_loads)
+
+    return set(load_indices or [])
+
+
+def _wire_grid(ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str) -> None:
+    """Wire one grid federate and every child placed on its pandapower loads.
+
+    ``net_key`` names the ``custom_metadata`` document holding the grid's net;
+    ``fed_name`` is the federate (and HELICS key prefix) it runs as.
+    """
+    _register_grid_federate(ctx, fed_name, net_key)
+
+    all_loads = _read_load_list(
+        net_key,
+        ctx.use_meta_db,
+        meta_store_path=ctx.meta_store_path,
+    )
+
+    children = ctx.tree.children(grid_node.identifier)
+    explicit_load_indices = _claim_explicit_placements(children, all_loads, fed_name)
+
+    claimed_load_indices: set[int] = set()
+
+    for child in children:
+        claimed_load_indices |= _wire_child(
+            ctx, child, fed_name, all_loads, explicit_load_indices
+        )
+
+    _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
+
+
 def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
     """Build the whole federation: place every federate, wire it, and write it out.
 
@@ -1413,6 +1642,18 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 f"previous step's published loads."
             )
 
+        ctx = _GridWiringContext(
+            federation=federation,
+            tree=tree,
+            scenario_name=scenario_name,
+            time_step=time_step,
+            grid_waits=grid_waits,
+            use_meta_db=use_meta_db,
+            meta_store_path=meta_store_path,
+            data_input_path=transformed.data_input_path,
+            handled_nodes=handled_nodes,
+        )
+
         # Phase 1: metadata-backed grids from InfDB or a local layout.
         for node in tree.all_nodes():
             if node.identifier not in grid_federates_by_node:
@@ -1428,176 +1669,16 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 )
                 continue
 
-            children = tree.children(grid_tree_id)
             handled_nodes.add(grid_tree_id)
 
-            for child in children:
+            for child in tree.children(grid_tree_id):
                 handled_nodes.add(child.identifier)
 
-            grid_mapped = map_params_to_class("grid")
-
             for fed_name in grid_fed_names:
-                fed = FederateConfig(
-                    fed_name,
-                    period=time_step,
-                    wait_for_current_time_update=grid_waits,
-                )
-                federation.add_federate_config(fed)
-
                 # The net key equals the federate name until grids can be cloned
-                # from one template net.
-                net_key = fed_name
-                cmd = _grid_command(
-                    grid_mapped["command"], scenario_name, fed_name, net_key
-                )
-
-                fed.config("image", grid_mapped["image"])
-                fed.config("command", cmd)
-                fed.config("federate_type", "value")
-
-                print(f"Added grid federate: {fed_name}")
-
-                all_loads = _read_load_list(
-                    net_key,
-                    use_meta_db,
-                    meta_store_path=meta_store_path,
-                )
-
-                explicit_load_indices: set[int] = set()
-                fill_children: list[str] = []
-                for child in children:
-                    if child.data.get("class") not in LOAD_PLACED_CLASSES:
-                        continue
-                    placement = child.data.get("placement")
-                    if placement == "fill":
-                        # 'fill' resolves to every load not claimed by an
-                        # explicit placement, so a second one resolves to the
-                        # same set and both federates would publish on the
-                        # same load keys.
-                        fill_children.append(child.identifier)
-                        if len(fill_children) > 1:
-                            raise ValueError(
-                                f"Grid '{fed_name}' has more than one child "
-                                f"with placement 'fill' "
-                                f"({', '.join(sorted(fill_children))}). Only "
-                                f"one federate can fill the remaining loads; "
-                                f"give the others explicit load indices."
-                            )
-                        continue
-                    claimed = set(_resolve_placement(placement, all_loads))
-                    overlap = explicit_load_indices & claimed
-                    if overlap:
-                        raise ValueError(
-                            f"Load index/indices {sorted(overlap)} in grid "
-                            f"'{fed_name}' are claimed by multiple federates."
-                        )
-                    explicit_load_indices.update(claimed)
-
-                claimed_load_indices: set[int] = set()
-
-                for child in children:
-                    child_data = child.data
-                    child_class = child_data.get("class")
-
-                    child_mapped = map_params_to_class(child_class)
-                    child_local_id = child.identifier.split(".")[-1]
-
-                    load_indices: list[int] | None = None
-
-                    if child_class in LOAD_PLACED_CLASSES:
-                        placement = child_data.get("placement")
-                        load_indices = _resolve_load_placement(
-                            placement,
-                            all_loads,
-                            child.identifier,
-                            child_class,
-                            fed_name,
-                            exclude=explicit_load_indices,
-                        )
-                        claimed_load_indices.update(load_indices)
-
-                        print(
-                            f"  Resolved placement {placement!r} to "
-                            f"{len(load_indices)} load(s)."
-                        )
-
-                    if child_class in UNIMPLEMENTED_GRID_CHILD_CLASSES:
-                        raise NotImplementedError(
-                            f"'{child.identifier}' is a {child_class} placed "
-                            f"directly in grid '{fed_name}', but no standalone "
-                            f"{child_class} federate exists yet - its physics "
-                            f"lives inside the house simulator, and generating "
-                            f"one here would start a house image with no "
-                            f"exogenous dataset. Declare it as a sub-federate "
-                            f"of a house instead."
-                        )
-
-                    for instance_id, instance_loads in _expand_child_instances(
-                        child_local_id, child_class, load_indices
-                    ):
-                        child_fed_name = f"{fed_name}.{instance_id}"
-
-                        child_fed = FederateConfig(
-                            child_fed_name,
-                            period=time_step,
-                        )
-                        federation.add_federate_config(child_fed)
-
-                        child_fed.config("image", child_mapped["image"])
-                        child_fed.config("federate_type", "value")
-
-                        control_publisher = None
-
-                        if child_class == "house":
-                            control_publisher = _wire_house_subcomponents(
-                                federation,
-                                tree,
-                                child,
-                                child_fed_name,
-                                scenario_name,
-                                time_step,
-                                handled_nodes,
-                            )
-
-                        _wire_grid_child(
-                            federation,
-                            fed_name,
-                            child_fed_name,
-                            instance_id,
-                            child_class,
-                            load_indices=instance_loads,
-                            control_publisher=control_publisher,
-                        )
-
-                        child_cmd = (
-                            f"{child_mapped['command']} "
-                            f"--scenario {scenario_name} "
-                            f"--federate_name {child_fed_name}"
-                        )
-
-                        if child_class == "load":
-                            ts_path = _resolve_timeseries_path(
-                                child_data, child_fed_name
-                            )
-                            child_cmd += f" --timeseries {ts_path}"
-
-                        if child_class == "house":
-                            _store_house_exogenous_data(
-                                child_data,
-                                child_fed_name,
-                                transformed.data_input_path,
-                                use_meta_db,
-                                meta_store_path,
-                            )
-
-                        child_fed.config("command", child_cmd)
-
-                        print(
-                            f"  Added child federate: {child_fed_name} "
-                            f"({child_class})"
-                        )
-
-                _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
+                # from one template net. _wire_grid is the unit a nested grid
+                # will recurse into (issue #65).
+                _wire_grid(ctx, node, fed_name, net_key=fed_name)
 
         # Phase 2: layout-based and already-expanded nodes.
         for node in tree.all_nodes():
