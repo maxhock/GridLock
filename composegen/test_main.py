@@ -193,6 +193,105 @@ def test_validate_tree_hems_requires_control_strategy() -> None:
         validate_tree(_tree_with_root({"class": "hems"}))
 
 
+def _mv_lv_tree(lv_data: dict, mv_data: dict | None = None) -> Tree:
+    """An MV grid with one LV grid nested under it."""
+    tree = Tree()
+    tree.create_node(
+        tag="mv",
+        identifier="mv-grid_0",
+        data=mv_data or {"class": "grid", "layout": "mv.xlsx"},
+    )
+    tree.create_node(
+        tag="lv", identifier="mv-grid_0.lv-grid_0", parent="mv-grid_0", data=lv_data
+    )
+    return tree
+
+
+def test_validate_tree_nested_grid_requires_placement(capsys) -> None:
+    tree = _mv_lv_tree({"class": "grid", "layout": "lv.xlsx"})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "mv-grid_0.lv-grid_0" in printed
+    assert "requires 'placement'" in printed
+
+
+def test_validate_tree_root_grid_rejects_placement(capsys) -> None:
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(
+            _tree_with_root({"class": "grid", "layout": "a.xlsx", "placement": 3})
+        )
+
+    assert "root grid" in capsys.readouterr().out
+
+
+def test_validate_tree_nested_grid_rejects_location(capsys) -> None:
+    tree = _mv_lv_tree({"class": "grid", "location": [{"plz": 91359}], "placement": 3})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "must use a 'layout'" in capsys.readouterr().out
+
+
+def test_validate_tree_grid_under_non_grid_is_rejected(capsys) -> None:
+    tree = Tree()
+    tree.create_node(
+        tag="house",
+        identifier="house_0",
+        data={"class": "house", "model": {"class": "1R1C"}, "exogenous_data": "x.csv"},
+    )
+    tree.create_node(
+        tag="lv",
+        identifier="house_0.lv-grid_0",
+        parent="house_0",
+        data={"class": "grid", "layout": "lv.xlsx", "placement": 3},
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "house_0.lv-grid_0" in printed
+    assert "never be wired" in printed
+
+
+@pytest.mark.parametrize("placement", ["all", [-1], [], [1, 1], [1, "a"], -1, True])
+def test_validate_tree_nested_grid_rejects_invalid_placement_shape(
+    placement, capsys
+) -> None:
+    tree = _mv_lv_tree({"class": "grid", "layout": "lv.xlsx", "placement": placement})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "invalid placement" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("placement", [3, 0, [3, 7], "fill"])
+def test_validate_tree_nested_grid_with_valid_placement_is_valid(placement) -> None:
+    validate_tree(
+        _mv_lv_tree({"class": "grid", "layout": "lv.xlsx", "placement": placement})
+    )
+
+
+def test_validate_tree_reports_every_grid_nesting_problem_together(capsys) -> None:
+    tree = _mv_lv_tree(
+        {"class": "grid", "location": [{"plz": 1}]},
+        mv_data={"class": "grid", "layout": "mv.xlsx", "placement": 2},
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "root grid" in printed
+    assert "requires 'placement'" in printed
+    assert "must use a 'layout'" in printed
+
+
 def test_validate_tree_collects_every_error_before_raising(capsys) -> None:
     tree = Tree()
     tree.create_node(tag="grid1", identifier="grid1", data={"class": "grid"})

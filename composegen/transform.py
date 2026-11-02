@@ -267,6 +267,92 @@ def add_pub_sub(node, topic: str, unit: str, kind: str = "publication") -> None:
     node.data[key][topic] = unit
 
 
+def placement_shape_error(placement: Any) -> str | None:
+    """Describe why `placement` is not an int, list[int] or 'fill', or None if it is.
+
+    Shape only: whether the indices exist in the parent net is resolved in `load.py`,
+    which is the first place that net is readable.
+    """
+
+    def is_index(value: Any) -> bool:
+        # bool is an int subclass, and `placement: true` is a YAML typo, not index 1.
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    if placement == "fill" or is_index(placement):
+        return None
+
+    if isinstance(placement, list):
+        if not placement:
+            return "the list is empty"
+
+        if not all(is_index(item) for item in placement):
+            return "every list entry must be an int >= 0"
+
+        if len(set(placement)) != len(placement):
+            return "the list contains duplicate indices"
+
+        return None
+
+    return "use an int >= 0, a non-empty list of ints >= 0, or 'fill'"
+
+
+def _grid_nesting_errors(tree: Tree, node) -> list[str]:
+    """Net-independent checks on where a grid sits in the tree.
+
+    A grid nested under a grid (an LV feeder on an MV net) attaches to the parent's
+    loads, so it needs `placement` and, until auto-placement exists (issue #65), a
+    `layout` - an InfDB location query returns an unknown number of feeders with no
+    mapping onto the parent's loads.
+    """
+    data = node.data
+    label = f"Node '{node.tag}' ({node.identifier})"
+    placement = data.get("placement")
+    is_root = tree.root == node.identifier
+
+    if is_root:
+        if placement is not None:
+            return [
+                f"[Grid] {label} is the root grid and has 'placement', but there is "
+                f"no parent grid for it to attach to."
+            ]
+        return []
+
+    parent_class = tree.parent(node.identifier).data.get("class")
+
+    if parent_class != "grid":
+        return [
+            f"[Grid] {label} sits under a '{parent_class}' node. Grids can only be "
+            f"nested under another grid; composegen only discovers grids whose "
+            f"ancestors are all grids, so this one would never be wired."
+        ]
+
+    errors: list[str] = []
+
+    if placement is None:
+        errors.append(
+            f"[Grid] {label} is nested under a grid and requires 'placement': the "
+            f"parent grid's load index (an int), list of indices, or 'fill' that it "
+            f"attaches to."
+        )
+    else:
+        shape_error = placement_shape_error(placement)
+
+        if shape_error:
+            errors.append(
+                f"[Grid] {label} has invalid placement {placement!r}: {shape_error}."
+            )
+
+    if data.get("location"):
+        errors.append(
+            f"[Grid] {label} is nested under a grid and uses 'location'. Nested "
+            f"grids must use a 'layout' for now: an InfDB location query returns an "
+            f"unknown number of LV feeders with no mapping onto the parent's loads "
+            f"(auto-placement is a later phase, issue #65)."
+        )
+
+    return errors
+
+
 def validate_tree(tree: Tree) -> None:
     """Report every missing or unsupported field at once, then refuse to run.
 
@@ -307,6 +393,8 @@ def validate_tree(tree: Tree) -> None:
                     f"[Grid] Node '{node.tag}' ({node.identifier}) specifies both "
                     f"'layout' and 'location'."
                 )
+
+            validation_errors.extend(_grid_nesting_errors(tree, node))
 
         elif node_class == "load":
             electrical_load = data.get("electrical_load")

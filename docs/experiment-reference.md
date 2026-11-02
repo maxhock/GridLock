@@ -93,6 +93,16 @@ Every net a location query resolves to becomes its own grid federate, named `<id
 A `plz`-only query therefore expands into one federate per grid InfDB holds for that postcode.
 A layout grid keeps the node's `id` as its federate name.
 
+### Nested grids
+
+A grid may sit under another grid (an LV feeder on an MV net). It attaches to the parent's loads, so it takes `placement` like the other load-placed classes: an int, a list of ints (each an int >= 0, no duplicates) or `"fill"`. The values are pandapower load indices of the **parent** grid.
+These are rejected before anything is written:
+
+- a nested grid without `placement`;
+- `placement` on the root grid, which has nothing to attach to;
+- a nested grid with `location` — it must use a `layout` for now, because an InfDB query returns an unknown number of LV feeders with no mapping onto the parent's loads (auto-placement is a later phase, issue #65);
+- a grid under any non-grid node, which would never be wired.
+
 ### Placement
 
 `placement` is a pandapower **load index**, a list of them, or `"fill"`, and it is required for everything that moves power: `load`, `house`, `pv`, `battery`.
