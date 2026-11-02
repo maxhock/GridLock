@@ -25,3 +25,8 @@ config/preflight.env
 *.venv
 *.local
 *.lock
+
+# The repo is public: real (DSO) grids and the experiments that use them stay
+# local. Committed stand-ins live next to them (data/input/mv_synthetic_20kv.json).
+data/input/private/
+config/private/

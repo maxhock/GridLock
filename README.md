@@ -193,6 +193,9 @@ Every timeseries CSV must cover the full simulated duration — composegen check
 python tools/yaml_graph_tui.py config/experiment-MV-LV.yml
 ```
 
+`tools/make_lv_variant.py` re-rates a Kerber LV layout to another slack voltage (an LV grid attached to an MV load must share its voltage base), and `tools/make_synthetic_mv.py` rebuilds the committed synthetic 20 kV MV net `data/input/mv_synthetic_20kv.json`.
+Real (DSO) grids stay in the git-ignored `data/input/private/` and `config/private/`, because this repository is public.
+
 ## Results
 
 Time-series data is written by the federates into TimescaleDB under a scenario named `<general.name>_<timestamp>`.
