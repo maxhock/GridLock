@@ -10,7 +10,8 @@ Nothing about the topology is wired by hand, so an experiment is reproducible fr
 
 Each federate class is a separate Docker image, and federates communicate **only** through HELICS publications and subscriptions.
 Class-specific behaviour lives inside the image; experiment-specific configuration is generated.
-A run resolves its grid first (from a local pandapower workbook or from an external InfDB instance by postcode), then generates the federation, then simulates.
+A run resolves its grid first (from a local pandapower workbook or JSON file, or from an external InfDB instance by postcode), then generates the federation, then simulates.
+Grids can be coupled: an MV grid can carry LV grids on its loads, each running as its own federate and exchanging power and voltage with the MV grid through HELICS (see [`docs/experiment-reference.md`](docs/experiment-reference.md#nested-grids)).
 
 Results are written to a time-series database and tagged with a timestamped scenario name; the git commit and the full experiment YAML that produced them are stored with that scenario in the metadata database.
 
@@ -18,7 +19,7 @@ Results are written to a time-series database and tagged with a timestamped scen
 
 | Class | Image | Role |
 |---|---|---|
-| `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages |
+| `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages; may itself hang off a load of a parent grid (MV/LV) |
 | `load` | [`federates/house_player`](federates/house_player) | replays an electrical load profile from CSV onto one or more grid loads |
 | `house` | [`federates/house`](federates/house) | simulated building — thermal model, heat pump, AC, battery, PV (via [EnergySim](https://github.com/Hosseini97/EnergySim)) |
 | `hems` / `controller` | [`federates/controller`](federates/controller) | model-predictive home energy management; commands a house's battery |
@@ -64,6 +65,7 @@ cp config/preflight.env.example config/preflight.env   # then fill in your value
 
 `config/experiment-local-grid.yml` runs entirely from a local grid workbook, so it works without InfDB access.
 `config/experiment-LV.yml` (the default when you pass no argument) resolves its grid from InfDB by postcode.
+`config/experiment-MV-LV.yml` runs a synthetic MV grid with LV grids on its loads, also without InfDB access.
 
 Useful flags:
 
@@ -176,7 +178,8 @@ federation:
 
 `placement` accepts a load index, a list of them, or `"fill"`.
 A house is expanded into one federate per load index it occupies; a load player stays a single federate covering all of its indices.
-Input CSVs and grid workbooks live in `data/input/`.
+A grid nested under another grid takes a `placement` of the parent's load indices too and is cloned like a house, subtree included; its LV slack must have the voltage base of the MV bus it hangs off.
+Input CSVs and grid layouts (`.xlsx` or pandapower `.json`) live in `data/input/`.
 Every timeseries CSV must cover the full simulated duration — composegen checks this up front and refuses to start otherwise, rather than letting a federate replay its last known value once the data runs out.
 
 > **The physical parameters above do not reach a federate yet.**
