@@ -385,11 +385,11 @@ def test_wire_pub_sub_wires_grid_and_load_power_and_voltage() -> None:
 
     assert grid_data["subscriptions"]["grid1.load1/active_power"] == "W"
     assert grid_data["subscriptions"]["grid1.load1/reactive_power"] == "VAr"
-    assert grid_data["publications"]["grid1.load1/voltage"] == "V"
+    assert grid_data["publications"]["grid1.load1/voltage"] == "pu"
 
     assert load_data["publications"]["grid1.load1/active_power"] == "W"
     assert load_data["publications"]["grid1.load1/reactive_power"] == "VAr"
-    assert load_data["subscriptions"]["grid1.load1/voltage"] == "V"
+    assert load_data["subscriptions"]["grid1.load1/voltage"] == "pu"
 
 
 def test_wire_pub_sub_wires_house_control_topic() -> None:

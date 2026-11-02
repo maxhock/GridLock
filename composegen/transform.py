@@ -660,8 +660,8 @@ def wire_pub_sub(tree: Tree) -> None:
             if parent_class == "grid":
                 voltage_topic = f"{child_node.identifier}/voltage"
 
-                add_pub_sub(parent_node, voltage_topic, "V", "publication")
-                add_pub_sub(child_node, voltage_topic, "V", "subscription")
+                add_pub_sub(parent_node, voltage_topic, "pu", "publication")
+                add_pub_sub(child_node, voltage_topic, "pu", "subscription")
 
                 if child_class in ["house", "load", "battery", "pv", "grid"]:
                     p_topic = f"{child_node.identifier}/active_power"
@@ -687,11 +687,11 @@ def wire_pub_sub(tree: Tree) -> None:
 
                     add_pub_sub(parent_node, p_topic, "W", "subscription")
                     add_pub_sub(parent_node, q_topic, "VAr", "subscription")
-                    add_pub_sub(parent_node, v_topic, "V", "subscription")
+                    add_pub_sub(parent_node, v_topic, "pu", "subscription")
 
                     add_pub_sub(child_node, p_topic, "W", "publication")
                     add_pub_sub(child_node, q_topic, "VAr", "publication")
-                    add_pub_sub(child_node, v_topic, "V", "publication")
+                    add_pub_sub(child_node, v_topic, "pu", "publication")
 
                     control_topic = f"{child_node.identifier}/control"
 
