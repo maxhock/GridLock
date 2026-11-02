@@ -80,19 +80,33 @@ federation:
 """
 
 
-def _net_json(num_loads: int) -> str:
-    """A pandapower net reduced to the load table composegen reads from it.
-
-    pandapower is not installed in the composegen image, and `_read_load_list`
-    only looks at `net["_object"]["load"]`, so the serialisation is built by
-    hand in pandapower's own format (a DataFrame as `orient="split"` JSON).
-    """
-    load_table = {
-        "columns": ["name", "bus"],
-        "index": list(range(num_loads)),
-        "data": [[f"load_{i}", i + 1] for i in range(num_loads)],
+def _table(columns: list[str], rows: list[list]) -> dict:
+    """A pandapower DataFrame in its `orient="split"` JSON serialisation."""
+    return {
+        "_module": "pandas.core.frame",
+        "_class": "DataFrame",
+        "_object": json.dumps(
+            {"columns": columns, "index": list(range(len(rows))), "data": rows}
+        ),
     }
-    return json.dumps({"_object": {"load": {"_object": json.dumps(load_table)}}})
+
+
+def _net_json(num_loads: int, vn_kv: float = 0.4, ext_grids: int = 1) -> str:
+    """A pandapower net reduced to the tables composegen reads from it.
+
+    pandapower is not installed in the composegen image, and `_read_net_tables`
+    only looks at the `load`, `bus` and `ext_grid` tables of `net["_object"]`,
+    so the serialisation is built by hand in pandapower's own format. Bus 0 is
+    the slack bus; load `i` sits on bus `i + 1`. Every bus has ``vn_kv``.
+    """
+    tables = {
+        "load": _table(
+            ["name", "bus"], [[f"load_{i}", i + 1] for i in range(num_loads)]
+        ),
+        "bus": _table(["vn_kv"], [[vn_kv] for _ in range(num_loads + 1)]),
+        "ext_grid": _table(["bus"], [[0] for _ in range(ext_grids)]),
+    }
+    return json.dumps({"_object": tables})
 
 
 def _write_timeseries(path: Path, seconds: int, step: int) -> None:
@@ -130,13 +144,13 @@ def _generate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     experiment_yaml: str,
-    nets: dict[str, int],
+    nets: dict[str, str],
     layouts: Iterable[str],
 ) -> Generated:
     """Run extract -> transform -> load for ``experiment_yaml`` in ``tmp_path``.
 
     ``nets`` maps each ``custom_metadata`` key the infdb stage would have
-    written to the number of loads in that net; ``layouts`` are the stub layout
+    written to that net's JSON (see ``_net_json``); ``layouts`` are the stub layout
     files extract checks for under the data input path.
     """
     data_dir = tmp_path / "input"
@@ -154,8 +168,8 @@ def _generate(
 
     # What the infdb stage writes for a local layout.
     (meta_store / "custom_metadata").mkdir(parents=True)
-    for net_key, num_loads in nets.items():
-        seed = {"grid_id": net_key, "net_json": _net_json(num_loads)}
+    for net_key, net_json in nets.items():
+        seed = {"grid_id": net_key, "net_json": net_json}
         (meta_store / "custom_metadata" / f"{net_key}.json").write_text(
             json.dumps(seed)
         )
@@ -189,7 +203,7 @@ def generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
         tmp_path,
         monkeypatch,
         EXPERIMENT_YAML,
-        nets={GRID_ID: NUM_LOADS},
+        nets={GRID_ID: _net_json(NUM_LOADS)},
         layouts=["layout.xlsx"],
     )
 
@@ -398,10 +412,14 @@ federation:
             electrical_load: "load_profile.csv"
 """
 
+# MV and LV are both 20 kV: the LV nets are the 20 kV variants, so the slack
+# of an LV grid has the voltage base of the MV bus it hangs off.
+MV_KV = 20.0
+LV_TEMPLATE = f"{MV_ID}.lv-grid_0"
 MV_LV_NETS = {
-    MV_ID: MV_LOADS,
-    f"{MV_ID}.lv-grid_0": LV_LOADS,
-    f"{MV_ID}.lv-feeder_0": LV_LOADS,
+    MV_ID: _net_json(MV_LOADS, vn_kv=MV_KV),
+    LV_TEMPLATE: _net_json(LV_LOADS, vn_kv=MV_KV),
+    f"{MV_ID}.lv-feeder_0": _net_json(LV_LOADS, vn_kv=MV_KV),
 }
 MV_LV_LAYOUTS = ["mv.json", "lv.json", "feeder.json"]
 
@@ -566,6 +584,44 @@ def test_mv_lv_placement_overlapping_an_mv_player_is_refused(
 
     with pytest.raises(ValueError, match=r"\[3\].*claimed by multiple federates"):
         _generate(tmp_path, monkeypatch, clashing, MV_LV_NETS, MV_LV_LAYOUTS)
+
+
+def test_mv_lv_lv_net_with_two_ext_grids_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nets = {**MV_LV_NETS, LV_TEMPLATE: _net_json(LV_LOADS, MV_KV, ext_grids=2)}
+
+    with pytest.raises(ValueError) as excinfo:
+        _generate(tmp_path, monkeypatch, _mv_lv_yaml(), nets, MV_LV_LAYOUTS)
+
+    # Both nets are named, so the message says which attachment is broken.
+    message = str(excinfo.value)
+    assert "exactly one ext_grid, found 2" in message
+    assert f"'{LV_TEMPLATE}'" in message
+    assert f"'{MV_ID}'" in message
+
+
+def test_mv_lv_mismatched_voltage_base_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nets = {**MV_LV_NETS, LV_TEMPLATE: _net_json(LV_LOADS, vn_kv=10.0)}
+
+    with pytest.raises(ValueError) as excinfo:
+        _generate(tmp_path, monkeypatch, _mv_lv_yaml(), nets, MV_LV_LAYOUTS)
+
+    message = str(excinfo.value)
+    assert "20.0 kV bus" in message
+    assert "10.0 kV" in message
+    assert f"'{LV_TEMPLATE}'" in message
+    assert f"'{MV_ID}'" in message
+    assert "tools/make_lv_variant.py" in message
+
+
+def test_mv_lv_voltage_is_labelled_per_unit(mv_lv: Generated) -> None:
+    # The grid publishes `res_bus.vm_pu`, so no voltage key may claim volts.
+    federation = mv_lv.federates[MV_ID]["HELICS_config"]
+    units = {entry["unit"] for entry in federation["publications"]}
+    assert units == {"pu"}
 
 
 def test_registering_a_grid_federate_twice_is_refused() -> None:

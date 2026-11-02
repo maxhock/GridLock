@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import traceback
 from dataclasses import dataclass
@@ -652,12 +653,34 @@ def _grid_command(
     )
 
 
-def _read_load_list(
+def _decode_table(table: dict) -> dict[int, dict[str, Any]]:
+    """Turn one serialised pandapower DataFrame into ``{index: {column: value}}``."""
+    raw = table.get("_object")
+
+    if not raw:
+        return {}
+
+    frame = json.loads(raw)
+
+    return {
+        idx: dict(zip(frame["columns"], row))
+        for idx, row in zip(frame["index"], frame["data"])
+    }
+
+
+def _read_net_tables(
     net_key: str,
     use_meta_db: str,
     meta_store_path: str = "generated",
-) -> list[tuple[int, str, int]]:
-    """Read a grid's `(load index, name, bus)` triples out of the net infdb stored."""
+    tables: tuple[str, ...] = ("load",),
+) -> dict[str, dict[int, dict[str, Any]]]:
+    """Read pandapower tables out of the net infdb stored under ``net_key``.
+
+    pandapower is not installed here, so the net's JSON is read directly: each
+    table is a DataFrame serialised as ``orient="split"`` JSON inside
+    ``net["_object"][<table>]["_object"]``. A table the net lacks comes back
+    empty.
+    """
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         meta_data = mgr.read("custom_metadata", net_key)
 
@@ -684,23 +707,14 @@ def _read_load_list(
             f"so the grid has no pandapower net to place federates on."
         )
 
-    net_dict = json.loads(net_json_str)
-    load_obj = net_dict.get("_object", {}).get("load", {})
-    load_data_str = load_obj.get("_object")
+    objects = json.loads(net_json_str).get("_object", {})
 
-    if not load_data_str:
-        return []
+    return {name: _decode_table(objects.get(name, {})) for name in tables}
 
-    load_df = json.loads(load_data_str)
 
-    columns: list[str] = load_df["columns"]
-    indices: list[int] = load_df["index"]
-    data: list[list] = load_df["data"]
-
-    name_col = columns.index("name")
-    bus_col = columns.index("bus")
-
-    return [(idx, row[name_col], int(row[bus_col])) for idx, row in zip(indices, data)]
+def _load_list(load_table: dict[int, dict[str, Any]]) -> list[tuple[int, str, int]]:
+    """A grid's `(load index, name, bus)` triples, from its pandapower load table."""
+    return [(idx, row["name"], int(row["bus"])) for idx, row in load_table.items()]
 
 
 def _resolve_placement(
@@ -1073,6 +1087,10 @@ def _wire_grid_child(
     # by the `load_<idx>` segment of the key, so a child that publishes a bare
     # `active_power` instead has its power silently dropped from the power
     # flow and never gets a voltage back.
+    #
+    # Voltage is labelled "pu" because the grid publishes `res_bus.vm_pu`, and
+    # an LV grid federate consumes it as its slack setpoint: it is only
+    # meaningful if both nets share a voltage base (see `_check_coupling`).
     if load_indices is not None:
         for idx in load_indices:
             load_id = f"load_{idx}"
@@ -1109,7 +1127,7 @@ def _wire_grid_child(
                 grid_fed_name,
                 child_fed_name,
                 "double",
-                "V",
+                "pu",
             )
 
         print(f"    Wired {len(load_indices)} load(s).")
@@ -1121,7 +1139,7 @@ def _wire_grid_child(
             grid_fed_name,
             child_fed_name,
             "double",
-            "V",
+            "pu",
         )
 
         if child_class in ("house", "load", "battery", "pv"):
@@ -1433,12 +1451,95 @@ def _claim_explicit_placements(
     return explicit_load_indices
 
 
+@dataclass
+class _ParentNet:
+    """What a nested grid's contract check needs to know about its parent's net."""
+
+    fed_name: str
+    net_key: str
+    load_bus: dict[int, int]
+    bus_vn_kv: dict[int, float]
+
+    def load_vn_kv(self, load_idx: int) -> float:
+        """Nominal voltage of the bus pandapower load ``load_idx`` sits on."""
+        bus = self.load_bus[load_idx]
+
+        if bus not in self.bus_vn_kv:
+            raise ValueError(
+                f"Net '{self.net_key}' of grid '{self.fed_name}' has no bus "
+                f"{bus} (or no vn_kv for it), so the voltage base of load "
+                f"{load_idx} is unknown."
+            )
+
+        return float(self.bus_vn_kv[bus])
+
+
+# The MV/LV coupling contract. `tools/grid_contract.py` carries the same check
+# for the grid-generator scripts; it is a deliberate copy, not an import,
+# because the two run in different images with no shared code. Keep the two in
+# step, messages included.
+def _lv_slack_vn_kv(
+    child_key: str,
+    tables: dict[str, dict[int, dict[str, Any]]],
+    parent: _ParentNet,
+) -> float:
+    """Nominal voltage of the single LV slack bus, or raise."""
+    ext_grids = tables["ext_grid"]
+
+    if len(ext_grids) != 1:
+        raise ValueError(
+            f"LV net '{child_key}' attached to '{parent.fed_name}' (net "
+            f"'{parent.net_key}') must have exactly one ext_grid, found "
+            f"{len(ext_grids)}"
+        )
+
+    (ext_grid,) = ext_grids.values()
+    slack_bus = ext_grid["bus"]
+
+    if slack_bus not in tables["bus"]:
+        raise ValueError(
+            f"LV net '{child_key}' has an ext_grid on bus {slack_bus}, which is "
+            f"not in its bus table."
+        )
+
+    return float(tables["bus"][slack_bus]["vn_kv"])
+
+
+def _check_coupling(
+    ctx: _GridWiringContext, parent: _ParentNet, load_idx: int, child_key: str
+) -> None:
+    """Refuse to attach a nested grid whose net cannot hang off the parent's load.
+
+    Voltage travels between the federates in per unit, so an LV slack rated
+    differently from the MV bus it hangs off would silently scale every LV
+    voltage. Both conditions are cheap to see here and expensive to find in
+    a finished run, so they are checked before anything is wired.
+    """
+    tables = _read_net_tables(
+        child_key,
+        ctx.use_meta_db,
+        ctx.meta_store_path,
+        tables=("bus", "ext_grid"),
+    )
+    lv_vn_kv = _lv_slack_vn_kv(child_key, tables, parent)
+    mv_vn_kv = parent.load_vn_kv(load_idx)
+
+    if not math.isclose(mv_vn_kv, lv_vn_kv, rel_tol=1e-6):
+        raise ValueError(
+            f"Load {load_idx} of '{parent.fed_name}' (net '{parent.net_key}') "
+            f"sits on a {mv_vn_kv} kV bus but the ext_grid bus of LV net "
+            f"'{child_key}' is {lv_vn_kv} kV; the bases must match. Re-rate "
+            f"the LV layout with tools/make_lv_variant.py."
+        )
+
+
 def _wire_nested_grid_instance(
     ctx: _GridWiringContext,
     child,
     fed_name: str,
     instance_id: str,
     instance_loads: list[int],
+    parent: _ParentNet,
 ) -> None:
     """Wire one LV clone of a nested grid onto its parent's load.
 
@@ -1453,6 +1554,9 @@ def _wire_nested_grid_instance(
     publishes ``load_<idx>/voltage`` back.
     """
     child_fed_name = f"{fed_name}.{instance_id}"
+
+    (load_idx,) = instance_loads
+    _check_coupling(ctx, parent, load_idx, child.identifier)
 
     _wire_grid(ctx, child, child_fed_name, net_key=child.identifier, waits=False)
 
@@ -1475,6 +1579,7 @@ def _wire_child_instance(
     fed_name: str,
     instance_id: str,
     instance_loads: list[int] | None,
+    parent: _ParentNet,
 ) -> None:
     """Create one federate of a grid child: its config, HELICS keys and command."""
     from cosim_toolbox.sims import FederateConfig
@@ -1487,7 +1592,9 @@ def _wire_child_instance(
                 f"Nested grid '{child.identifier}' in '{fed_name}' resolved to "
                 f"no pandapower load index."
             )
-        _wire_nested_grid_instance(ctx, child, fed_name, instance_id, instance_loads)
+        _wire_nested_grid_instance(
+            ctx, child, fed_name, instance_id, instance_loads, parent
+        )
         return
 
     child_class = child_data.get("class")
@@ -1556,6 +1663,7 @@ def _wire_child(
     fed_name: str,
     all_loads: list[tuple[int, str, int]],
     explicit_load_indices: set[int],
+    parent: _ParentNet,
 ) -> set[int]:
     """Place one grid child and launch its federate instances.
 
@@ -1593,7 +1701,7 @@ def _wire_child(
     for instance_id, instance_loads in _expand_child_instances(
         child_local_id, child_class, load_indices
     ):
-        _wire_child_instance(ctx, child, fed_name, instance_id, instance_loads)
+        _wire_child_instance(ctx, child, fed_name, instance_id, instance_loads, parent)
 
     return set(load_indices or [])
 
@@ -1616,10 +1724,24 @@ def _wire_grid(
     # falls through to the generic phase 2 and would get a second federate.
     ctx.handled_nodes.add(grid_node.identifier)
 
-    all_loads = _read_load_list(
+    tables = _read_net_tables(
         net_key,
         ctx.use_meta_db,
         meta_store_path=ctx.meta_store_path,
+        tables=("load", "bus"),
+    )
+    all_loads = _load_list(tables["load"])
+
+    # Read once here for every nested grid below, rather than once per clone.
+    parent = _ParentNet(
+        fed_name=fed_name,
+        net_key=net_key,
+        load_bus={idx: bus for idx, _, bus in all_loads},
+        bus_vn_kv={
+            bus: float(row["vn_kv"])
+            for bus, row in tables["bus"].items()
+            if "vn_kv" in row
+        },
     )
 
     children = ctx.tree.children(grid_node.identifier)
@@ -1631,7 +1753,7 @@ def _wire_grid(
 
     for child in children:
         claimed_load_indices |= _wire_child(
-            ctx, child, fed_name, all_loads, explicit_load_indices
+            ctx, child, fed_name, all_loads, explicit_load_indices, parent
         )
 
     _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
