@@ -254,13 +254,31 @@ def write_grid_to_metadata(
     return federate_names
 
 
+LAYOUT_DIR = Path("/data/input")
+
+# Kept in step with LAYOUT_SUFFIXES in composegen/extract.py, which rejects an
+# unsupported suffix before anything runs (the two images share no code).
+_LAYOUT_READERS = {".xlsx": pp.from_excel, ".json": pp.from_json}
+
+
+def _read_layout(layout_path: Path) -> pp.pandapowerNet:
+    """Read a pandapower net from a workbook (`.xlsx`) or a JSON export (`.json`)."""
+    reader = _LAYOUT_READERS.get(layout_path.suffix.lower())
+    if reader is None:
+        raise ValueError(
+            f"Unsupported grid layout '{layout_path.name}': expected one of "
+            f"{', '.join(_LAYOUT_READERS)}."
+        )
+    return reader(layout_path)
+
+
 def load_local_layout(grid_id: str, layout: str) -> list[tuple[str, str]]:
-    """Load a local Pandapower workbook as the same JSON payload InfDB returns."""
-    layout_path = Path("/data/input") / layout
+    """Load a local pandapower net as the same JSON payload InfDB returns."""
+    layout_path = LAYOUT_DIR / layout
     if not layout_path.is_file():
         raise FileNotFoundError(f"Local grid layout not found: {layout_path}")
 
-    net = pp.from_excel(layout_path)
+    net = _read_layout(layout_path)
     print(f"Loaded local grid '{grid_id}' from {layout_path}")
     return [(grid_id, pp.to_json(net))]
 

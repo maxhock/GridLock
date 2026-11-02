@@ -2,10 +2,11 @@
 
 import json
 
+import pandapower as pp
 import pytest
 
 import main as infdb_main
-from main import extract_grid_config, write_grid_to_metadata
+from main import extract_grid_config, load_local_layout, write_grid_to_metadata
 from src.infdb_data import _net_table_count, get_pylovo_grid, resolve_grid_queries
 
 
@@ -431,3 +432,40 @@ def test_resolve_grid_queries_raises_when_nothing_resolves() -> None:
         resolve_grid_queries(
             infdb=stub, log=_StubLog(), grid_id="lv-grid", queries=[{"plz": 91359}]
         )
+
+
+# ---------------------------------------------------------------------------
+# main.load_local_layout
+# ---------------------------------------------------------------------------
+
+
+def _tiny_net() -> pp.pandapowerNet:
+    net = pp.create_empty_network()
+    bus = pp.create_bus(net, vn_kv=20.0)
+    pp.create_ext_grid(net, bus)
+    pp.create_load(net, bus, p_mw=0.1)
+    return net
+
+
+def _layout_dir(tmp_path, monkeypatch):
+    """Point load_local_layout's fixed /data/input base at a temp directory."""
+    monkeypatch.setattr(infdb_main, "LAYOUT_DIR", tmp_path)
+    return tmp_path
+
+
+def test_load_local_layout_reads_json_export(tmp_path, monkeypatch) -> None:
+    pp.to_json(_tiny_net(), str(_layout_dir(tmp_path, monkeypatch) / "net.json"))
+
+    ((grid_id, net_json),) = load_local_layout("grid", "net.json")
+
+    assert grid_id == "grid"
+    assert _net_table_count(net_json, "bus") == 1
+    assert _net_table_count(net_json, "load") == 1
+    assert len(pp.from_json_string(net_json).load) == 1
+
+
+def test_load_local_layout_rejects_unsupported_suffix(tmp_path, monkeypatch) -> None:
+    (_layout_dir(tmp_path, monkeypatch) / "net.xls").write_text("stub")
+
+    with pytest.raises(ValueError, match=r"net\.xls.*\.xlsx.*\.json"):
+        load_local_layout("grid", "net.xls")
