@@ -3,7 +3,13 @@
 import pandapower as pp
 import pytest
 
-from main import GridFederate, _parse_load_index, sanitize_net_for_power_flow
+import main
+from main import (
+    GridFederate,
+    _parse_load_index,
+    load_net_from_metadata,
+    sanitize_net_for_power_flow,
+)
 
 
 def _net_with_one_load() -> pp.pandapowerNet:
@@ -152,3 +158,45 @@ def test_update_internal_model_raises_runtime_error_on_non_convergence() -> None
 
     with pytest.raises(RuntimeError, match="did not converge"):
         federate.update_internal_model()
+
+
+class _FakeMetadataManager:
+    """Stands in for the CST metadata manager and records what was read."""
+
+    def __init__(self, documents: dict[str, dict]) -> None:
+        self.documents = documents
+        self.requested: list[tuple[str, str]] = []
+
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+    def read(self, collection: str, name: str) -> dict | None:
+        self.requested.append((collection, name))
+        return self.documents.get(name)
+
+
+def test_load_net_from_metadata_reads_the_document_named_by_the_net_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _FakeMetadataManager(
+        {"lv-template": {"net_json": pp.to_json(_net_with_two_loads())}}
+    )
+    monkeypatch.setattr(main, "create_metadata_manager", lambda **_: manager)
+
+    net = load_net_from_metadata("lv-template")
+
+    assert manager.requested == [("custom_metadata", "lv-template")]
+    assert len(net.load) == 2
+
+
+def test_load_net_from_metadata_missing_document_names_the_net_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = _FakeMetadataManager({})
+    monkeypatch.setattr(main, "create_metadata_manager", lambda **_: manager)
+
+    with pytest.raises(FileNotFoundError, match="lv-template"):
+        load_net_from_metadata("lv-template")

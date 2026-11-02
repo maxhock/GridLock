@@ -48,7 +48,7 @@ It is not caught: swallowing it would leave the previous step's voltages in `dat
 ## Running one by hand
 
 ```bash
-CST_USE_META_DB=json python3 main.py --scenario <name>_<timestamp> --federate_name <grid federate name>
+CST_USE_META_DB=json python3 main.py --scenario <name>_<timestamp> --federate_name <grid federate name> --net_key <custom_metadata key of its net>
 ```
 
 The metadata store has to already contain this grid's net — run stages 2 and 3 first.

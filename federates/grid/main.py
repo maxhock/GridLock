@@ -5,6 +5,7 @@ HELICS co-simulation loop exchanging load power / bus voltage data.
 
 Usage:
     python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0
+        --net_key lv-grid_91301_0
 """
 
 import argparse
@@ -155,6 +156,15 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Federate name matching meta_store entry (e.g. lv-grid_91301_0)",
     )
+    parser.add_argument(
+        "--net_key",
+        type=str,
+        required=True,
+        help=(
+            "custom_metadata document holding this grid's pandapower net, "
+            "written by the infdb stage"
+        ),
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -174,10 +184,14 @@ def get_db_backends_from_env() -> tuple[str, str]:
 
 
 def load_net_from_metadata(
-    federate_name: str,
+    net_key: str,
     use_meta_db: str = "json",
 ) -> pp.pandapowerNet:
-    """Read this grid's pandapower net out of `custom_metadata`, where infdb put it."""
+    """Read the pandapower net named `net_key` out of `custom_metadata`.
+
+    The key is separate from the federate name so that several grid federates
+    can be built from one template net.
+    """
     md_kwargs = {"backend": use_meta_db}
     if use_meta_db == "json":
         md_kwargs["location"] = "meta_store"
@@ -185,24 +199,22 @@ def load_net_from_metadata(
     md_mgr = create_metadata_manager(**md_kwargs)
     md_mgr.connect()
     try:
-        data = md_mgr.read("custom_metadata", federate_name)
+        data = md_mgr.read("custom_metadata", net_key)
     finally:
         md_mgr.disconnect()
 
     if not data:
         raise FileNotFoundError(
-            f"No grid data found in metadata store for '{federate_name}'. "
+            f"No grid data found in metadata store for net key '{net_key}'. "
             f"Ensure infdb data setup has run."
         )
 
     net_json = data.get("net_json")
     if not net_json:
-        raise ValueError(f"Grid metadata for '{federate_name}' has no net_json.")
+        raise ValueError(f"Grid metadata for net key '{net_key}' has no net_json.")
     net = cast(pp.pandapowerNet, pp.from_json_string(net_json))
     sanitize_net_for_power_flow(net)
-    print(
-        f"Loaded net for {federate_name}: {len(net.bus)} buses, {len(net.load)} loads"
-    )
+    print(f"Loaded net '{net_key}': {len(net.bus)} buses, {len(net.load)} loads")
     return net
 
 
@@ -225,19 +237,21 @@ def run_grid_federate(
 def main(
     scenario_name: str | None = None,
     federate_name: str | None = None,
+    net_key: str | None = None,
 ) -> None:
     """Fetch this grid's net and run it, taking the names from the CLI unless given."""
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario
         federate_name = args.federate_name
+        net_key = args.net_key
 
-    if scenario_name is None or federate_name is None:
-        raise ValueError("scenario_name and federate_name are required")
+    if scenario_name is None or federate_name is None or net_key is None:
+        raise ValueError("scenario_name, federate_name and net_key are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 
-    net = load_net_from_metadata(federate_name, use_meta_db)
+    net = load_net_from_metadata(net_key, use_meta_db)
     run_grid_federate(
         federate_name,
         net,

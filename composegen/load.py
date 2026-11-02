@@ -629,14 +629,30 @@ def discover_grid_federates(
     return names
 
 
+def _grid_command(
+    base_command: str, scenario_name: str, fed_name: str, net_key: str
+) -> str:
+    """Build the grid federate's command line.
+
+    The net key is passed explicitly because the federate name no longer
+    determines which `custom_metadata` document holds the net.
+    """
+    return (
+        f"{base_command} "
+        f"--scenario {scenario_name} "
+        f"--federate_name {fed_name} "
+        f"--net_key {net_key}"
+    )
+
+
 def _read_load_list(
-    grid_fed_name: str,
+    net_key: str,
     use_meta_db: str,
     meta_store_path: str = "generated",
 ) -> list[tuple[int, str, int]]:
     """Read a grid's `(load index, name, bus)` triples out of the net infdb stored."""
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
-        meta_data = mgr.read("custom_metadata", grid_fed_name)
+        meta_data = mgr.read("custom_metadata", net_key)
 
     # A missing or contentless entry is a defect in the infdb stage, not an
     # empty grid. Warning and returning [] let the caller wire its children on
@@ -645,7 +661,7 @@ def _read_load_list(
     # different direction.
     if not meta_data:
         raise ValueError(
-            f"No custom_metadata entry '{grid_fed_name}' in backend "
+            f"No custom_metadata entry '{net_key}' in backend "
             f"'{use_meta_db}'. The grid's pandapower net is written there by "
             f"the infdb stage; re-run it before composegen."
         )
@@ -657,7 +673,7 @@ def _read_load_list(
 
     if not net_json_str:
         raise ValueError(
-            f"custom_metadata entry '{grid_fed_name}' carries no 'net_json', "
+            f"custom_metadata entry '{net_key}' carries no 'net_json', "
             f"so the grid has no pandapower net to place federates on."
         )
 
@@ -1428,10 +1444,11 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 )
                 federation.add_federate_config(fed)
 
-                cmd = (
-                    f"{grid_mapped['command']} "
-                    f"--scenario {scenario_name} "
-                    f"--federate_name {fed_name}"
+                # The net key equals the federate name until grids can be cloned
+                # from one template net.
+                net_key = fed_name
+                cmd = _grid_command(
+                    grid_mapped["command"], scenario_name, fed_name, net_key
                 )
 
                 fed.config("image", grid_mapped["image"])
@@ -1441,7 +1458,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 print(f"Added grid federate: {fed_name}")
 
                 all_loads = _read_load_list(
-                    fed_name,
+                    net_key,
                     use_meta_db,
                     meta_store_path=meta_store_path,
                 )
@@ -1604,7 +1621,13 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             mapped = map_params_to_class(node_class)
             command = mapped["command"]
 
-            if mapped["image"] in ["grid", "house_player", "house"]:
+            if mapped["image"] == "grid":
+                command = _grid_command(
+                    command, federation.scenario_name, node.identifier, node.identifier
+                )
+                if node.data.get("config"):
+                    command += f" --config {node.data['config']}"
+            elif mapped["image"] in ["house_player", "house"]:
                 command += f" --scenario {federation.scenario_name} --federate_name {node.identifier}"
                 if node.data.get("config"):
                     command += f" --config {node.data['config']}"

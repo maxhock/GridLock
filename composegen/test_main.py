@@ -9,6 +9,7 @@ from extract import add_to_tree, validate_location_queries
 from transform import process_general_config, validate_tree, wire_pub_sub
 from load import (
     _expand_child_instances,
+    _grid_command,
     _grid_waits_for_current_time,
     _resolve_load_placement,
     _resolve_placement,
@@ -435,6 +436,20 @@ def test_grid_waits_for_current_time_only_with_exactly_one_grid() -> None:
     assert _grid_waits_for_current_time(1) is True
     assert _grid_waits_for_current_time(0) is False
     assert _grid_waits_for_current_time(2) is False
+
+
+# ---------------------------------------------------------------------------
+# load._grid_command
+# ---------------------------------------------------------------------------
+
+
+def test_grid_command_passes_net_key_separately_from_federate_name() -> None:
+    cmd = _grid_command("python3 main.py", "Scn_20260101_000000", "lv-grid_3", "lv")
+
+    assert cmd == (
+        "python3 main.py --scenario Scn_20260101_000000 "
+        "--federate_name lv-grid_3 --net_key lv"
+    )
 
 
 # ---------------------------------------------------------------------------
