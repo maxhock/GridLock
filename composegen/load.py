@@ -30,8 +30,14 @@ RUNNER_FEDERATES = {
 # bus. The grid identifies incoming power by the `load_<idx>` segment of the
 # HELICS key, so anything that injects or draws power has to be placed here to
 # reach the power flow at all. Generation is no exception - a PV plant is a
-# negative load, and a battery is a load of either sign.
-LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery"}
+# negative load, and a battery is a load of either sign. So is a nested grid:
+# an LV grid hangs off an MV grid as an aggregate load, with its slack bus
+# standing in for that load.
+LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery", "grid"}
+
+# Classes that simulate exactly one connection point and are therefore cloned
+# once per load index they are placed on (see `_expand_child_instances`).
+PER_LOAD_INSTANCE_CLASSES = {"house", "grid"}
 
 # Classes that can be placed in a grid but have no federate of their own yet.
 # Their physics currently lives inside the house simulator, and
@@ -804,6 +810,11 @@ def _expand_child_instances(
     prefix. Load indices are unique across explicit placements, so the names
     cannot collide.
 
+    A nested grid is the same case: an LV grid has one slack bus, so it can
+    stand in for exactly one parent load. ``lv-grid_0`` at ``[3, 7]`` becomes
+    ``lv-grid_3`` and ``lv-grid_7``, two LV federates that share the
+    template's net and each carry their own copy of its sub-federates.
+
     A load player is the opposite case: one federate replays one profile
     across every load it is placed on, so it stays a single instance holding
     all its indices.
@@ -811,13 +822,14 @@ def _expand_child_instances(
     Returns:
         ``(instance_id, load_indices_for_that_instance)`` pairs.
     """
-    if child_class != "house":
+    if child_class not in PER_LOAD_INSTANCE_CLASSES:
         return [(child_local_id, load_indices)]
 
     if not load_indices:
         raise ValueError(
-            f"House '{child_local_id}' resolved to no pandapower load index. "
-            f"A house must be placed on at least one load."
+            f"{child_class.capitalize()} '{child_local_id}' resolved to no "
+            f"pandapower load index. A {child_class} must be placed on at "
+            f"least one load."
         )
 
     base_id = re.sub(r"_\d+$", "", child_local_id)
@@ -1112,7 +1124,7 @@ def _wire_grid_child(
             "V",
         )
 
-        if child_class in ("house", "load", "battery", "pv", "grid"):
+        if child_class in ("house", "load", "battery", "pv"):
             _add_group(
                 federation,
                 "active_power",
@@ -1341,17 +1353,31 @@ class _GridWiringContext:
 
 
 def _register_grid_federate(
-    ctx: _GridWiringContext, fed_name: str, net_key: str
+    ctx: _GridWiringContext, fed_name: str, net_key: str, waits: bool
 ) -> None:
-    """Add one grid federate, with the command that points it at its net."""
+    """Add one grid federate, with the command that points it at its net.
+
+    ``waits`` sets ``wait_for_current_time_update``, which HELICS allows on one
+    federate federation-wide (see ``_grid_waits_for_current_time``).
+    """
     from cosim_toolbox.sims import FederateConfig
+
+    # A second FederateConfig under the same name replaces the first together
+    # with every key already wired to it. That is how a nested grid used to
+    # lose its MV<->LV wiring, silently, when it was registered once as a
+    # discovered root and again as somebody's child.
+    if fed_name in ctx.federation.federates:
+        raise ValueError(
+            f"Grid federate '{fed_name}' is already registered; registering "
+            f"it again would drop the HELICS keys wired to it so far."
+        )
 
     grid_mapped = map_params_to_class("grid")
 
     fed = FederateConfig(
         fed_name,
         period=ctx.time_step,
-        wait_for_current_time_update=ctx.grid_waits,
+        wait_for_current_time_update=waits,
     )
     ctx.federation.add_federate_config(fed)
 
@@ -1407,6 +1433,42 @@ def _claim_explicit_placements(
     return explicit_load_indices
 
 
+def _wire_nested_grid_instance(
+    ctx: _GridWiringContext,
+    child,
+    fed_name: str,
+    instance_id: str,
+    instance_loads: list[int],
+) -> None:
+    """Wire one LV clone of a nested grid onto its parent's load.
+
+    Every clone of a template runs the template's net, which infdb stored under
+    the template's tree id, so the net key is the same for all of them while the
+    federate name is not. The template's whole subtree is wired once per clone,
+    with the clone's name as its prefix.
+
+    The clone's federate has to exist before the coupling keys are added, and
+    the coupling is wired the way a house on that load is: the parent
+    subscribes to ``load_<idx>/active_power`` and ``/reactive_power`` and
+    publishes ``load_<idx>/voltage`` back.
+    """
+    child_fed_name = f"{fed_name}.{instance_id}"
+
+    _wire_grid(ctx, child, child_fed_name, net_key=child.identifier, waits=False)
+
+    _wire_grid_child(
+        ctx.federation,
+        fed_name,
+        child_fed_name,
+        instance_id,
+        "grid",
+        load_indices=instance_loads,
+        control_publisher=None,
+    )
+
+    print(f"  Added nested grid federate: {child_fed_name}")
+
+
 def _wire_child_instance(
     ctx: _GridWiringContext,
     child,
@@ -1418,6 +1480,16 @@ def _wire_child_instance(
     from cosim_toolbox.sims import FederateConfig
 
     child_data = child.data
+
+    if child_data.get("class") == "grid":
+        if not instance_loads:
+            raise ValueError(
+                f"Nested grid '{child.identifier}' in '{fed_name}' resolved to "
+                f"no pandapower load index."
+            )
+        _wire_nested_grid_instance(ctx, child, fed_name, instance_id, instance_loads)
+        return
+
     child_class = child_data.get("class")
     child_mapped = map_params_to_class(child_class)
     child_fed_name = f"{fed_name}.{instance_id}"
@@ -1526,13 +1598,23 @@ def _wire_child(
     return set(load_indices or [])
 
 
-def _wire_grid(ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str) -> None:
+def _wire_grid(
+    ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str, waits: bool
+) -> None:
     """Wire one grid federate and every child placed on its pandapower loads.
 
     ``net_key`` names the ``custom_metadata`` document holding the grid's net;
-    ``fed_name`` is the federate (and HELICS key prefix) it runs as.
+    ``fed_name`` is the federate (and HELICS key prefix) it runs as. ``waits``
+    is whether this grid takes the federation's one
+    ``wait_for_current_time_update`` slot: the root passes the decision made
+    for the federation, nested grids never do.
     """
-    _register_grid_federate(ctx, fed_name, net_key)
+    _register_grid_federate(ctx, fed_name, net_key, waits)
+
+    # Marked here rather than by the caller so that nested grids, which are
+    # only reached through recursion, are covered too; anything left unmarked
+    # falls through to the generic phase 2 and would get a second federate.
+    ctx.handled_nodes.add(grid_node.identifier)
 
     all_loads = _read_load_list(
         net_key,
@@ -1541,6 +1623,8 @@ def _wire_grid(ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str) 
     )
 
     children = ctx.tree.children(grid_node.identifier)
+    ctx.handled_nodes.update(child.identifier for child in children)
+
     explicit_load_indices = _claim_explicit_placements(children, all_loads, fed_name)
 
     claimed_load_indices: set[int] = set()
@@ -1551,6 +1635,27 @@ def _wire_grid(ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str) 
         )
 
     _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
+
+
+def _root_grid_nodes(tree: Tree) -> list:
+    """Grid nodes that are not nested under another grid.
+
+    ``validate_tree`` only allows grids under grids, so after it this is the
+    tree root, but the parent check is what actually defines "root" here.
+    """
+    roots = []
+
+    for node in tree.all_nodes():
+        if node.data.get("class") != "grid":
+            continue
+
+        parent = tree.parent(node.identifier)
+        if parent is not None and parent.data.get("class") == "grid":
+            continue
+
+        roots.append(node)
+
+    return roots
 
 
 def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
@@ -1610,14 +1715,15 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         time_step = general_cfg.get("time_step", 1.0)
         handled_nodes: set[str] = set()
 
-        # Resolve every grid's federate names up front: the count decides
+        # Resolve every root grid's federate names up front: the count decides
         # whether the single wait_for_current_time_update slot can be used.
+        # Nested grids are not discovered here - they are reached only by
+        # recursing from their parent, which names them after the load they
+        # sit on. Counting them would hand them a second registration that
+        # overwrites the MV<->LV wiring, and cost the root its slot.
         grid_federates_by_node: dict[str, list[str]] = {}
 
-        for node in tree.all_nodes():
-            if node.data.get("class") != "grid":
-                continue
-
+        for node in _root_grid_nodes(tree):
             if not node.data.get("location") and not node.data.get("layout"):
                 continue
 
@@ -1669,16 +1775,9 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
                 )
                 continue
 
-            handled_nodes.add(grid_tree_id)
-
-            for child in tree.children(grid_tree_id):
-                handled_nodes.add(child.identifier)
-
             for fed_name in grid_fed_names:
-                # The net key equals the federate name until grids can be cloned
-                # from one template net. _wire_grid is the unit a nested grid
-                # will recurse into (issue #65).
-                _wire_grid(ctx, node, fed_name, net_key=fed_name)
+                # A root grid runs on the net stored under its own name.
+                _wire_grid(ctx, node, fed_name, net_key=fed_name, waits=grid_waits)
 
         # Phase 2: layout-based and already-expanded nodes.
         for node in tree.all_nodes():

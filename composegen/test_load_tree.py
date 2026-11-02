@@ -126,9 +126,19 @@ class Generated:
         return {entry["key"] for entry in helics.get(kind, [])}
 
 
-@pytest.fixture
-def generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
-    """Generate the local-grid federation in ``tmp_path``."""
+def _generate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    experiment_yaml: str,
+    nets: dict[str, int],
+    layouts: Iterable[str],
+) -> Generated:
+    """Run extract -> transform -> load for ``experiment_yaml`` in ``tmp_path``.
+
+    ``nets`` maps each ``custom_metadata`` key the infdb stage would have
+    written to the number of loads in that net; ``layouts`` are the stub layout
+    files extract checks for under the data input path.
+    """
     data_dir = tmp_path / "input"
     data_dir.mkdir()
     meta_store = tmp_path / "meta_store"
@@ -136,15 +146,22 @@ def generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
     # The HEMS asks for a 24-step forecast beyond the 24 hour run.
     _write_timeseries(data_dir / "load_profile.csv", 86400, 3600)
     _write_timeseries(data_dir / "house_data.csv", 2 * 86400, 3600)
-    pd.DataFrame({"bus": [0]}).to_excel(data_dir / "layout.xlsx", index=False)
+    for layout in layouts:
+        if layout.endswith(".xlsx"):
+            pd.DataFrame({"bus": [0]}).to_excel(data_dir / layout, index=False)
+        else:
+            (data_dir / layout).write_text("{}")
 
     # What the infdb stage writes for a local layout.
     (meta_store / "custom_metadata").mkdir(parents=True)
-    seed = {"grid_id": GRID_ID, "net_json": _net_json(NUM_LOADS)}
-    (meta_store / "custom_metadata" / f"{GRID_ID}.json").write_text(json.dumps(seed))
+    for net_key, num_loads in nets.items():
+        seed = {"grid_id": net_key, "net_json": _net_json(num_loads)}
+        (meta_store / "custom_metadata" / f"{net_key}.json").write_text(
+            json.dumps(seed)
+        )
 
     config_path = tmp_path / "experiment.yml"
-    config_path.write_text(EXPERIMENT_YAML.format(meta_store=meta_store))
+    config_path.write_text(experiment_yaml.format(meta_store=meta_store))
 
     # DockerRunner.define_yaml writes ./generated/docker-compose.yaml.
     monkeypatch.chdir(tmp_path)
@@ -162,6 +179,18 @@ def generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
         federates=json.loads(federation_file.read_text())["federation"],
         compose=(tmp_path / "generated" / "docker-compose.yaml").read_text(),
         meta_store=meta_store,
+    )
+
+
+@pytest.fixture
+def generated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
+    """Generate the local-grid federation in ``tmp_path``."""
+    return _generate(
+        tmp_path,
+        monkeypatch,
+        EXPERIMENT_YAML,
+        nets={GRID_ID: NUM_LOADS},
+        layouts=["layout.xlsx"],
     )
 
 
@@ -289,3 +318,281 @@ def test_house_exogenous_data_is_stored_for_the_house(
     )
     assert doc["source_file"] == "house_data.csv"
     assert doc["exogenous_data_csv"].startswith("timestamp,power")
+
+
+# ---------------------------------------------------------------------------
+# MV grid with LV grids on its loads (issue #65)
+# ---------------------------------------------------------------------------
+
+MV_ID = "mv-grid_0"
+MV_LOADS = 6
+LV_LOADS = 8
+
+# MV loads 1 and 3 each carry an LV grid (one clone per load), load 5 a unique
+# feeder, and the MV-level player fills the rest: 0, 2 and 4. The house and the
+# load player under `lv-grid_0` are replicated into every clone.
+MV_LV_YAML = """
+general:
+  name: "TestMvLv"
+  start_time: 0
+  end_time: 86400
+  time_step: 3600
+  duration: 86400
+  use_meta_db: "json"
+  use_data_db: "postgres"
+  meta_store_path: "{meta_store}"
+federation:
+  id: "mv-grid_0"
+  name: "MV grid"
+  class: "grid"
+  config:
+    layout: "mv.json"
+  sub_federates:
+    - id: "mvload_0"
+      name: "MV load player"
+      class: "load"
+      config:
+        placement: {mv_load_placement}
+        electrical_load: "load_profile.csv"
+    - id: "lv-grid_0"
+      name: "LV grid"
+      class: "grid"
+      config:
+        layout: "lv.json"
+        placement: {lv_placement}
+      sub_federates:
+        - id: "lvload_0"
+          name: "LV load player"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "load_profile.csv"
+        - id: "house_0"
+          name: "sim house"
+          class: "house"
+          config:
+            placement: [4, 6]
+            exogenous_data: "house_data.csv"
+            model:
+              class: "1R1C"
+              resistance: "5 Ohm"
+              capacitance: "8 F"
+          sub_federates:
+            - id: "hems_0"
+              name: "Smart HEMS"
+              class: "hems"
+              config:
+                control_strategy: "mpc"
+    - id: "lv-feeder_0"
+      name: "LV feeder"
+      class: "grid"
+      config:
+        layout: "feeder.json"
+        placement: 5
+      sub_federates:
+        - id: "feederload_0"
+          name: "Feeder load player"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "load_profile.csv"
+"""
+
+MV_LV_NETS = {
+    MV_ID: MV_LOADS,
+    f"{MV_ID}.lv-grid_0": LV_LOADS,
+    f"{MV_ID}.lv-feeder_0": LV_LOADS,
+}
+MV_LV_LAYOUTS = ["mv.json", "lv.json", "feeder.json"]
+
+
+def _mv_lv_yaml(mv_load_placement: str = '"fill"', lv_placement: str = "[1, 3]") -> str:
+    # `.format` is applied later to fill in the meta store, so the braces that
+    # belong to the YAML flow lists are not touched: only these two keys are.
+    return MV_LV_YAML.replace("{mv_load_placement}", mv_load_placement).replace(
+        "{lv_placement}", lv_placement
+    )
+
+
+@pytest.fixture
+def mv_lv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
+    return _generate(tmp_path, monkeypatch, _mv_lv_yaml(), MV_LV_NETS, MV_LV_LAYOUTS)
+
+
+def _lv_clone_federates(clone: str) -> set[str]:
+    """Everything one clone of ``lv-grid_0`` brings with it."""
+    fed = f"{MV_ID}.{clone}"
+    return {
+        fed,
+        f"{fed}.lvload_0",
+        f"{fed}.house_4",
+        f"{fed}.house_4.hems_0",
+        f"{fed}.house_6",
+        f"{fed}.house_6.hems_0",
+    }
+
+
+def _keys(fed: str, loads: Iterable[int], quantities: Iterable[str]) -> set[str]:
+    """HELICS keys ``<fed>/load_<idx>/<quantity>`` for a dotted federate name."""
+    path = fed.replace(".", "/")
+    return {f"{path}/load_{idx}/{q}" for idx in loads for q in quantities}
+
+
+def _power(fed: str, loads: Iterable[int]) -> set[str]:
+    return _keys(fed, loads, ("active_power", "reactive_power"))
+
+
+def test_mv_lv_federate_set(mv_lv: Generated) -> None:
+    # `lv-grid_0` at [1, 3] is cloned per MV load, subtree included; the house
+    # inside is split per LV load as it is in any other grid.
+    assert set(mv_lv.federates) == (
+        {MV_ID, f"{MV_ID}.mvload_0"}
+        | _lv_clone_federates("lv-grid_1")
+        | _lv_clone_federates("lv-grid_3")
+        | {f"{MV_ID}.lv-feeder_5", f"{MV_ID}.lv-feeder_5.feederload_0"}
+    )
+
+
+def test_mv_lv_grid_commands_point_clones_at_the_template_net(
+    mv_lv: Generated,
+) -> None:
+    scenario = mv_lv.scenario
+
+    def grid_command(fed: str, net_key: str) -> str:
+        return (
+            f"python3 main.py --scenario {scenario} "
+            f"--federate_name {fed} --net_key {net_key}"
+        )
+
+    assert mv_lv.command(MV_ID) == grid_command(MV_ID, MV_ID)
+    for clone in ("lv-grid_1", "lv-grid_3"):
+        assert mv_lv.command(f"{MV_ID}.{clone}") == grid_command(
+            f"{MV_ID}.{clone}", f"{MV_ID}.lv-grid_0"
+        )
+    assert mv_lv.command(f"{MV_ID}.lv-feeder_5") == grid_command(
+        f"{MV_ID}.lv-feeder_5", f"{MV_ID}.lv-feeder_0"
+    )
+
+
+def test_mv_lv_only_the_root_grid_waits_for_current_time(mv_lv: Generated) -> None:
+    waiting = {
+        name
+        for name, fed in mv_lv.federates.items()
+        if fed["HELICS_config"].get("wait_for_current_time_update")
+    }
+    assert waiting == {MV_ID}
+
+
+def test_mv_lv_mv_grid_keys(mv_lv: Generated) -> None:
+    # The MV grid publishes a voltage on every load and reads power from what
+    # sits on it: its own player on 0, 2, 4 and one LV federate each on 1, 3, 5.
+    assert mv_lv.pubs(MV_ID) == _keys(MV_ID, range(MV_LOADS), ["voltage"])
+    assert mv_lv.subs(MV_ID) == (
+        _power(f"{MV_ID}.mvload_0", [0, 2, 4])
+        | _power(f"{MV_ID}.lv-grid_1", [1])
+        | _power(f"{MV_ID}.lv-grid_3", [3])
+        | _power(f"{MV_ID}.lv-feeder_5", [5])
+    )
+
+
+def test_mv_lv_fill_player_holds_exactly_the_unclaimed_mv_loads(
+    mv_lv: Generated,
+) -> None:
+    fed = f"{MV_ID}.mvload_0"
+    assert mv_lv.pubs(fed) == _power(fed, [0, 2, 4])
+    assert mv_lv.subs(fed) == _keys(MV_ID, [0, 2, 4], ["voltage"])
+
+
+@pytest.mark.parametrize("idx", [1, 3])
+def test_mv_lv_clone_is_coupled_to_its_parent_load(mv_lv: Generated, idx: int) -> None:
+    clone = f"{MV_ID}.lv-grid_{idx}"
+    house_4, house_6 = f"{clone}.house_4", f"{clone}.house_6"
+    lvload = f"{clone}.lvload_0"
+
+    # Upstream: power out on the parent's load, voltage in from it.
+    # Downstream: a voltage per LV load, power in from the clone's own children.
+    assert mv_lv.pubs(clone) == _power(clone, [idx]) | _keys(
+        clone, range(LV_LOADS), ["voltage"]
+    )
+    assert mv_lv.subs(clone) == (
+        _keys(MV_ID, [idx], ["voltage"])
+        | _power(lvload, [0, 1, 2, 3, 5, 7])
+        | _power(house_4, [4])
+        | _power(house_6, [6])
+    )
+
+
+def test_mv_lv_the_subtree_is_replicated_per_clone(mv_lv: Generated) -> None:
+    for idx in (1, 3):
+        clone = f"{MV_ID}.lv-grid_{idx}"
+        house = f"{clone}.house_4"
+        hems = f"{house}.hems_0"
+        house_path = house.replace(".", "/")
+
+        assert mv_lv.pubs(f"{clone}.lvload_0") == _power(
+            f"{clone}.lvload_0", [0, 1, 2, 3, 5, 7]
+        )
+        assert mv_lv.pubs(house) == _power(house, [4]) | {f"{house_path}/state"}
+        assert mv_lv.subs(house) == _keys(clone, [4], ["voltage"]) | {
+            f"{house_path}/hems_0/control"
+        }
+        assert mv_lv.pubs(hems) == {f"{house_path}/hems_0/control"}
+        assert mv_lv.subs(hems) == {f"{house_path}/state"}
+        assert mv_lv.command(hems).endswith(
+            f"--federate_name {hems} --house_federate {house} --horizon 24"
+        )
+
+
+def test_mv_lv_feeder_covers_every_lv_load(mv_lv: Generated) -> None:
+    feeder = f"{MV_ID}.lv-feeder_5"
+    player = f"{feeder}.feederload_0"
+
+    assert mv_lv.pubs(feeder) == _power(feeder, [5]) | _keys(
+        feeder, range(LV_LOADS), ["voltage"]
+    )
+    assert mv_lv.pubs(player) == _power(player, range(LV_LOADS))
+
+
+def test_mv_lv_house_exogenous_data_is_stored_per_clone(mv_lv: Generated) -> None:
+    for idx in (1, 3):
+        doc = mv_lv.meta_store / "custom_metadata"
+        assert (doc / f"{MV_ID}.lv-grid_{idx}.house_4.json").exists()
+
+
+def test_mv_lv_placement_overlapping_an_mv_player_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clashing = _mv_lv_yaml(mv_load_placement="[3, 4]")
+
+    with pytest.raises(ValueError, match=r"\[3\].*claimed by multiple federates"):
+        _generate(tmp_path, monkeypatch, clashing, MV_LV_NETS, MV_LV_LAYOUTS)
+
+
+def test_registering_a_grid_federate_twice_is_refused() -> None:
+    from types import SimpleNamespace
+
+    from load import _GridWiringContext, _register_grid_federate
+
+    federates: dict[str, object] = {}
+    federation = SimpleNamespace(
+        federates=federates,
+        add_federate_config=lambda fed: federates.__setitem__(fed.name, fed),
+    )
+    ctx = _GridWiringContext(
+        federation=federation,
+        tree=None,  # type: ignore[arg-type]
+        scenario_name="s",
+        time_step=3600,
+        grid_waits=True,
+        use_meta_db="json",
+        meta_store_path="unused",
+        data_input_path=Path("unused"),
+        handled_nodes=set(),
+    )
+
+    _register_grid_federate(ctx, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False)
+
+    with pytest.raises(ValueError, match="already registered"):
+        _register_grid_federate(
+            ctx, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False
+        )

@@ -475,10 +475,21 @@ def test_resolve_load_placement_returns_resolved_indices() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_expand_child_instances_leaves_non_house_classes_untouched() -> None:
+def test_expand_child_instances_keeps_load_player_as_one_instance() -> None:
     assert _expand_child_instances("loadhouse_0", "load", [0, 1, 2]) == [
         ("loadhouse_0", [0, 1, 2])
     ]
+
+
+def test_expand_child_instances_splits_grid_per_load_index() -> None:
+    result = _expand_child_instances("lv-grid_0", "grid", [3, 7])
+
+    assert result == [("lv-grid_3", [3]), ("lv-grid_7", [7])]
+
+
+def test_expand_child_instances_grid_requires_load_indices() -> None:
+    with pytest.raises(ValueError, match="Grid 'lv-grid_0'.*no pandapower load"):
+        _expand_child_instances("lv-grid_0", "grid", None)
 
 
 def test_expand_child_instances_splits_house_per_load_index() -> None:
