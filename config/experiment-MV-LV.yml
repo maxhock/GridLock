@@ -1,67 +1,90 @@
+# MV grid with LV grids attached to its loads (issue #65).
+#
+# Every nested grid is placed on loads of its PARENT grid (pandapower load
+# indices). The MV loads left over are driven by the "fill" load player.
 general:
- name: "grid"
- start_time: 
- end_time: 86400
- time_step: 300
- duration: 86400
+  name: "MvLvGrid"
+  start_time: 0
+  end_time: 86400
+  time_step: 3600
+  duration: 86400
+  use_meta_db: "mongo"
+  use_data_db: "postgres"
 federation:
- id: "mv-grid_0"
- name: "MediumVoltageGrid"
- class: "grid"
- config:
-   layout: "kerber_landnetz_freileitung_1.xlsx"
-   location: #"Forchheim" # [45.555, 28.444]
-   simulator: "PandaPower" # "PyPSA"
- sub_federates:
-   - id: "lv-grid_0"
-     name: "LowVoltageGrid"
-     class: "grid"
-     config:
-       placement: 3 # [3, 7]
-       layout: "kerber_landnetz_freileitung_1.xlsx"
-     sub_federates:
-       - id: "loadhouse_0"
-         name: "Load profile house"
-         class: "load"
-         config:
-           placement: "fill"
-           electrical_load: "H0" # "H25", "electricloadcurve.csv"
-           heat_load: "" # "heatloadcurve.csv"
-       - id: "house_0"
-         name: "sim house"
-         class: "house"
-         config:
-           placement: [4,6]
-           exogenous_data: "sample_data.csv"
-           model:
-             class: "1R1C"
-             resistance: "5 Ohm"
-             capacitance: "8 F"
-         sub_federates:
-           - id: "battery_0"
-             name: "BYD Battery"
-             class: "battery"
-             config:
-               placement: 0
-               capacity: "5kWh"
-               power: "5 kW"
-           - id: "pv_1"
-             name: "Sunwell PV"
-             class: "pv"
-             config:
-               capacity: "5 5 kW"
-               max_production: "renewables_ninja2019_munich.csv"
-           - id: "hems_0"
-             name: "Smart HEMS"
-             class: "hems"
-             config:
-               control_strategy: "mpc"
-               accessible: ["battery_0", "pv_1"]
-   - id: "pv_0"
-     name: "PV Power Plant SWM"
-     class: "pv"
-     config:
-       placement: 5
-       capacity: "5 MW"
-       control_range: [5,95]
-       max_production: "renewables_ninja2019_munich.csv"
+  id: "mv-grid_0"
+  name: "Synthetic MV grid"
+  class: "grid"
+  config:
+    layout: "mv_synthetic_20kv.json"
+  sub_federates:
+    # MV loads 0, 2, 4 (the ones no LV grid claims): replay a profile.
+    - id: "loadmv_0"
+      name: "MV load profile"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "sample_house.csv"
+    # A list placement CLONES this LV grid and its whole subtree, one clone per
+    # MV load: mv-grid_0.lv-grid_1 (on MV load 1) and mv-grid_0.lv-grid_3 (MV
+    # load 3). Both clones share this template's net, which infdb stores under
+    # the dotted tree id "mv-grid_0.lv-grid_0". Its slack voltage (20 kV) must
+    # equal the vn_kv of the MV load bus it attaches to.
+    - id: "lv-grid_0"
+      name: "LV grid template"
+      class: "grid"
+      config:
+        layout: "kerber_landnetz_freileitung_1_20kv.xlsx"
+        placement: [1, 3]
+      sub_federates:
+        - id: "loadhouse_0"
+          name: "Load profile house"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "sample_house.csv"
+        - id: "house_0"
+          name: "sim house"
+          class: "house"
+          config:
+            placement: [4,6]
+            exogenous_data: "sample_data.csv"
+            model:
+              class: "1R1C"
+              resistance: "5 Ohm"
+              capacitance: "8 F"
+          sub_federates:
+            - id: "battery_0"
+              name: "BYD Battery"
+              class: "battery"
+              config:
+                placement: 0
+                capacity: "5kWh"
+                power: "5 kW"
+            - id: "pv_1"
+              name: "Sunwell PV"
+              class: "pv"
+              config:
+                capacity: "5 5 kW"
+                max_production: "renewables_ninja2019_munich.csv"
+            - id: "hems_0"
+              name: "Smart HEMS"
+              class: "hems"
+              config:
+                control_strategy: "mpc"
+                accessible: ["battery_0", "pv_1"]
+    # A single int placement is not cloned: one LV grid, on MV load 5, with
+    # its own net (the cable variant) stored under "mv-grid_0.lv-feeder_0".
+    # Like a house, the federate is named after the load: mv-grid_0.lv-feeder_5.
+    - id: "lv-feeder_0"
+      name: "LV feeder"
+      class: "grid"
+      config:
+        layout: "kerber_landnetz_kabel_1_20kv.xlsx"
+        placement: 5
+      sub_federates:
+        - id: "loadfeeder_0"
+          name: "Load profile feeder"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "sample_house.csv"
