@@ -159,6 +159,10 @@ services:
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017
+      # composegen creates the run's timeseries tables before any federate
+      # starts (load.create_timeseries_tables), so it needs the data DB too.
+      POSTGRES_HOST: database
+      POSTGRES_PORT: 5432
       CONFIG_PATH: ${CONFIG_PATH:-/config/experiment-LV.yml}
       CST_BROKER_HOST: ${CST_BROKER_HOST}
       CST_RUNTIME_POSTGRES_HOST: ${CST_BROKER_HOST}

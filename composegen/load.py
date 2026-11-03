@@ -442,6 +442,41 @@ def _create_metadata_manager(
     return create_metadata_manager(**kwargs)
 
 
+def create_timeseries_tables(analysis_name: str) -> None:
+    """Create the analysis schema and every CST timeseries table before any federate.
+
+    CST's writer runs `CREATE TABLE IF NOT EXISTS` lazily from each federate's
+    first flush, and `IF NOT EXISTS` is not safe under concurrency: on the first
+    run into a new `general.name`, federates flushing at the same moment collide
+    on the table's row type ("duplicate key value violates unique constraint
+    pg_type_typname_nsp_index"). The loser rolls back and only logs it. Federates
+    flush at teardown, so for a short run that one failed flush was all of one
+    federate's records, and the run still exited 0 (#67). Once the tables exist,
+    the federates' own `IF NOT EXISTS` is a no-op and cannot race.
+    """
+    from cosim_toolbox.dbms import create_timeseries_manager
+    from cosim_toolbox.dbms.postgresql_timeseries import type_mapping
+
+    manager = create_timeseries_manager("postgres", analysis_name)
+
+    # connect() issues the equally racy CREATE SCHEMA IF NOT EXISTS, and CST
+    # reports its failure only through the return value.
+    if not manager.connect():
+        raise RuntimeError(
+            f"Could not connect to the CST timeseries database to create schema "
+            f"'{analysis_name}'; see the CST error above."
+        )
+
+    try:
+        # CST's own DDL, so the tables are exactly what a federate would have
+        # created. Every type, not just the ones this federation publishes
+        # today: one left to a federate would bring the race back.
+        for table_name in type_mapping:
+            manager.writer._ensure_table_exists(table_name)
+    finally:
+        manager.disconnect()
+
+
 def map_params_to_class(federate_class: str) -> dict:
     """Map a config `class` to the Docker image and entry command that implement it."""
     mapping = {
@@ -1883,11 +1918,12 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         meta_store_path = general_cfg.get("meta_store_path", "generated")
 
         name = general_cfg.get("name", "GridLock")
+        analysis_name = f"{name}Analysis"
         use_data_db = general_cfg.get("use_data_db", "postgres")
 
         federation = FederationConfig(
             scenario_name,
-            f"{name}Analysis",
+            analysis_name,
             f"{name}Federation",
             True,
             use_meta_db,
@@ -2028,6 +2064,9 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             use_meta_db,
             meta_store_path=meta_store_path,
         )
+
+        if use_data_db == "postgres":
+            create_timeseries_tables(analysis_name)
 
         DockerRunner.define_yaml(
             federation.scenario_name,

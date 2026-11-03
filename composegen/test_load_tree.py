@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import load as load_module
 from extract import extract
 from load import load
 from transform import transform
@@ -178,6 +179,8 @@ def _generate(
 
     # DockerRunner.define_yaml writes ./generated/docker-compose.yaml.
     monkeypatch.chdir(tmp_path)
+    # There is no timeseries DB here; test_main covers the table creation.
+    monkeypatch.setattr(load_module, "create_timeseries_tables", lambda _: None)
 
     extracted = extract(
         config_path=config_path, data_input_path=data_dir, output_path=tmp_path
