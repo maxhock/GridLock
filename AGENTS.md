@@ -191,6 +191,15 @@ Unclaimed load indices are legal (the grid zeroes all static loads and sgens at 
 and sets every load's `scaling` to 1, so they sit at 0 W) but are reported, since they
 look identical to a placement typo.
 
+Every federate publishes the power its load *actually draws*, not a nominal value at
+1 pu, so the grid makes every load constant-power at import: `scaling` is set to 1 and
+all ZIP shares (`const_z_*_percent`, `const_i_*_percent`) to 0
+(`federates/grid/main.py:_zero_static_loads`). A ZIP share would make pandapower apply
+voltage dependency a second time — for a nested grid on top of its own power flow, so a
+100 % constant-Z coupling load at 0.98 pu drew only 0.9604 of what the LV grid
+reported. Do not reintroduce voltage-dependent loads on driven indices; model that
+dependency inside the federate that publishes the power.
+
 A nested grid is coupled to its parent like a house on that load: it publishes
 `load_<idx>/active_power` and `/reactive_power` (its `res_ext_grid` draw, losses
 included) and subscribes to the parent's `load_<idx>/voltage`, which it writes into its
