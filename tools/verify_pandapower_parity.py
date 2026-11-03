@@ -25,6 +25,7 @@ from parity_common import (
     load_timeseries,
     lookup_power,
     postgres_dsn,
+    resolve_run_window,
     sanitize_net_for_power_flow,
 )
 
@@ -41,8 +42,7 @@ def _independent_pandapower_run(
     csv_path: Path,
     load_indices: list[int],
     time_step: int,
-    start_time: int,
-    end_time: int,
+    duration_s: int,
 ) -> dict[float, dict[int, float]]:
     """Replay the same timeseries directly against pandapower, bypassing HELICS/CST."""
     raw_net = pp.from_excel(layout_path)
@@ -56,7 +56,8 @@ def _independent_pandapower_run(
     timeseries = load_timeseries(str(csv_path))
 
     voltages: dict[float, dict[int, float]] = {}
-    for sim_time in range(start_time, end_time + time_step, time_step):
+    # HELICS time runs from 0 whatever wall clock the run starts at.
+    for sim_time in range(0, duration_s + time_step, time_step):
         p_w, q_var = lookup_power(timeseries, float(sim_time))
 
         # Mirrors grid/main.py:update_internal_model's unit conversion exactly.
@@ -124,13 +125,7 @@ def main() -> int:
 
     analysis_name = general["name"]
     time_step = int(general["time_step"])
-    # `duration:` is accepted by the schema but read by nothing in composegen
-    # (see docs/experiment-reference.md) - the run length actually comes from
-    # end_time - start_time. Matching that here, rather than the dead key,
-    # keeps this script correct if the experiment's start/end ever diverge
-    # from its duration.
-    start_time = int(general.get("start_time") or 0)
-    end_time = int(general["end_time"])
+    duration_s = resolve_run_window(general).duration_s
     grid_fed_name = federation["id"]
     layout_path = REPO_ROOT / "data" / "input" / federation["config"]["layout"]
 
@@ -142,7 +137,7 @@ def main() -> int:
 
     print(f"Replaying {csv_path.name} against {layout_path.name} in pure pandapower...")
     expected = _independent_pandapower_run(
-        layout_path, csv_path, load_indices, time_step, start_time, end_time
+        layout_path, csv_path, load_indices, time_step, duration_s
     )
 
     scenario = args.scenario

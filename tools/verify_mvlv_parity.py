@@ -41,6 +41,7 @@ from parity_common import (
     load_timeseries,
     lookup_power,
     postgres_dsn,
+    resolve_run_window,
     sanitize_net_for_power_flow,
 )
 
@@ -70,8 +71,7 @@ class Experiment:
     """The parts of the experiment YAML the reference needs."""
 
     analysis: str
-    start_time: int
-    end_time: int
+    duration_s: int
     time_step: int
     mv_federate: str
     mv_layout: Path
@@ -80,10 +80,8 @@ class Experiment:
 
     @property
     def sim_times(self) -> list[float]:
-        """Every simulated step, first to last."""
-        return [
-            float(t) for t in range(self.start_time, self.end_time + 1, self.time_step)
-        ]
+        """Every simulated step, first to last; HELICS time starts at 0."""
+        return [float(t) for t in range(0, self.duration_s + 1, self.time_step)]
 
 
 def key_prefix(federate: str) -> str:
@@ -174,8 +172,7 @@ def parse_experiment(path: Path) -> Experiment:
         raise ValueError(f"Only load players and LV grids are supported: {unsupported}")
     return Experiment(
         analysis=general["name"],
-        start_time=int(general.get("start_time") or 0),
-        end_time=int(general["end_time"]),
+        duration_s=resolve_run_window(general).duration_s,
         time_step=int(general["time_step"]),
         mv_federate=root["id"],
         mv_layout=INPUT_DIR / root["config"]["layout"],

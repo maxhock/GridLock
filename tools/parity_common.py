@@ -42,7 +42,13 @@ _load_player = load_module(
     "gridlock_tools_load_player",
     REPO_ROOT / "federates" / "house_player" / "src" / "load_player.py",
 )
+# composegen's own reading of start_time / end_time / duration, so a verifier
+# expects exactly the steps the run was configured for.
+_run_window = load_module(
+    "gridlock_tools_run_window", REPO_ROOT / "composegen" / "run_window.py"
+)
 sanitize_net_for_power_flow = _grid_main.sanitize_net_for_power_flow
+resolve_run_window = _run_window.resolve_run_window
 load_timeseries = _load_player.load_timeseries
 lookup_power = _load_player.lookup_power
 

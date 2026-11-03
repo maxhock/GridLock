@@ -82,7 +82,6 @@ A CSV is shorter than the run.
 The message gives what it covers, what is needed, and why.
 A house with a HEMS needs 24 steps *beyond* `end_time`, because the MPC still asks for a full forecast window at the last step.
 Provide a longer profile or shorten the experiment.
-See the two known holes in this check under [Silent failures](#silent-failures).
 
 **`Placement error: pandapower load index N does not exist. Valid indices: [...]`**
 The index is a pandapower load index, not a bus.
@@ -177,10 +176,12 @@ It is deliberately fatal: continuing would publish the previous step's voltages 
 **`Forecast window [a, b) runs past the end of the exogenous dataset`**
 The federation was generated against a different MPC horizon than the controller is running with. `--horizon` is passed by composegen and has to match `transform.MPC_FORECAST_HORIZON_STEPS`.
 
-**Every federate dies inside `set_metadata` on `strptime`**
-`start_time` or `end_time` was given as a string that is not exactly `YYYY-MM-DDTHH:MM:SS`.
-composegen passes strings through unvalidated (N13 in #56).
-Use numbers.
+**`[General] 'start_time', 'end_time' and 'duration' are all set`**
+Give at most two: any two fix the third, and `end_time` is an absolute time, not a length.
+Drop `duration` to keep `start_time`/`end_time`, or see the table in [`experiment-reference.md`](experiment-reference.md#general).
+
+**`[General] '<key>' carries a UTC offset`** / **`must fall on a whole second`**
+composegen normalises time strings to the `YYYY-MM-DDTHH:MM:SS` CST parses, and refuses what that form cannot hold.
 
 **`CSV ... missing required 'timestamp' column`** / **`'base_load'`**
 A load player's profile.
@@ -211,11 +212,6 @@ All are tracked in issue #56; they are listed here because no error message will
 `model`, `capacity`, `power`, `max_production`, `control_strategy`, `accessible` are validated and discarded.
 Every house is the same hardcoded two-room network with a 13 kWh battery and a 4 kW heat pump.
 Changing them changes nothing (S1).
-
-**The coverage check can be switched off by accident.**
-It returns early and silently if `start_time` or `end_time` is a string, so an ISO 8601 time means no CSV is validated at all (N5).
-It also sizes the run as `end_time - start_time` while a numeric `end_time` is a duration *from* `start_time`, so a non-zero `start_time` under-checks (N4).
-Both reinstate the sample-and-hold this check exists to prevent.
 
 **A house past the end of its dataset re-publishes its last values.**
 CST does not reset `data_to_federation` between steps, so the stale load and state are logged as fresh rows every step (N7).

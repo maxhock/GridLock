@@ -2,11 +2,18 @@
 
 from types import SimpleNamespace
 
+from pathlib import Path
+
 import pytest
 from treelib import Tree
 
 from extract import add_to_tree, validate_location_queries
-from transform import process_general_config, validate_tree, wire_pub_sub
+from transform import (
+    process_general_config,
+    validate_timeseries_coverage,
+    validate_tree,
+    wire_pub_sub,
+)
 from load import (
     _expand_child_instances,
     _grid_command,
@@ -311,13 +318,50 @@ def test_validate_tree_collects_every_error_before_raising(capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
+# transform.validate_timeseries_coverage
+# ---------------------------------------------------------------------------
+
+
+def _player_covering(tmp_path: Path, seconds: int) -> Tree:
+    """A load player whose CSV runs from 0 to ``seconds`` in 900 s rows."""
+    rows = "\n".join(f"{t},1000.0,0.0" for t in range(0, seconds + 1, 900))
+    (tmp_path / "profile.csv").write_text(f"timestamp,power,reactive\n{rows}\n")
+    return _tree_with_root({"class": "load", "electrical_load": "profile.csv"})
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        # 5400 s from 00:30: a CSV covering 3600 s is short however the times
+        # are spelled. Both forms used to slip through: the numeric one was
+        # sized as end - start of a relative end, the ISO one never checked.
+        {"start_time": 1800, "end_time": 7200},
+        {"start_time": "2023-01-01T00:30:00", "end_time": "2023-01-01T02:00:00"},
+        {"start_time": 1800, "duration": 5400},
+    ],
+)
+def test_coverage_check_uses_the_resolved_duration(
+    tmp_path: Path, general: dict
+) -> None:
+    tree = _player_covering(tmp_path, 3600)
+    cfg = process_general_config({**general, "time_step": 900})
+
+    with pytest.raises(ValueError, match="coverage"):
+        validate_timeseries_coverage(tree, cfg, tmp_path)
+
+    validate_timeseries_coverage(_player_covering(tmp_path, 5400), cfg, tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # transform.process_general_config
 # ---------------------------------------------------------------------------
 
 
-def test_process_general_config_requires_end_time() -> None:
-    with pytest.raises(ValueError, match="end_time"):
+def test_process_general_config_requires_end_time_or_duration() -> None:
+    with pytest.raises(ValueError, match="'end_time' or 'duration'"):
         process_general_config({})
+    with pytest.raises(ValueError, match="'end_time' or 'duration'"):
+        process_general_config({"start_time": 0})
 
 
 def test_process_general_config_defaults_start_time() -> None:
@@ -350,10 +394,72 @@ def test_process_general_config_rejects_fractional_time_step() -> None:
         process_general_config({"end_time": 3600, "time_step": 1.5})
 
 
-def test_process_general_config_converts_numeric_end_time_relative_to_start() -> None:
-    cfg = process_general_config({"start_time": 0, "end_time": 3600})
+def test_process_general_config_numeric_end_time_is_absolute() -> None:
+    cfg = process_general_config({"start_time": 1800, "end_time": 7200})
 
+    assert cfg["start_time"] == "2023-01-01T00:30:00"
+    assert cfg["end_time"] == "2023-01-01T02:00:00"
+    assert cfg["duration"] == 5400
+
+
+def test_process_general_config_duration_alone_starts_at_zero() -> None:
+    cfg = process_general_config({"duration": 3600})
+
+    assert cfg["start_time"] == "2023-01-01T00:00:00"
     assert cfg["end_time"] == "2023-01-01T01:00:00"
+    assert cfg["duration"] == 3600
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        {"start_time": 1800, "duration": 5400},
+        {"end_time": 7200, "duration": 5400},
+        {"start_time": "2023-01-01T00:30:00", "end_time": "2023-01-01T02:00:00"},
+    ],
+)
+def test_process_general_config_any_two_fix_the_third(general: dict) -> None:
+    cfg = process_general_config(general)
+
+    assert (cfg["start_time"], cfg["end_time"], cfg["duration"]) == (
+        "2023-01-01T00:30:00",
+        "2023-01-01T02:00:00",
+        5400,
+    )
+
+
+def test_process_general_config_refuses_all_three() -> None:
+    # Even a consistent triple: two always fix the third, so a third can only
+    # agree or silently contradict.
+    with pytest.raises(ValueError, match="at most two"):
+        process_general_config({"start_time": 0, "end_time": 3600, "duration": 3600})
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        {"start_time": 3600, "end_time": 3600},
+        {"start_time": 7200, "end_time": 3600},
+        {"duration": 0},
+    ],
+)
+def test_process_general_config_refuses_an_empty_or_reversed_run(
+    general: dict,
+) -> None:
+    with pytest.raises(ValueError, match="end after it starts"):
+        process_general_config(general)
+
+
+def test_process_general_config_refuses_a_utc_offset() -> None:
+    with pytest.raises(ValueError, match="UTC offset"):
+        process_general_config({"end_time": "2023-01-01T02:00:00+01:00"})
+
+
+def test_process_general_config_normalises_a_bare_date() -> None:
+    cfg = process_general_config({"end_time": "2023-01-02"})
+
+    assert cfg["end_time"] == "2023-01-02T00:00:00"
+    assert cfg["duration"] == 86400
 
 
 def test_process_general_config_accepts_iso_end_time() -> None:

@@ -30,7 +30,6 @@ general:
   start_time: 0
   end_time: 86400
   time_step: 3600
-  duration: 86400
   use_meta_db: "json"
   use_data_db: "postgres"
   meta_store_path: "{meta_store}"
@@ -351,7 +350,6 @@ general:
   start_time: 0
   end_time: 86400
   time_step: 3600
-  duration: 86400
   use_meta_db: "json"
   use_data_db: "postgres"
   meta_store_path: "{meta_store}"
@@ -725,7 +723,6 @@ general:
   start_time: 0
   end_time: 86400
   time_step: 3600
-  duration: 86400
   use_meta_db: "json"
   use_data_db: "postgres"
   meta_store_path: "{meta_store}"

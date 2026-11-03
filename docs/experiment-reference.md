@@ -16,21 +16,35 @@ Three experiments in `config/` are the best starting points: `experiment-local-g
 | Key | Required | Default | Meaning |
 |---|---|---|---|
 | `name` | no | `GridLock` | Names the run. The scenario is `<name>_<YYYYMMDD_HHMMSS>` and the results schema is `"<name>Analysis"`. |
-| `start_time` | no | `0` | Seconds, converted to a wall clock offset from `2023-01-01T00:00:00`. |
-| `end_time` | **yes** | — | Seconds after `start_time`. |
+| `start_time` | no | `0` | When the run starts: seconds after `2023-01-01T00:00:00`, or an ISO 8601 time. |
+| `end_time` | one of these two | — | When the run ends, **absolute** like `start_time` — not a length. |
+| `duration` | one of these two | — | Run length in seconds. |
 | `time_step` | no | `1` | Simulation period in **whole** seconds, shared by every federate. |
 | `use_meta_db` | no | `json` | `mongo`, or `json` to write metadata into `generated/` instead. |
 | `use_data_db` | no | `postgres` | Where the timeseries go. |
 | `meta_store_path` | no | `generated` | Directory the `json` metadata backend writes into. |
 
-Give both times as numbers.
-A string is passed through composegen unchanged and has to be exactly `YYYY-MM-DDTHH:MM:SS`; any other ISO 8601 form — a bare date, or an offset like `+01:00` — is accepted here and then kills every federate at startup.
-It also switches off the coverage check below.
+Give at most two of `start_time`, `end_time` and `duration`; any two fix the third (`run_window.resolve_run_window`):
+
+| Given | Run |
+|---|---|
+| `duration` | 0 to `duration` |
+| `end_time` | 0 to `end_time` |
+| `start_time` + `end_time` | as given; the duration is their difference |
+| `start_time` + `duration` | `start_time` to `start_time + duration` |
+| `end_time` + `duration` | `end_time - duration` to `end_time` |
+
+All three together are refused, even when they agree: a third value can only repeat the other two or contradict them.
+`start_time: 1800, end_time: 7200` is a 5400 s run from 00:30 to 02:00.
+
+Times may be numbers or ISO 8601 strings, mixed freely.
+Strings are normalised to `YYYY-MM-DDTHH:MM:SS`, so a bare date works; one with a UTC offset (`+01:00`) or a fraction of a second is refused.
+The run has to end after it starts.
+
+Simulation time starts at 0 whatever `start_time` is, and the CSVs are read from their first row, so `start_time` shifts only the wall clock the run is stamped with.
 
 `time_step` has to be a whole number of seconds.
 CST type-checks the HELICS `period` against an integer default, so a fractional step is refused up front rather than failing deep inside composegen.
-
-`duration:` appears in both shipped experiment files and is read by nothing — the run length comes from `end_time` alone.
 
 ## `federation:`
 
@@ -221,13 +235,9 @@ The house resamples the dataset onto the federation's `time_step` at startup —
 Every `electrical_load` and `exogenous_data` CSV has to cover the whole run, and composegen checks this before anything starts.
 Without the check a load player silently repeats its last known value once the data runs out, producing a flat load that still reports success.
 
-A house with a HEMS needs more than the run itself: at the last step the MPC still asks for a full forecast window, so it needs a further 24 steps (`transform.MPC_FORECAST_HORIZON_STEPS`) beyond `end_time`.
+The run length checked is the resolved duration, however the times were given.
+A house with a HEMS needs more than the run itself: at the last step the MPC still asks for a full forecast window, so it needs a further 24 steps (`transform.MPC_FORECAST_HORIZON_STEPS`) beyond the end of the run.
 A CSV longer than needed is fine.
-
-Two gaps in that check are worth knowing about, both tracked as N4 and N5 in issue #56:
-
-- It does not run at all if `start_time` or `end_time` is a string, so an ISO 8601 time means no CSV is validated.
-- It sizes the run as `end_time - start_time`, while a numeric `end_time` is a duration *from* `start_time`. With a non-zero `start_time` it asks for too little, and a CSV that passes can still run out mid-run. Both shipped experiments use `start_time: 0`, where the two agree.
 
 ### What is in `data/input/` today
 
