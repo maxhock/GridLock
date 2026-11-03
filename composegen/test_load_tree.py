@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import load as load_module
 from extract import extract
 from load import load
 from transform import transform
@@ -124,6 +125,7 @@ class Generated:
     federates: dict[str, dict]
     compose: str
     meta_store: Path
+    timeseries_schemas: list[str]
 
     def command(self, federate: str) -> str:
         return self.federates[federate]["command"]
@@ -178,6 +180,12 @@ def _generate(
 
     # DockerRunner.define_yaml writes ./generated/docker-compose.yaml.
     monkeypatch.chdir(tmp_path)
+    # There is no timeseries DB here, so only record which schemas would be
+    # created; test_main covers the table creation itself.
+    timeseries_schemas: list[str] = []
+    monkeypatch.setattr(
+        load_module, "create_timeseries_tables", timeseries_schemas.append
+    )
 
     extracted = extract(
         config_path=config_path, data_input_path=data_dir, output_path=tmp_path
@@ -192,6 +200,7 @@ def _generate(
         federates=json.loads(federation_file.read_text())["federation"],
         compose=(tmp_path / "generated" / "docker-compose.yaml").read_text(),
         meta_store=meta_store,
+        timeseries_schemas=timeseries_schemas,
     )
 
 
@@ -218,6 +227,19 @@ def _grid_keys(loads: list[int], publisher: str) -> set[str]:
 
 def _voltage_keys(loads: Iterable[int]) -> set[str]:
     return {f"{GRID_ID}/load_{idx}/voltage" for idx in loads}
+
+
+def test_timeseries_tables_are_created_for_the_federates_schema(
+    generated: Generated,
+) -> None:
+    # Federates take their schema from the scenario document's `analysis`;
+    # tables created under any other name leave them racing to create their
+    # own (#67).
+    scenario_file = generated.meta_store / "scenarios" / f"{generated.scenario}.json"
+    analysis = json.loads(scenario_file.read_text())["analysis"]
+
+    assert analysis == "TestGridAnalysis"
+    assert generated.timeseries_schemas == [analysis]
 
 
 def test_federate_names(generated: Generated) -> None:

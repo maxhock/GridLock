@@ -159,6 +159,15 @@ services:
     environment:
       MONGO_HOST: mongodb://mongodb
       MONGO_PORT: 27017
+      # composegen creates the run's timeseries tables before any federate
+      # starts (load.create_timeseries_tables), so it must reach the data DB
+      # exactly the way the federates will - the CST_RUNTIME_POSTGRES_* pair
+      # below, which monkeypatch.py writes into every federate. Pointing it at
+      # the `database` service instead only coincides with that by default; with
+      # any other runtime host the tables would land in a database no federate
+      # writes to, and the race would be back behind a green stage 3.
+      POSTGRES_HOST: ${CST_BROKER_HOST}
+      POSTGRES_PORT: ${CST_POSTGRES_PORT}
       CONFIG_PATH: ${CONFIG_PATH:-/config/experiment-LV.yml}
       CST_BROKER_HOST: ${CST_BROKER_HOST}
       CST_RUNTIME_POSTGRES_HOST: ${CST_BROKER_HOST}

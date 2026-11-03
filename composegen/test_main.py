@@ -21,6 +21,7 @@ from load import (
     _grid_waits_for_current_time,
     _resolve_load_placement,
     _resolve_placement,
+    create_timeseries_tables,
     map_params_to_class,
 )
 from monkeypatch import _federate_docker, _service
@@ -683,6 +684,71 @@ def test_grid_command_passes_net_key_separately_from_federate_name() -> None:
         "python3 main.py --scenario Scn_20260101_000000 "
         "--federate_name lv-grid_3 --net_key lv"
     )
+
+
+# ---------------------------------------------------------------------------
+# load.create_timeseries_tables
+# ---------------------------------------------------------------------------
+
+
+class _FakeTimeseriesManager:
+    def __init__(self, connects: bool) -> None:
+        self.connects = connects
+        self.created: list[str] = []
+        self.disconnected = False
+        self.factory_args: tuple[str, ...] = ()
+        self.writer = SimpleNamespace(_ensure_table_exists=self.created.append)
+
+    def connect(self) -> bool:
+        return self.connects
+
+    def disconnect(self) -> None:
+        self.disconnected = True
+
+
+def _patch_timeseries_manager(monkeypatch, manager: _FakeTimeseriesManager) -> None:
+    import cosim_toolbox.dbms
+
+    def factory(*args: str) -> _FakeTimeseriesManager:
+        manager.factory_args = args
+        return manager
+
+    monkeypatch.setattr(cosim_toolbox.dbms, "create_timeseries_manager", factory)
+
+
+def test_create_timeseries_tables_creates_every_cst_type(monkeypatch) -> None:
+    from cosim_toolbox.dbms.postgresql_timeseries import type_mapping
+
+    manager = _FakeTimeseriesManager(connects=True)
+    _patch_timeseries_manager(monkeypatch, manager)
+
+    create_timeseries_tables("FreshAnalysis")
+
+    assert manager.factory_args == ("postgres", "FreshAnalysis")
+    assert manager.created == list(type_mapping)
+    assert manager.disconnected
+
+
+def test_create_timeseries_tables_propagates_a_failed_table(monkeypatch) -> None:
+    manager = _FakeTimeseriesManager(connects=True)
+
+    def fail(table_name: str) -> None:
+        raise RuntimeError(f"cannot create {table_name}")
+
+    manager.writer = SimpleNamespace(_ensure_table_exists=fail)
+    _patch_timeseries_manager(monkeypatch, manager)
+
+    with pytest.raises(RuntimeError, match="cannot create"):
+        create_timeseries_tables("FreshAnalysis")
+
+    assert manager.disconnected
+
+
+def test_create_timeseries_tables_raises_when_connect_fails(monkeypatch) -> None:
+    _patch_timeseries_manager(monkeypatch, _FakeTimeseriesManager(connects=False))
+
+    with pytest.raises(RuntimeError, match="FreshAnalysis"):
+        create_timeseries_tables("FreshAnalysis")
 
 
 # ---------------------------------------------------------------------------
