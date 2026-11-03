@@ -36,6 +36,7 @@ class LvPart:
     bus_ids: dict[int, int]  # LV bus index -> merged bus index
     trafo_ids: tuple[int, ...]
     line_ids: tuple[int, ...]
+    shunt_ids: tuple[int, ...]
 
 
 @dataclass
@@ -126,6 +127,7 @@ def _attach(merged: MergedNet, mv_load_idx: int, lv_net: pp.pandapowerNet) -> No
         },
         trafo_ids=tuple(moved("trafo", list(lv_net.trafo.index))),
         line_ids=tuple(moved("line", list(lv_net.line.index))),
+        shunt_ids=tuple(moved("shunt", list(lv_net.shunt.index))),
     )
 
 
@@ -152,11 +154,12 @@ def power_into_part(merged: MergedNet, mv_load_idx: int) -> tuple[float, float]:
     """(P in W, Q in VAr) the MV bus delivers into one fused LV part.
 
     Read off the part's own elements at the fused bus after `runpp`: what flows
-    into the LV transformer(s) and lines, plus the LV loads sitting on the slack
-    bus itself, is the sum of the LV loads plus every loss inside the part,
+    into the LV transformer(s) and lines, plus the LV loads and shunts sitting on
+    the slack bus itself, is the sum of the LV loads plus every loss inside the part,
     exactly what the LV federate's `res_ext_grid` publishes. The coupling
     contract does not require a branch between the slack and a load, so the
-    loads on the fused bus are counted directly. It is solved together with the
+    elements on the fused bus are counted directly; sanitising leaves shunts
+    in place, so they draw in the LV federate's run too. It is solved together with the
     MV net, so unlike re-solving the LV net alone at the co-simulated voltage it
     does not borrow the answer under test.
     """
@@ -167,6 +170,10 @@ def power_into_part(merged: MergedNet, mv_load_idx: int) -> tuple[float, float]:
         if net.load.at[idx, "bus"] == bus:
             p_mw += float(net.res_load.at[idx, "p_mw"])
             q_mvar += float(net.res_load.at[idx, "q_mvar"])
+    for idx in part.shunt_ids:
+        if net.shunt.at[idx, "bus"] == bus:
+            p_mw += float(net.res_shunt.at[idx, "p_mw"])
+            q_mvar += float(net.res_shunt.at[idx, "q_mvar"])
     for idx in part.trafo_ids:
         if net.trafo.at[idx, "hv_bus"] == bus:
             p_mw += float(net.res_trafo.at[idx, "p_hv_mw"])

@@ -190,7 +190,9 @@ def _roundtripped(layout: Path) -> pp.pandapowerNet:
     Through JSON, then sanitised, exactly like `databases/infdb/main.py` ->
     `federates/grid/main.py:load_net_from_metadata`.
     """
-    raw = pp.from_json(layout) if layout.suffix == ".json" else pp.from_excel(layout)
+    # infdb and extract accept the suffix in any case (`NET.JSON`).
+    is_json = layout.suffix.lower() == ".json"
+    raw = pp.from_json(layout) if is_json else pp.from_excel(layout)
     net = pp.from_json_string(pp.to_json(raw))
     sanitize_net_for_power_flow(net)
     return net

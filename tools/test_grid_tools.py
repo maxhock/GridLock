@@ -190,6 +190,22 @@ def test_power_into_part_counts_lv_loads_on_the_slack_bus() -> None:
     assert q_var == pytest.approx(2000.0)
 
 
+def test_power_into_part_counts_lv_shunts_on_the_slack_bus() -> None:
+    mv = build_net()
+    lv = pp.create_empty_network()
+    slack = pp.create_bus(lv, vn_kv=float(mv.bus.vn_kv.at[mv.load.bus.at[1]]))
+    pp.create_ext_grid(lv, slack)
+    pp.create_shunt(lv, slack, q_mvar=0.003, p_mw=0.001)
+    merged = build_merged_net(mv, {1: lv})
+    pp.runpp(merged.net)
+
+    (shunt,) = merged.parts[1].shunt_ids
+    p_w, q_var = power_into_part(merged, 1)
+    assert p_w == pytest.approx(merged.net.res_shunt.at[shunt, "p_mw"] * 1e6)
+    assert q_var == pytest.approx(merged.net.res_shunt.at[shunt, "q_mvar"] * 1e6)
+    assert p_w > 0
+
+
 def test_merge_rejects_an_mv_load_that_does_not_exist() -> None:
     with pytest.raises(ValueError, match="not available"):
         build_merged_net(build_net(), {99: _load(LV_FREILEITUNG)})

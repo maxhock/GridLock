@@ -645,6 +645,34 @@ def test_sibling_named_like_a_grid_clone_is_refused(
         _generate(tmp_path, monkeypatch, clashing, MV_LV_NETS, MV_LV_LAYOUTS)
 
 
+def test_house_named_like_a_grid_net_key_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `lv-feeder_9` on load 0 runs as `lv-feeder_0`, which is the key the
+    # `lv-feeder_0` template keeps its net under (it runs as `lv-feeder_5`).
+    clashing = (
+        _mv_lv_yaml(mv_load_placement="[2, 4]")
+        + """\
+    - id: "lv-feeder_9"
+      name: "MV house"
+      class: "house"
+      config:
+        placement: [0]
+        exogenous_data: "house_data.csv"
+        model:
+          class: "1R1C"
+          resistance: "5 Ohm"
+          capacitance: "8 F"
+"""
+    )
+
+    with pytest.raises(ValueError, match=r"\['mv-grid_0\.lv-feeder_0'\]"):
+        _generate(tmp_path, monkeypatch, clashing, MV_LV_NETS, MV_LV_LAYOUTS)
+
+    net_doc = tmp_path / "meta_store" / "custom_metadata" / f"{MV_ID}.lv-feeder_0.json"
+    assert "net_json" in json.loads(net_doc.read_text())
+
+
 def test_failed_coupling_writes_no_house_dataset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1269,6 +1269,28 @@ def _read_house_exogenous_data(
     }
 
 
+def _check_house_dataset_keys(
+    datasets: dict[str, dict[str, str]], net_keys: set[str]
+) -> None:
+    """Refuse a house whose dataset key is a grid's net key.
+
+    Both live in ``custom_metadata``, a house under its federate name and a
+    nested grid's net under its template's tree id, and houses are renamed
+    after their load: house ``feeder_2`` on load 0 runs as ``feeder_0``,
+    which is where a sibling grid template ``feeder_0`` keeps its net, even
+    though that grid itself runs as ``feeder_<its load>``. Writing the house
+    CSV there would replace the net, and the grid would fail at startup.
+    """
+    clashes = sorted(set(datasets) & net_keys)
+    if clashes:
+        raise ValueError(
+            f"House federate(s) {clashes} would store their exogenous dataset "
+            f"under the custom_metadata key a grid reads its net from. Houses "
+            f"are renamed after the load they are placed on; rename the house "
+            f"or the grid so their ids do not share a base."
+        )
+
+
 def _store_house_datasets(
     datasets: dict[str, dict[str, str]], use_meta_db: str, meta_store_path: str
 ) -> None:
@@ -1392,6 +1414,8 @@ class _GridWiringContext:
     # for a later sibling must not fail after an earlier house has already
     # overwritten the dataset stored under its name.
     house_datasets: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Every custom_metadata key a grid in this federation reads its net from.
+    net_keys: set[str] = field(default_factory=set)
 
 
 def _claim_federate_name(federation, fed_name: str) -> None:
@@ -1753,6 +1777,7 @@ def _wire_grid(
     for the federation, nested grids never do.
     """
     _register_grid_federate(ctx, fed_name, net_key, waits)
+    ctx.net_keys.add(net_key)
 
     # Marked here rather than by the caller so that nested grids, which are
     # only reached through recursion, are covered too; anything left unmarked
@@ -1979,6 +2004,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
 
         federation.define_io()
 
+        _check_house_dataset_keys(ctx.house_datasets, ctx.net_keys)
         _store_house_datasets(ctx.house_datasets, use_meta_db, meta_store_path)
 
         start_str = _to_iso_wallclock(general_cfg.get("start_time", 0))
