@@ -235,6 +235,15 @@ depth-staggered offsets were removed — read it before touching timing.
 `time_step` must be a whole number of seconds: CST's `HelicsMsg.verify` type-checks
 `period` against an int default.
 
+`start_time` and `end_time` are always **absolute** times (a number is seconds after
+`2023-01-01T00:00:00`), never a length; `duration` is the length. Any two of the three
+fix the third, `duration` alone runs from 0, and all three together are refused. The
+rule lives only in `composegen/run_window.py:resolve_run_window`, which
+`process_general_config` calls and the parity tools load by path — size a run through
+it, never with `end_time - start_time` of raw config values, which is how the coverage
+check and the verifiers once disagreed with composegen. HELICS time starts at 0 whatever
+`start_time` is, and CSVs are read from their first row.
+
 ### CST monkeypatches
 
 `composegen/monkeypatch.py` replaces `DockerRunner._service`, `DockerRunner.define_yaml`
