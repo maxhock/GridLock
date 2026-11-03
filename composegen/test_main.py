@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+import yaml
 from treelib import Tree
 
 from extract import add_to_tree, validate_location_queries
@@ -453,6 +454,22 @@ def test_process_general_config_refuses_an_empty_or_reversed_run(
 def test_process_general_config_refuses_a_utc_offset() -> None:
     with pytest.raises(ValueError, match="UTC offset"):
         process_general_config({"end_time": "2023-01-01T02:00:00+01:00"})
+
+
+def test_process_general_config_accepts_unquoted_yaml_times() -> None:
+    # yaml.safe_load turns unquoted ISO times into date / datetime objects.
+    general = yaml.safe_load("start_time: 2023-01-01T00:30:00\nend_time: 2023-01-02")
+    cfg = process_general_config(general)
+
+    assert cfg["start_time"] == "2023-01-01T00:30:00"
+    assert cfg["end_time"] == "2023-01-02T00:00:00"
+    assert cfg["duration"] == 84600
+
+
+@pytest.mark.parametrize("value", ["", "now", "tomorrow"])
+def test_process_general_config_refuses_non_iso_strings(value: str) -> None:
+    with pytest.raises(ValueError, match="not an ISO 8601 time"):
+        process_general_config({"start_time": value, "end_time": 3600})
 
 
 def test_process_general_config_normalises_a_bare_date() -> None:

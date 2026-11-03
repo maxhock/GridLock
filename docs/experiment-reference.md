@@ -37,8 +37,8 @@ Give at most two of `start_time`, `end_time` and `duration`; any two fix the thi
 All three together are refused, even when they agree: a third value can only repeat the other two or contradict them.
 `start_time: 1800, end_time: 7200` is a 5400 s run from 00:30 to 02:00.
 
-Times may be numbers or ISO 8601 strings, mixed freely.
-Strings are normalised to `YYYY-MM-DDTHH:MM:SS`, so a bare date works; one with a UTC offset (`+01:00`) or a fraction of a second is refused.
+Times may be numbers or ISO 8601 times, quoted or not, mixed freely.
+They are normalised to `YYYY-MM-DDTHH:MM:SS`, so a bare date works; one with a UTC offset (`+01:00`) or a fraction of a second is refused.
 The run has to end after it starts.
 
 Simulation time starts at 0 whatever `start_time` is, and the CSVs are read from their first row, so `start_time` shifts only the wall clock the run is stamped with.

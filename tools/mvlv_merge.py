@@ -156,7 +156,10 @@ def power_into_part(merged: MergedNet, mv_load_idx: int) -> tuple[float, float]:
     Read off the part's own elements at the fused bus after `runpp`: what flows
     into the LV transformer(s) and lines, plus the LV loads and shunts sitting on
     the slack bus itself, is the sum of the LV loads plus every loss inside the part,
-    exactly what the LV federate's `res_ext_grid` publishes. The coupling
+    which is what the LV federate's `res_ext_grid` publishes - for the element
+    kinds counted here. Any other element on the fused bus (storage, ward, a
+    bus-bus switch to a loaded bus) is not counted and would show up as a parity
+    mismatch; no committed net has one. The coupling
     contract does not require a branch between the slack and a load, so the
     elements on the fused bus are counted directly; sanitising leaves shunts
     in place, so they draw in the LV federate's run too. It is solved together with the

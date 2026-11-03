@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 import pandas as pd
@@ -60,8 +61,25 @@ def _whole_seconds(value: float, key: str) -> pd.Timedelta:
     return pd.Timedelta(seconds=int(value))
 
 
+def _parse_iso(value: str, key: str) -> datetime:
+    # datetime.fromisoformat rather than pd.Timestamp: pandas also accepts ""
+    # (NaT) and keywords like "now", which would surface as a baffling
+    # whole-second error, or worse, as a run window that moves every call.
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"[General] '{key}' is not an ISO 8601 time: {value!r}."
+        ) from exc
+
+
 def _as_timestamp(value: Any, key: str) -> pd.Timestamp:
-    """An absolute time: seconds after `RUN_EPOCH`, or an ISO 8601 string."""
+    """An absolute time: seconds after `RUN_EPOCH`, or an ISO 8601 time.
+
+    The time may come as a string or, when written unquoted, as the ``date`` /
+    ``datetime`` that ``yaml.safe_load`` turns ``2023-01-02`` or
+    ``2023-01-01T00:30:00`` into.
+    """
     if isinstance(value, bool):
         raise ValueError(f"[General] '{key}' must be a time, got {value!r}.")
 
@@ -69,26 +87,24 @@ def _as_timestamp(value: Any, key: str) -> pd.Timestamp:
         return RUN_EPOCH + _whole_seconds(value, key)
 
     if isinstance(value, str):
-        try:
-            ts = pd.Timestamp(value)
-        except ValueError as exc:
-            raise ValueError(
-                f"[General] '{key}' is not an ISO 8601 time: {value!r}."
-            ) from exc
-        if ts.tzinfo is not None:
-            raise ValueError(
-                f"[General] '{key}' carries a UTC offset ({value!r}); give a "
-                f"local wall-clock time without one."
-            )
-        if ts != ts.floor("s"):
-            raise ValueError(
-                f"[General] '{key}' must fall on a whole second, got {value!r}."
-            )
-        return ts
+        value = _parse_iso(value, key)
 
-    raise ValueError(
-        f"[General] '{key}' must be seconds or an ISO 8601 string, got {value!r}."
-    )
+    if not isinstance(value, date):
+        raise ValueError(
+            f"[General] '{key}' must be seconds or an ISO 8601 time, got {value!r}."
+        )
+
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is not None:
+        raise ValueError(
+            f"[General] '{key}' carries a UTC offset ({value!r}); give a "
+            f"local wall-clock time without one."
+        )
+    if ts != ts.floor("s"):
+        raise ValueError(
+            f"[General] '{key}' must fall on a whole second, got {value!r}."
+        )
+    return ts
 
 
 def _as_duration(value: Any) -> pd.Timedelta:
