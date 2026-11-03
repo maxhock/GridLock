@@ -696,6 +696,7 @@ class _FakeTimeseriesManager:
         self.connects = connects
         self.created: list[str] = []
         self.disconnected = False
+        self.factory_args: tuple[str, ...] = ()
         self.writer = SimpleNamespace(_ensure_table_exists=self.created.append)
 
     def connect(self) -> bool:
@@ -708,9 +709,11 @@ class _FakeTimeseriesManager:
 def _patch_timeseries_manager(monkeypatch, manager: _FakeTimeseriesManager) -> None:
     import cosim_toolbox.dbms
 
-    monkeypatch.setattr(
-        cosim_toolbox.dbms, "create_timeseries_manager", lambda *_: manager
-    )
+    def factory(*args: str) -> _FakeTimeseriesManager:
+        manager.factory_args = args
+        return manager
+
+    monkeypatch.setattr(cosim_toolbox.dbms, "create_timeseries_manager", factory)
 
 
 def test_create_timeseries_tables_creates_every_cst_type(monkeypatch) -> None:
@@ -721,7 +724,23 @@ def test_create_timeseries_tables_creates_every_cst_type(monkeypatch) -> None:
 
     create_timeseries_tables("FreshAnalysis")
 
+    assert manager.factory_args == ("postgres", "FreshAnalysis")
     assert manager.created == list(type_mapping)
+    assert manager.disconnected
+
+
+def test_create_timeseries_tables_propagates_a_failed_table(monkeypatch) -> None:
+    manager = _FakeTimeseriesManager(connects=True)
+
+    def fail(table_name: str) -> None:
+        raise RuntimeError(f"cannot create {table_name}")
+
+    manager.writer = SimpleNamespace(_ensure_table_exists=fail)
+    _patch_timeseries_manager(monkeypatch, manager)
+
+    with pytest.raises(RuntimeError, match="cannot create"):
+        create_timeseries_tables("FreshAnalysis")
+
     assert manager.disconnected
 
 
