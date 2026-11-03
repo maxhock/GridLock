@@ -10,7 +10,8 @@ The key is not the federate name for a nested grid: several clones of one LV tem
 
 The imported net is then sanitised (`sanitize_net_for_power_flow`):
 
-- Missing ZIP-load columns are added with zero defaults, because nets serialised by older or external pandapower versions omit columns `runpp` now expects.
+- Missing ZIP-load columns are added, because nets serialised by older or external pandapower versions omit columns `runpp` now expects.
+- **Every load is made constant-power** (all `const_z_*_percent` / `const_i_*_percent` set to 0), for the same reason as `scaling`: a federate publishes the power its load actually draws, and a nested grid's draw is already resolved by its own power flow, so a voltage-dependent share would be applied twice. A note reports how many loads were changed.
 - **Every static load is zeroed.** Demand in this project comes from HELICS, so an imported `p_mw` would double-count. This is also why an unclaimed load index is harmless: it simply stays at 0 W.
 - **Every load's `scaling` is reset to 1.0.** A federate publishes the actual power of its load and pandapower multiplies `p_mw` by `scaling`, so any other value (DSO exports use 0, 0.3, 0.7) would silently change what was published. A note reports how many loads were rescaled.
 - **Every static `sgen` is zeroed** (`p_mw` and `q_mvar`; `in_service` is untouched). Only federates drive the grid, and a static sgen would otherwise inject constant feed-in while the loads sit at 0 W. A loud note reports the count and the nominal MW removed. This runs even for a net without loads.

@@ -172,6 +172,24 @@ def test_power_into_part_is_the_lv_load_plus_losses() -> None:
     assert p_w == pytest.approx(lv.res_ext_grid.p_mw.iat[0] * 1e6, rel=1e-6)
 
 
+def test_power_into_part_counts_lv_loads_on_the_slack_bus() -> None:
+    # A one-bus LV net is a valid attachment: its load hangs on the slack bus,
+    # which fusion merges into the MV bus, so no LV branch carries its power.
+    mv = build_net()
+    lv = pp.create_empty_network()
+    slack = pp.create_bus(lv, vn_kv=float(mv.bus.vn_kv.at[mv.load.bus.at[1]]))
+    pp.create_ext_grid(lv, slack)
+    pp.create_load(lv, slack, p_mw=0.0)
+    merged = build_merged_net(mv, {1: lv})
+    (lv_load,) = merged.parts[1].load_ids.values()
+    merged.net.load.loc[lv_load, ["p_mw", "q_mvar"]] = [0.006, 0.002]
+    pp.runpp(merged.net)
+
+    p_w, q_var = power_into_part(merged, 1)
+    assert p_w == pytest.approx(6000.0)
+    assert q_var == pytest.approx(2000.0)
+
+
 def test_merge_rejects_an_mv_load_that_does_not_exist() -> None:
     with pytest.raises(ValueError, match="not available"):
         build_merged_net(build_net(), {99: _load(LV_FREILEITUNG)})

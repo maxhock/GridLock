@@ -624,6 +624,43 @@ def test_mv_lv_voltage_is_labelled_per_unit(mv_lv: Generated) -> None:
     assert units == {"pu"}
 
 
+def test_sibling_named_like_a_grid_clone_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `lv-grid_0` on load 1 runs as `lv-grid_1`. A load player declared under
+    # that id after it would replace the clone's config and coupling keys.
+    clashing = (
+        _mv_lv_yaml(mv_load_placement="[0, 2]")
+        + """\
+    - id: "lv-grid_1"
+      name: "MV load player 2"
+      class: "load"
+      config:
+        placement: [4]
+        electrical_load: "load_profile.csv"
+"""
+    )
+
+    with pytest.raises(ValueError, match=f"'{MV_ID}.lv-grid_1' is already registered"):
+        _generate(tmp_path, monkeypatch, clashing, MV_LV_NETS, MV_LV_LAYOUTS)
+
+
+def test_failed_coupling_writes_no_house_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The houses under `lv-grid_0` are wired before `lv-feeder_0`'s coupling
+    # is checked; their datasets must not be stored for a run that never comes.
+    nets = {**MV_LV_NETS, f"{MV_ID}.lv-feeder_0": _net_json(LV_LOADS, vn_kv=10.0)}
+
+    with pytest.raises(ValueError, match="the bases must match"):
+        _generate(tmp_path, monkeypatch, _mv_lv_yaml(), nets, MV_LV_LAYOUTS)
+
+    stored = {
+        path.stem for path in (tmp_path / "meta_store" / "custom_metadata").iterdir()
+    }
+    assert stored == set(nets)
+
+
 def test_registering_a_grid_federate_twice_is_refused() -> None:
     from types import SimpleNamespace
 

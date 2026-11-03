@@ -64,13 +64,34 @@ def test_sanitize_clears_imported_power() -> None:
     assert net.load.at[0, "q_mvar"] == 0.0
 
 
-def test_sanitize_keeps_existing_zip_columns() -> None:
+def test_sanitize_makes_every_load_constant_power() -> None:
+    # Federates publish the power actually drawn; a ZIP share would apply the
+    # voltage dependency a second time (for a nested grid, on top of its own
+    # power flow).
     net = _net_with_one_load()
     net.load.at[0, "const_z_p_percent"] = 25.0
+    net.load.at[0, "const_i_q_percent"] = 100.0
 
     sanitize_net_for_power_flow(net)
 
-    assert net.load.at[0, "const_z_p_percent"] == 25.0
+    assert (
+        (net.load[["const_z_p_percent", "const_i_q_percent"]] == 0.0).to_numpy().all()
+    )
+
+
+def test_published_power_is_drawn_unchanged_off_nominal_voltage() -> None:
+    net = _net_with_one_load()
+    net.load.at[0, "const_z_p_percent"] = 100.0
+    net.load.at[0, "const_z_q_percent"] = 100.0
+    net.ext_grid["vm_pu"] = 0.95
+
+    sanitize_net_for_power_flow(net)
+    net.load.at[0, "p_mw"] = 0.006
+    net.load.at[0, "q_mvar"] = 0.002
+    pp.runpp(net)
+
+    assert net.res_load.at[0, "p_mw"] == pytest.approx(0.006)
+    assert net.res_load.at[0, "q_mvar"] == pytest.approx(0.002)
 
 
 def test_sanitize_sets_defaults_on_added_columns() -> None:

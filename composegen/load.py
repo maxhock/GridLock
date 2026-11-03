@@ -6,7 +6,7 @@ import json
 import math
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1241,23 +1241,20 @@ def _resolve_timeseries_path(child_data: dict, federate_name: str) -> str:
     return f"/data/input/{electrical_load}"
 
 
-def _store_house_exogenous_data(
-    child_data: dict,
-    child_fed_name: str,
-    data_input_path: Path,
-    use_meta_db: str,
-    meta_store_path: str,
-) -> None:
-    """Load a house's exogenous dataset CSV and store it in the CST metadata store.
+def _read_house_exogenous_data(
+    child_data: dict, child_fed_name: str, data_input_path: Path
+) -> dict[str, str] | None:
+    """Read a house's exogenous dataset CSV into the document stored for it.
 
     Houses read this back via ``metadata_manager.read("custom_metadata", ...)``
     at runtime instead of mounting the CSV as a file, so the dataset travels
     through the same CST store as the pandapower net rather than a path arg.
+    Returns ``None`` for a house without a dataset.
     """
     exogenous_data = child_data.get("exogenous_data")
 
     if not exogenous_data:
-        return
+        return None
 
     csv_path = data_input_path / str(exogenous_data)
 
@@ -1266,16 +1263,22 @@ def _store_house_exogenous_data(
             f"Exogenous dataset for '{child_fed_name}' not found: {csv_path}"
         )
 
+    return {
+        "exogenous_data_csv": csv_path.read_text(),
+        "source_file": str(exogenous_data),
+    }
+
+
+def _store_house_datasets(
+    datasets: dict[str, dict[str, str]], use_meta_db: str, meta_store_path: str
+) -> None:
+    """Write every house's exogenous dataset under its federate name."""
+    if not datasets:
+        return
+
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
-        mgr.write(
-            "custom_metadata",
-            child_fed_name,
-            {
-                "exogenous_data_csv": csv_path.read_text(),
-                "source_file": str(exogenous_data),
-            },
-            overwrite=True,
-        )
+        for fed_name, document in datasets.items():
+            mgr.write("custom_metadata", fed_name, document, overwrite=True)
 
 
 def _add_generic_tree_pubsub_groups(
@@ -1385,6 +1388,30 @@ class _GridWiringContext:
     meta_store_path: str
     data_input_path: Path
     handled_nodes: set[str]
+    # Written only once the whole tree is wired: a coupling contract checked
+    # for a later sibling must not fail after an earlier house has already
+    # overwritten the dataset stored under its name.
+    house_datasets: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+def _claim_federate_name(federation, fed_name: str) -> None:
+    """Refuse a federate name that is already registered.
+
+    A second FederateConfig under the same name replaces the first together
+    with every key already wired to it. That is how a nested grid used to
+    lose its MV<->LV wiring, silently, when it was registered once as a
+    discovered root and again as somebody's child. Names that composegen
+    generates make this reachable from a valid-looking config too:
+    ``lv-grid_0`` placed on load 1 runs as ``lv-grid_1``, which is also what a
+    sibling load player declared as ``lv-grid_1`` is called.
+    """
+    if fed_name in federation.federates:
+        raise ValueError(
+            f"Federate '{fed_name}' is already registered; registering it again "
+            f"would drop the HELICS keys wired to it so far. Houses and nested "
+            f"grids are renamed after the load they are placed on, so a "
+            f"sibling whose id matches such a name must be renamed."
+        )
 
 
 def _register_grid_federate(
@@ -1397,15 +1424,7 @@ def _register_grid_federate(
     """
     from cosim_toolbox.sims import FederateConfig
 
-    # A second FederateConfig under the same name replaces the first together
-    # with every key already wired to it. That is how a nested grid used to
-    # lose its MV<->LV wiring, silently, when it was registered once as a
-    # discovered root and again as somebody's child.
-    if fed_name in ctx.federation.federates:
-        raise ValueError(
-            f"Grid federate '{fed_name}' is already registered; registering "
-            f"it again would drop the HELICS keys wired to it so far."
-        )
+    _claim_federate_name(ctx.federation, fed_name)
 
     grid_mapped = map_params_to_class("grid")
 
@@ -1617,6 +1636,7 @@ def _wire_child_instance(
     child_class = child_data.get("class")
     child_mapped = map_params_to_class(child_class)
     child_fed_name = f"{fed_name}.{instance_id}"
+    _claim_federate_name(ctx.federation, child_fed_name)
 
     child_fed = FederateConfig(
         child_fed_name,
@@ -1661,13 +1681,11 @@ def _wire_child_instance(
         child_cmd += f" --timeseries {ts_path}"
 
     if child_class == "house":
-        _store_house_exogenous_data(
-            child_data,
-            child_fed_name,
-            ctx.data_input_path,
-            ctx.use_meta_db,
-            ctx.meta_store_path,
+        dataset = _read_house_exogenous_data(
+            child_data, child_fed_name, ctx.data_input_path
         )
+        if dataset is not None:
+            ctx.house_datasets[child_fed_name] = dataset
 
     child_fed.config("command", child_cmd)
 
@@ -1960,6 +1978,8 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
         _add_generic_tree_pubsub_groups(federation, tree, handled_nodes)
 
         federation.define_io()
+
+        _store_house_datasets(ctx.house_datasets, use_meta_db, meta_store_path)
 
         start_str = _to_iso_wallclock(general_cfg.get("start_time", 0))
         end_str = _to_iso_wallclock(general_cfg.get("end_time", 0))

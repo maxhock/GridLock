@@ -119,8 +119,9 @@ See [Coupling contract](experiment-reference.md#coupling-contract).
 Two children of one grid claim the same load, an LV grid and a load player on the MV grid for instance.
 Overlap checks span every placed class.
 
-**`Grid federate '<name>' is already registered`**
+**`Federate '<name>' is already registered`**
 Two nodes resolved to the same federate name, which would drop the keys wired to the first.
+Houses and nested grids are renamed after the load they sit on (`lv-grid_0` at load 1 runs as `lv-grid_1`), so a sibling declared with that id collides; rename the sibling.
 
 **`No custom_metadata entry '<grid>' in backend '<backend>'`**
 Stage 2 did not run, or did not run for this experiment.

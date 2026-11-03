@@ -26,6 +26,15 @@ from cosim_toolbox.dbms import create_metadata_manager
 
 _LOAD_RE = re.compile(r"/load_(\d+)/")
 
+# pandapower's ZIP split: the share of each load that scales with |V|^2 (Z) or
+# |V| (I) instead of staying constant (P).
+_ZIP_COLUMNS = (
+    "const_z_p_percent",
+    "const_i_p_percent",
+    "const_z_q_percent",
+    "const_i_q_percent",
+)
+
 _LOAD_COLUMN_DEFAULTS: dict[str, Any] = {
     "const_z_p_percent": 0.0,
     "const_i_p_percent": 0.0,
@@ -61,6 +70,13 @@ def _zero_static_loads(net: pp.pandapowerNet) -> None:
     # published value (0.0 would swallow it entirely).
     rescaled = int((net.load["scaling"] != 1.0).sum())
     net.load["scaling"] = 1.0
+    # Same reason for the ZIP split: what arrives is the power actually drawn
+    # at the voltage the federate saw, so a voltage-dependent share would be
+    # applied a second time. For a nested grid that is already resolved
+    # through its own power flow: a 100 % constant-Z coupling load at 0.98 pu
+    # would draw only 0.9604 of what the LV grid reported.
+    voltage_dependent = int((net.load[list(_ZIP_COLUMNS)] != 0.0).any(axis=1).sum())
+    net.load[list(_ZIP_COLUMNS)] = 0.0
     net.load["p_mw"] = 0.0
     net.load["q_mvar"] = 0.0
 
@@ -70,6 +86,12 @@ def _zero_static_loads(net: pp.pandapowerNet) -> None:
         print(
             f"Reset net.load scaling to 1.0 on {rescaled} load(s) whose scaling "
             "differed from 1; this changes what the imported model meant."
+        )
+    if voltage_dependent:
+        print(
+            f"Reset the ZIP split to constant power on {voltage_dependent} "
+            "load(s) with a voltage-dependent share; federates publish the "
+            "power actually drawn."
         )
     print("Reset imported net.load active/reactive powers to zero for co-simulation.")
 
@@ -90,8 +112,9 @@ def sanitize_net_for_power_flow(net: pp.pandapowerNet) -> pp.pandapowerNet:
     """Prepare an imported pandapower net for HELICS-driven co-simulation.
 
     Older or externally generated pandapower JSON payloads may omit ZIP-load
-    columns that newer pandapower releases expect during ``runpp``. Those
-    columns describe the static load model split and can safely default to zero.
+    columns that newer pandapower releases expect during ``runpp``; they are
+    added, and every load's ZIP split is set to constant power, because each
+    published power is already what the load draws at its voltage.
 
     Only HELICS federates may drive the grid, so every imported static power
     is cleared here: the federates write the active/reactive power values for
