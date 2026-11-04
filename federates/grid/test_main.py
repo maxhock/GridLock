@@ -2,6 +2,7 @@
 
 import pandapower as pp
 import pytest
+from pandapower.control import ContinuousTapControl
 
 import main
 from main import (
@@ -388,6 +389,22 @@ def test_upstream_voltage_drives_the_slack_and_the_bus_voltages() -> None:
     assert raised.data_to_federation["publications"][_OWN_V] > (
         nominal.data_to_federation["publications"][_OWN_V] + 0.02
     )
+
+
+@pytest.mark.parametrize("voltage", [0.97, 1.03])
+def test_a_tap_controller_stored_with_the_net_holds_its_bus(voltage: float) -> None:
+    """An MV island under an HV grid keeps its busbar at the OLTC setpoint."""
+    net = _lv_net_behind_trafo()
+    net.trafo.loc[0, ["tap_pos", "tap_min", "tap_max"]] = [0.0, -10.0, 10.0]
+    ContinuousTapControl(net, 0, vm_set_pu=1.0, side="lv", tol=1e-6)
+    net = pp.from_json_string(pp.to_json(net))  # as infdb stores it
+    federate = _coupled_federate(net, voltage=voltage)
+
+    federate.update_internal_model()
+
+    lv_bus = int(net.trafo.at[0, "lv_bus"])
+    assert net.res_bus.at[lv_bus, "vm_pu"] == pytest.approx(1.0, abs=1e-5)
+    assert net.trafo.at[0, "tap_pos"] != 0.0
 
 
 def test_upstream_power_is_the_slack_draw_including_losses() -> None:

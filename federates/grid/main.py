@@ -283,8 +283,12 @@ class GridFederate(Federate):
         # published as if they were current - the co-simulation completes
         # and reports success while every downstream federate reacts to a
         # grid state that was never solved.
+        #
+        # Controllers stored with the net (e.g. a tap changer holding an MV
+        # busbar at its setpoint) run inside the power flow, so a net that
+        # carries them behaves as it does in a standalone pandapower study.
         try:
-            pp.runpp(self.net, numba=True)
+            pp.runpp(self.net, numba=True, run_control=not self.net.controller.empty)
         except Exception as exc:
             p_total_w = float(self.net.load["p_mw"].sum()) * 1e6
             q_total_var = float(self.net.load["q_mvar"].sum()) * 1e6
