@@ -151,13 +151,18 @@ class _GridKeys:
     config to couple a grid to a parent grid. The parent's voltage key also
     contains ``/load_<idx>/``, so the load regex alone cannot tell it from a
     child's power key; this classification is the single source of truth.
+
+    Every grid publishes what its slack draws, root or nested: a nested grid's
+    slack keys are its parent's load inputs, a root's have no subscriber in
+    the federation and exist to be recorded. Only the upstream voltage input
+    is what sets a nested grid apart.
     """
 
     load_inputs: dict[str, tuple[int, str]]  # key -> (load index, net.load column)
     voltage_pubs: dict[str, int]  # key -> load index whose bus voltage it carries
     upstream_voltage: str | None
-    upstream_p: str | None
-    upstream_q: str | None
+    slack_p: str
+    slack_q: str
 
     @property
     def has_upstream(self) -> bool:
@@ -173,31 +178,28 @@ class _GridKeys:
         voltage_inputs = [k for k in input_keys if k.endswith(_VOLTAGE)]
         p_pubs = [k for k in pub_keys if k.endswith(_ACTIVE)]
         q_pubs = [k for k in pub_keys if k.endswith(_REACTIVE)]
-        for what, keys in (
-            ("upstream voltage input", voltage_inputs),
-            ("upstream active_power publication", p_pubs),
-            ("upstream reactive_power publication", q_pubs),
-        ):
-            if len(keys) > 1:
-                raise ValueError(
-                    f"Grid '{federate_name}' has {len(keys)} {what}s, expected at "
-                    f"most one: {keys}"
-                )
-        # A voltage without a reply (or a reply without a voltage) leaves the
-        # parent grid silently without this grid's demand.
-        if bool(voltage_inputs) != bool(p_pubs) or bool(p_pubs) != bool(q_pubs):
+        if len(voltage_inputs) > 1:
             raise ValueError(
-                f"Grid '{federate_name}' has a partial upstream coupling; an "
-                "upstream voltage input, active_power publication and "
-                f"reactive_power publication come together. Got voltage "
-                f"{voltage_inputs}, active_power {p_pubs}, reactive_power {q_pubs}"
+                f"Grid '{federate_name}' has {len(voltage_inputs)} upstream "
+                f"voltage inputs, expected at most one: {voltage_inputs}"
             )
+        # Without its slack keys a nested grid leaves the parent silently
+        # without its demand, and a root grid's draw goes unrecorded.
+        for what, keys in (
+            ("slack active_power publication", p_pubs),
+            ("slack reactive_power publication", q_pubs),
+        ):
+            if len(keys) != 1:
+                raise ValueError(
+                    f"Grid '{federate_name}' has {len(keys)} {what}s, expected "
+                    f"exactly one: {keys}"
+                )
         return cls(
             load_inputs=cls._load_inputs(input_keys),
             voltage_pubs=cls._voltage_pubs(pub_keys),
             upstream_voltage=voltage_inputs[0] if voltage_inputs else None,
-            upstream_p=p_pubs[0] if p_pubs else None,
-            upstream_q=q_pubs[0] if q_pubs else None,
+            slack_p=p_pubs[0],
+            slack_q=q_pubs[0],
         )
 
     @staticmethod
@@ -300,21 +302,18 @@ class GridFederate(Federate):
         )
 
     def _publish(self, keys: _GridKeys) -> None:
-        """Publish per-load bus voltages and, if coupled, the slack's draw."""
+        """Publish per-load bus voltages and the slack's draw."""
         publications = self.data_to_federation["publications"]
         for key, idx in keys.voltage_pubs.items():
             bus = int(self.net.load.at[idx, "bus"])
             publications[key] = float(self.net.res_bus.at[bus, "vm_pu"])
-        if keys.upstream_p is not None and keys.upstream_q is not None:
-            # What the slack delivers is the parent's load: positive when drawn
-            # from the parent (a load's sign convention), and it includes the
-            # trafo and line losses inside this grid, not just the child loads.
-            publications[keys.upstream_p] = (
-                float(self.net.res_ext_grid.p_mw.iat[0]) * 1e6
-            )
-            publications[keys.upstream_q] = (
-                float(self.net.res_ext_grid.q_mvar.iat[0]) * 1e6
-            )
+        # What the slack delivers is the parent's load: positive when drawn
+        # from upstream (a load's sign convention), and it includes the trafo
+        # and line losses inside this grid, not just the child loads. A nested
+        # grid has one ext_grid; a root may have several, which together are
+        # what it draws from upstream.
+        publications[keys.slack_p] = float(self.net.res_ext_grid.p_mw.sum()) * 1e6
+        publications[keys.slack_q] = float(self.net.res_ext_grid.q_mvar.sum()) * 1e6
 
     def on_enter_executing_mode(self) -> None:
         """Run initial power flow at t=0 with load values published by load players."""

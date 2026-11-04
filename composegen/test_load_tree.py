@@ -290,8 +290,12 @@ def test_federate_commands(generated: Generated) -> None:
 def test_grid_keys(generated: Generated) -> None:
     # The grid publishes a voltage for every load, driven or not (load_4 and
     # load_6 belong to the houses, the rest to the load player), and
-    # subscribes to the power of exactly the loads that have a federate.
-    assert generated.pubs("local-grid") == _voltage_keys(range(NUM_LOADS))
+    # subscribes to the power of exactly the loads that have a federate. As a
+    # root it also publishes its slack draw, which nothing subscribes to.
+    assert generated.pubs("local-grid") == _voltage_keys(range(NUM_LOADS)) | {
+        "local-grid/active_power",
+        "local-grid/reactive_power",
+    }
     assert generated.subs("local-grid") == (
         _grid_keys([0, 1, 2, 3, 5, 7], "loadhouse_0")
         | _grid_keys([4], "house_4")
@@ -524,7 +528,12 @@ def test_mv_lv_only_the_root_grid_waits_for_current_time(mv_lv: Generated) -> No
 def test_mv_lv_mv_grid_keys(mv_lv: Generated) -> None:
     # The MV grid publishes a voltage on every load and reads power from what
     # sits on it: its own player on 0, 2, 4 and one LV federate each on 1, 3, 5.
-    assert mv_lv.pubs(MV_ID) == _keys(MV_ID, range(MV_LOADS), ["voltage"])
+    # Like every grid it also publishes its slack draw; as the root it does so
+    # on keys nothing in the federation subscribes to.
+    assert mv_lv.pubs(MV_ID) == _keys(MV_ID, range(MV_LOADS), ["voltage"]) | {
+        f"{MV_ID}/active_power",
+        f"{MV_ID}/reactive_power",
+    }
     assert mv_lv.subs(MV_ID) == (
         _power(f"{MV_ID}.mvload_0", [0, 2, 4])
         | _power(f"{MV_ID}.lv-grid_1", [1])
@@ -640,7 +649,11 @@ def test_mv_lv_mismatched_voltage_base_is_refused(
 def test_mv_lv_voltage_is_labelled_per_unit(mv_lv: Generated) -> None:
     # The grid publishes `res_bus.vm_pu`, so no voltage key may claim volts.
     federation = mv_lv.federates[MV_ID]["HELICS_config"]
-    units = {entry["unit"] for entry in federation["publications"]}
+    units = {
+        entry["unit"]
+        for entry in federation["publications"]
+        if entry["key"].endswith("/voltage")
+    }
     assert units == {"pu"}
 
 

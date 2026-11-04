@@ -36,6 +36,10 @@ def _net_with_two_loads() -> pp.pandapowerNet:
     return net
 
 
+# Every grid publishes its slack draw; a root grid's keys have no "load_" segment.
+_ROOT_SLACK = {"test-grid/active_power": None, "test-grid/reactive_power": None}
+
+
 def test_sanitize_adds_missing_zip_columns() -> None:
     net = _net_with_one_load()
     net.load = net.load.drop(
@@ -172,6 +176,7 @@ def test_update_internal_model_filters_helics_sentinel_values() -> None:
     federate.data_to_federation["publications"] = {
         "test-grid/load_0/voltage": None,
         "test-grid/load_1/voltage": None,
+        **_ROOT_SLACK,
     }
 
     federate.update_internal_model()
@@ -189,6 +194,7 @@ def test_update_internal_model_publishes_voltage_per_load_bus() -> None:
     federate.data_to_federation["publications"] = {
         "test-grid/load_0/voltage": None,
         "test-grid/load_1/voltage": None,
+        **_ROOT_SLACK,
     }
 
     federate.update_internal_model()
@@ -214,6 +220,7 @@ def test_update_internal_model_raises_runtime_error_on_non_convergence() -> None
     pp.create_load(net, bus, p_mw=1.0, q_mvar=0.0)  # no ext_grid: no slack bus
     sanitize_net_for_power_flow(net)
     federate = GridFederate("test-grid", net)
+    federate.data_to_federation["publications"] = dict(_ROOT_SLACK)
 
     with pytest.raises(RuntimeError, match="did not converge"):
         federate.update_internal_model()
@@ -315,8 +322,8 @@ def test_grid_keys_classifies_a_mixed_key_set() -> None:
     )
 
     assert keys.upstream_voltage == _V_IN
-    assert keys.upstream_p == _P_OUT
-    assert keys.upstream_q == _Q_OUT
+    assert keys.slack_p == _P_OUT
+    assert keys.slack_q == _Q_OUT
     assert keys.voltage_pubs == {_OWN_V: 0}
     assert keys.load_inputs == {
         _HOUSE_P: (0, "p_mw"),
@@ -326,12 +333,17 @@ def test_grid_keys_classifies_a_mixed_key_set() -> None:
     assert keys.has_upstream
 
 
-def test_grid_keys_of_a_root_grid_have_no_upstream() -> None:
-    keys = _GridKeys.classify("lv", ["lv/h/load_0/active_power"], ["lv/load_0/voltage"])
+def test_grid_keys_of_a_root_grid_have_slack_keys_but_no_upstream() -> None:
+    keys = _GridKeys.classify(
+        "mv",
+        ["mv/h/load_0/active_power"],
+        ["mv/load_0/voltage", "mv/active_power", "mv/reactive_power"],
+    )
 
     assert not keys.has_upstream
-    assert keys.upstream_p is None
-    assert keys.upstream_q is None
+    assert keys.slack_p == "mv/active_power"
+    assert keys.slack_q == "mv/reactive_power"
+    assert keys.voltage_pubs == {"mv/load_0/voltage": 0}
 
 
 def test_grid_keys_reject_two_upstream_voltage_inputs() -> None:
@@ -343,24 +355,24 @@ def test_grid_keys_reject_two_upstream_voltage_inputs() -> None:
         )
 
 
-def test_grid_keys_reject_two_upstream_power_publications() -> None:
-    with pytest.raises(ValueError, match="active_power publication"):
+def test_grid_keys_reject_two_slack_power_publications() -> None:
+    with pytest.raises(ValueError, match="2 slack active_power publications"):
         _GridKeys.classify("lv", [_V_IN], [_P_OUT, "x/load_5/active_power", _Q_OUT])
 
 
 @pytest.mark.parametrize(
-    "input_keys, pub_keys",
+    "input_keys, pub_keys, missing",
     [
-        ([_V_IN], [_OWN_V]),  # voltage without a reply
-        ([], [_P_OUT, _Q_OUT]),  # reply without a voltage
-        ([_V_IN], [_P_OUT]),  # no reactive_power
-        ([_V_IN], [_Q_OUT]),  # no active_power
+        ([_V_IN], [_OWN_V], "active_power"),  # nested grid without a reply
+        ([], [_OWN_V], "active_power"),  # root grid that would go unrecorded
+        ([_V_IN], [_P_OUT], "reactive_power"),
+        ([], [_Q_OUT], "active_power"),
     ],
 )
-def test_grid_keys_reject_a_partial_upstream(
-    input_keys: list[str], pub_keys: list[str]
+def test_grid_keys_require_both_slack_publications(
+    input_keys: list[str], pub_keys: list[str], missing: str
 ) -> None:
-    with pytest.raises(ValueError, match="lv.*partial upstream"):
+    with pytest.raises(ValueError, match=f"lv.*0 slack {missing} publications"):
         _GridKeys.classify("lv", input_keys, pub_keys)
 
 
@@ -426,13 +438,25 @@ def test_upstream_requires_exactly_one_ext_grid() -> None:
         _coupled_federate(net, voltage=1.0).update_internal_model()
 
 
-def test_root_grid_publishes_no_upstream_power() -> None:
+def test_root_grid_publishes_its_whole_slack_draw() -> None:
     net = _lv_net_behind_trafo()
+    pp.create_ext_grid(net, int(net.trafo.at[0, "hv_bus"]))  # a root may have two
     federate = GridFederate("root", net)
     federate.data_from_federation["inputs"] = {"root/h/load_0/active_power": 1000.0}
-    federate.data_to_federation["publications"] = {"root/load_0/voltage": None}
+    federate.data_to_federation["publications"] = {
+        "root/load_0/voltage": None,
+        "root/active_power": None,
+        "root/reactive_power": None,
+    }
 
     federate.update_internal_model()
 
-    assert list(federate.data_to_federation["publications"]) == ["root/load_0/voltage"]
-    assert net.ext_grid.at[0, "vm_pu"] == 1.0
+    publications = federate.data_to_federation["publications"]
+    assert publications["root/active_power"] == pytest.approx(
+        net.res_ext_grid.p_mw.sum() * 1e6
+    )
+    assert publications["root/reactive_power"] == pytest.approx(
+        net.res_ext_grid.q_mvar.sum() * 1e6
+    )
+    assert publications["root/active_power"] > 1000.0  # load plus losses
+    assert (net.ext_grid.vm_pu == 1.0).all()
