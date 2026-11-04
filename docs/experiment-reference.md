@@ -292,8 +292,13 @@ Federates never build these themselves — they discover them from the CST feder
 | `load_<idx>/active_power` | double, W | whatever is placed on that load | `local-grid/house_4/load_4/active_power` |
 | `load_<idx>/reactive_power` | double, VAr | same | `local-grid/loadhouse_0/load_7/reactive_power` |
 | `load_<idx>/voltage` | double, pu | the grid | `local-grid/load_4/voltage` |
+| `active_power` | double, W | the root grid | `local-grid/active_power` |
+| `reactive_power` | double, VAr | the root grid | `local-grid/reactive_power` |
 | `state` | string, JSON | a house | `local-grid/house_4/state` |
 | `control` | string, JSON | a HEMS | `local-grid/house_4/hems_0/control` |
+
+Every grid publishes what its slack draws from upstream: the sum of `res_ext_grid.p_mw` / `q_mvar`, positive = drawn, losses inside the grid included.
+A nested grid publishes it on its parent's `load_<idx>` keys (see [Coupling contract](#coupling-contract)); the root grid publishes it on the bare keys above, which nothing in the federation subscribes to and which exist to be recorded.
 
 The voltage is the bus voltage in per unit (`res_bus.vm_pu`), not volts.
 The extra keys of an MV/LV coupling are in the table under [Coupling contract](#coupling-contract).

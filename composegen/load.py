@@ -1854,6 +1854,19 @@ def _wire_grid(
     _report_unclaimed_loads(fed_name, all_loads, claimed_load_indices)
 
 
+def _publish_root_slack(federation, fed_name: str) -> None:
+    """Give a root grid the slack keys a nested grid gets from its coupling.
+
+    The grid federate publishes what its slack draws through whichever
+    ``active_power`` / ``reactive_power`` keys it has. A nested grid's are its
+    parent's load inputs (``_wire_nested_grid_instance``); nothing in the
+    federation consumes a root's, so they are source-only and recorded by CST.
+    Without them the HV/MV draw had to be recomputed after a run.
+    """
+    _add_source_only_group(federation, "active_power", fed_name, "double", "W")
+    _add_source_only_group(federation, "reactive_power", fed_name, "double", "VAr")
+
+
 def _root_grid_nodes(tree: Tree) -> list:
     """Grid nodes that are not nested under another grid.
 
@@ -1996,6 +2009,7 @@ def load_tree_cst_outputs(transformed: TransformedConfig) -> None:
             for fed_name in grid_fed_names:
                 # A root grid runs on the net stored under its own name.
                 _wire_grid(ctx, node, fed_name, net_key=fed_name, waits=grid_waits)
+                _publish_root_slack(ctx.federation, fed_name)
 
         # Phase 2: layout-based and already-expanded nodes.
         for node in tree.all_nodes():
