@@ -18,7 +18,12 @@ BROKER_SERVICE = "helics"
 
 
 def _service(
-    name: str, image: str, params: list, cnt: int, depends: Optional[str] = None
+    name: str,
+    image: str,
+    params: list,
+    cnt: int,
+    depends: Optional[str] = None,
+    build: bool = True,
 ) -> str:
     """Builds the "service" part of the docker-compose.yaml
 
@@ -29,19 +34,27 @@ def _service(
         cnt (int): Federate counter, used by the caller to size the broker's
             -f argument. No longer used to assign an address.
         depends (str, optional): Dependency for service being defined. Defaults to None.
+        build (bool, optional): Whether this service carries the image's `build`
+            section. Only one service per image should; see define_yaml.
 
     Returns:
         str: Docker-compose service block as a string.
     """
     _svc = "  " + name + ":\n"
     _svc += '    image: "' + image + '"\n'
-    _svc += "    build:\n"
-    if image in ["house", "controller"]:
-        _svc += "      context: ..\n"
-        _svc += "      dockerfile: federates/" + image + "/Dockerfile\n"
+    if build:
+        _svc += "    build:\n"
+        if image in ["house", "controller"]:
+            _svc += "      context: ..\n"
+            _svc += "      dockerfile: federates/" + image + "/Dockerfile\n"
+        else:
+            _svc += "      context: ../federates/" + image + "\n"
+            _svc += "      dockerfile: Dockerfile\n"
     else:
-        _svc += "      context: ../federates/" + image + "\n"
-        _svc += "      dockerfile: Dockerfile\n"
+        # The service that carries the build section builds the image; this
+        # one only runs it. Without "never", a missing local image would send
+        # Compose to pull e.g. "grid" from Docker Hub instead of failing.
+        _svc += "    pull_policy: never\n"
     if params[0] != "":
         _svc += "    environment:\n"
         _svc += params[0]
@@ -136,6 +149,23 @@ def define_yaml(
         '      CST_USE_META_DB: "' + use_meta_db + '"\n'
         '      CST_USE_DATA_DB: "' + use_data_db + '"\n'
     )
+    # Only the first service of each image carries its build section. Compose
+    # builds once per service that has one, so with a build on every service the
+    # ÜZW Nord federation (194 services, 3 images) started 194 parallel builds of
+    # the same three images, and BuildKit lost one of them ("failed to receive
+    # status: rpc error: code = NotFound desc = no such job") before any federate
+    # ran. 59 services still got through.
+    #
+    # Interim: long term the federate images are meant to be built once, pushed
+    # to a registry and pulled, which would replace local builds altogether.
+    built_images: set[str] = set()
+
+    def claims_build(image: str) -> bool:
+        if image in built_images:
+            return False
+        built_images.add(image)
+        return True
+
     # Add helics broker federate
     cnt = 2
     yaml_str = ""
@@ -148,7 +178,9 @@ def define_yaml(
             if fed_def[name]["prefix"] != "":
                 commandline = f"{fed_def[name]['prefix']} && " + commandline
         params = [cosim_env, commandline]
-        yaml_str += _service(name, image, params, cnt, depends="helics")
+        yaml_str += _service(
+            name, image, params, cnt, depends="helics", build=claims_build(image)
+        )
         if "logger" in fed_def[name]:
             if fed_def[name]["logger"]:
                 add_logger = True
@@ -163,7 +195,14 @@ def define_yaml(
             f"python3 -c 'import cosim_toolbox.sims.federateLogger as datalog; "
             f'datalog.main(\\"FederateLogger\\", \\"{scenario_name}\\", \\"{use_meta_db}\\", \\"{use_data_db}\\")\'',
         ]
-        yaml_str += _service("cst_logger", "broker", params, cnt, depends="helics")
+        yaml_str += _service(
+            "cst_logger",
+            "broker",
+            params,
+            cnt,
+            depends="helics",
+            build=claims_build("broker"),
+        )
 
     # DockerRunner._network() is deliberately not appended: it emits a
     # cst_net with a hard-coded 10.5.0.0/16 subnet and gateway. Without it
@@ -184,7 +223,11 @@ def define_yaml(
         f"--global_disconnect",
     ]
     yaml_str = (
-        "services:\n" + _service("helics", "broker", params, 2, depends=None) + yaml_str
+        "services:\n"
+        + _service(
+            "helics", "broker", params, 2, depends=None, build=claims_build("broker")
+        )
+        + yaml_str
     )
 
     Path("./generated").mkdir(parents=True, exist_ok=True)

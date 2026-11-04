@@ -24,7 +24,8 @@ from load import (
     create_timeseries_tables,
     map_params_to_class,
 )
-from monkeypatch import _federate_docker, _service
+import monkeypatch as compose_patch
+from monkeypatch import _federate_docker, _service, define_yaml
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +791,67 @@ def test_service_omits_depends_on_when_none() -> None:
     svc = _service("helics", "broker", ["", "helics_broker"], 2, depends=None)
 
     assert "depends_on" not in svc
+
+
+def test_service_without_build_only_runs_the_image() -> None:
+    svc = _service("lv-grid_3", "grid", ["", "python3 main.py"], 4, build=False)
+
+    assert '    image: "grid"\n' in svc
+    assert "build:" not in svc
+    assert "context:" not in svc
+    assert "    pull_policy: never\n" in svc
+
+
+class _FakeMetadataManager:
+    """Serves one scenario and its federation, as CST's metadata manager would."""
+
+    def __init__(self, federates: dict[str, dict[str, str]]) -> None:
+        self.federates = federates
+
+    def __enter__(self) -> "_FakeMetadataManager":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read_scenario(self, name: str) -> dict[str, str]:
+        return {"analysis": "Analysis", "federation": "Federation"}
+
+    def read_federation(self, name: str) -> dict[str, dict]:
+        return {"federation": self.federates}
+
+
+def test_define_yaml_builds_each_image_once(monkeypatch, tmp_path) -> None:
+    # Compose builds once per service that has a build section: with one on
+    # every service, a large federation started one build per federate of the
+    # same few images and BuildKit lost jobs.
+    federates = {
+        "mv": {"image": "grid", "command": "python3 main.py"},
+        "mv.lv_1": {"image": "grid", "command": "python3 main.py"},
+        "mv.lv_1.loads": {"image": "house_player", "command": "python3 player.py"},
+        "mv.lv_2": {"image": "grid", "command": "python3 main.py"},
+        "mv.lv_2.loads": {"image": "house_player", "command": "python3 player.py"},
+    }
+    monkeypatch.setattr(
+        compose_patch,
+        "create_metadata_manager",
+        lambda backend: _FakeMetadataManager(federates),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    define_yaml("Scenario", use_meta_db="json")
+
+    services = yaml.safe_load(
+        (tmp_path / "generated" / "docker-compose.yaml").read_text()
+    )["services"]
+    assert list(services) == ["helics", *federates]
+    builders = {name for name, svc in services.items() if "build" in svc}
+    assert builders == {"helics", "mv", "mv.lv_1.loads"}
+    for name, svc in services.items():
+        if name not in builders:
+            assert svc["pull_policy"] == "never"
+    built = [services[name]["image"] for name in builders]
+    assert sorted(built) == sorted(set(built))
 
 
 def test_federate_docker_points_broker_address_at_compose_service_name() -> None:
