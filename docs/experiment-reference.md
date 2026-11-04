@@ -128,6 +128,9 @@ When a grid federate loads its net, it clears everything that is not driven by a
 So only federates drive the grid, and the layout's own demand and generation never count.
 This is also why an unclaimed load index is harmless.
 
+Pandapower controllers stored with the net (`net.controller`, e.g. a `ContinuousTapControl` that holds an MV busbar at its setpoint) are kept, and run inside every power flow (`runpp(run_control=True)`).
+A `.json` layout keeps them; build the net in pandapower and save it with `pp.to_json`.
+
 ### Nested grids
 
 A grid may sit under another grid (an LV feeder on an MV net). It attaches to the parent's loads, so it takes `placement` like the other load-placed classes: an int, a non-empty list of ints (each an int >= 0, no duplicates) or `"fill"`. The values are pandapower load indices of the **parent** grid.
