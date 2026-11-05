@@ -6,19 +6,24 @@ HELICS co-simulation loop exchanging load power / bus voltage data.
 Usage:
     python main.py --scenario TestGridScenario --federate_name lv-grid_91301_0
         --net_key lv-grid_91301_0
+
+Repeat ``--federate_name``/``--net_key`` pairs to run several grids in this one
+process, one thread each; composegen does that for the grids under one parent.
 """
 
 import argparse
 import os
 import re
-from collections.abc import Iterable
+import threading
+import traceback
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, cast
 
 import pandapower as pp
 from cosim_toolbox.sims import Federate
 from cosim_toolbox.dbms import create_metadata_manager
-
 
 # ---------------------------------------------------------------------------
 # GridFederate
@@ -343,19 +348,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--federate_name",
         type=str,
+        action="append",
         required=True,
-        help="Federate name matching meta_store entry (e.g. lv-grid_91301_0)",
+        help=(
+            "Federate name matching meta_store entry (e.g. lv-grid_91301_0); "
+            "repeat it to run several grids"
+        ),
     )
     parser.add_argument(
         "--net_key",
         type=str,
+        action="append",
         required=True,
         help=(
             "custom_metadata document holding this grid's pandapower net, "
-            "written by the infdb stage"
+            "written by the infdb stage; one per --federate_name, in order"
         ),
     )
     args, _ = parser.parse_known_args()
+    if len(args.federate_name) != len(args.net_key):
+        parser.error(
+            f"got {len(args.federate_name)} --federate_name but "
+            f"{len(args.net_key)} --net_key; they pair up in order"
+        )
     return args
 
 
@@ -424,30 +439,67 @@ def run_grid_federate(
     )
 
 
+def _exit_on_federate_error(args: threading.ExceptHookArgs) -> None:
+    """End the whole process when one federate thread fails.
+
+    Its siblings would otherwise block forever on a time grant that waits for
+    the dead federate, and the container would hang instead of failing the run.
+    """
+    print(f"Federate thread '{args.thread.name if args.thread else '?'}' failed:")
+    traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback)
+    os._exit(1)
+
+
+def run_concurrently(runs: dict[str, Callable[[], None]]) -> None:
+    """Run each federate on a thread of its own, named after it, and wait for all.
+
+    One process per grid loaded pandapower, numba and CST once per grid,
+    about 166 MB each: the 256 grids of the full ÜZW federation needed ~42 GB
+    before simulating anything. Threads share those imports. HELICS releases
+    the GIL while a federate waits for its time grant, so the others proceed.
+    """
+    threading.excepthook = _exit_on_federate_error
+    threads = [threading.Thread(target=run, name=name) for name, run in runs.items()]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
 def main(
     scenario_name: str | None = None,
-    federate_name: str | None = None,
-    net_key: str | None = None,
+    grids: dict[str, str] | None = None,
 ) -> None:
-    """Fetch this grid's net and run it, taking the names from the CLI unless given."""
+    """Fetch each grid's net and run them all, taking the names from the CLI unless given.
+
+    ``grids`` maps each federate name to the net key it runs on.
+    """
     if scenario_name is None:
         args = parse_args()
         scenario_name = args.scenario
-        federate_name = args.federate_name
-        net_key = args.net_key
+        grids = dict(zip(args.federate_name, args.net_key))
 
-    if scenario_name is None or federate_name is None or net_key is None:
-        raise ValueError("scenario_name, federate_name and net_key are required")
+    if scenario_name is None or not grids:
+        raise ValueError("scenario_name and at least one grid are required")
 
     use_meta_db, use_data_db = get_db_backends_from_env()
 
-    net = load_net_from_metadata(net_key, use_meta_db)
-    run_grid_federate(
-        federate_name,
-        net,
-        scenario_name,
-        use_meta_db,
-        use_data_db,
+    nets = {
+        federate_name: load_net_from_metadata(net_key, use_meta_db)
+        for federate_name, net_key in grids.items()
+    }
+    run_concurrently(
+        {
+            federate_name: partial(
+                run_grid_federate,
+                federate_name,
+                net,
+                scenario_name,
+                use_meta_db,
+                use_data_db,
+            )
+            for federate_name, net in nets.items()
+        }
     )
 
 

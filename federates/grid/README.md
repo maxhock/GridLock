@@ -82,3 +82,7 @@ CST_USE_META_DB=json python3 main.py --scenario <name>_<timestamp> --federate_na
 
 The metadata store has to already contain this grid's net — run stages 2 and 3 first.
 `.vscode/launch.json` has a working argument set.
+
+Repeat the `--federate_name`/`--net_key` pair to run several grids in one process, one thread each.
+composegen does this for every set of grids under the same parent, which share one container: a separate process per grid loaded pandapower, numba and CST again for each, about 166 MB per grid before it solved anything.
+If one grid fails, the process exits at once, since its siblings would otherwise wait forever for its time grant.
