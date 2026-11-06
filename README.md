@@ -3,14 +3,15 @@
 A containerized, config-driven [HELICS](https://docs.helics.org/) co-simulation platform for power grids and households to research the effects of Home Energy Management Systems (HEMS) on the grid.
 
 One experiment YAML describes a grid and everything placed on it.
-A generator container turns that description into a complete federation — HELICS publications and subscriptions, CoSim Toolbox metadata, and a `docker-compose.yaml` — and the simulation runs as a set of containers, one per federate.
+A generator container turns that description into a complete federation — HELICS publications and subscriptions, CoSim Toolbox metadata, and a `docker-compose.yaml` — and the simulation runs as a set of containers: the grids and load players under one parent share one, every other federate gets its own.
 Nothing about the topology is wired by hand, so an experiment is reproducible from its config file and the commit it ran at.
 
 ## Concept
 
 Each federate class is a separate Docker image, and federates communicate **only** through HELICS publications and subscriptions.
 Class-specific behaviour lives inside the image; experiment-specific configuration is generated.
-A run resolves its grid first (from a local pandapower workbook or from an external InfDB instance by postcode), then generates the federation, then simulates.
+A run resolves its grid first (from a local pandapower workbook or JSON file, or from an external InfDB instance by postcode), then generates the federation, then simulates.
+Grids can be coupled: an MV grid can carry LV grids on its loads, each running as its own federate and exchanging power and voltage with the MV grid through HELICS (see [`docs/experiment-reference.md`](docs/experiment-reference.md#nested-grids)).
 
 Results are written to a time-series database and tagged with a timestamped scenario name; the git commit and the full experiment YAML that produced them are stored with that scenario in the metadata database.
 
@@ -18,7 +19,7 @@ Results are written to a time-series database and tagged with a timestamped scen
 
 | Class | Image | Role |
 |---|---|---|
-| `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages |
+| `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages; may itself hang off a load of a parent grid (MV/LV) |
 | `load` | [`federates/house_player`](federates/house_player) | replays an electrical load profile from CSV onto one or more grid loads |
 | `house` | [`federates/house`](federates/house) | simulated building — thermal model, heat pump, AC, battery, PV (via [EnergySim](https://github.com/Hosseini97/EnergySim)) |
 | `hems` / `controller` | [`federates/controller`](federates/controller) | model-predictive home energy management; commands a house's battery |
@@ -64,6 +65,7 @@ cp config/preflight.env.example config/preflight.env   # then fill in your value
 
 `config/experiment-local-grid.yml` runs entirely from a local grid workbook, so it works without InfDB access.
 `config/experiment-LV.yml` (the default when you pass no argument) resolves its grid from InfDB by postcode.
+`config/experiment-MV-LV.yml` runs a synthetic MV grid with LV grids on its loads, also without InfDB access.
 
 Useful flags:
 
@@ -88,7 +90,7 @@ docker compose -f generated/docker-compose.yaml down --remove-orphans
 1. **Databases** — start TimescaleDB and MongoDB, the two CST stores.
 2. **infdb** — resolve the experiment's grid, from InfDB or a local workbook, and write the pandapower net into the metadata store.
 3. **composegen** — read the experiment YAML, place every federate on the grid, wire the HELICS keys, and write the CST federation plus `generated/docker-compose.yaml`.
-4. **Simulation** — bring up the generated compose file: a broker and one container per federate. Any federate exiting non-zero fails the whole run.
+4. **Simulation** — bring up the generated compose file: a broker plus the federate containers. Grids under the same parent run as threads of one process in one container, and so do load players; houses and HEMS still get one container each. Any federate exiting non-zero fails the whole run.
 
 ### Inside the generator
 
@@ -176,7 +178,8 @@ federation:
 
 `placement` accepts a load index, a list of them, or `"fill"`.
 A house is expanded into one federate per load index it occupies; a load player stays a single federate covering all of its indices.
-Input CSVs and grid workbooks live in `data/input/`.
+A grid nested under another grid takes a `placement` of the parent's load indices too and is cloned like a house, subtree included; its LV slack must have the voltage base of the MV bus it hangs off.
+Input CSVs and grid layouts (`.xlsx` or pandapower `.json`) live in `data/input/`.
 Every timeseries CSV must cover the full simulated duration — composegen checks this up front and refuses to start otherwise, rather than letting a federate replay its last known value once the data runs out.
 
 > **The physical parameters above do not reach a federate yet.**
@@ -192,6 +195,9 @@ Every timeseries CSV must cover the full simulated duration — composegen check
 ```bash
 python tools/yaml_graph_tui.py config/experiment-MV-LV.yml
 ```
+
+`tools/make_lv_variant.py` re-rates a Kerber LV layout to another slack voltage (an LV grid attached to an MV load must share its voltage base), and `tools/make_synthetic_mv.py` rebuilds the committed synthetic 20 kV MV net `data/input/mv_synthetic_20kv.json`.
+Real (DSO) grids stay in the git-ignored `data/input/private/` and `config/private/`, because this repository is public.
 
 ## Results
 

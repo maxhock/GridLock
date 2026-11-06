@@ -3,7 +3,7 @@
 Everything an experiment YAML can say, what the input CSVs have to contain, and what a run writes.
 [`README.md`](../README.md) covers the concept and the quick start — this is the detail you need once you write your own experiment rather than copy one.
 
-Two experiments in `config/` are known to work and are the best starting points: `experiment-local-grid.yml` (local grid workbook, no InfDB access needed) and `experiment-LV.yml` (grid resolved from InfDB by postcode).
+Three experiments in `config/` are the best starting points: `experiment-local-grid.yml` (local grid workbook, no InfDB access needed), `experiment-LV.yml` (grid resolved from InfDB by postcode) and `experiment-MV-LV.yml` (an MV grid with LV grids on its loads, see [Nested grids](#nested-grids); no InfDB access needed).
 
 > **Physical parameters are not applied yet.**
 > `model`, `capacity`, `power`, `max_production`, `control_strategy` and `accessible` are checked for presence and then dropped — no federate reads them.
@@ -16,21 +16,35 @@ Two experiments in `config/` are known to work and are the best starting points:
 | Key | Required | Default | Meaning |
 |---|---|---|---|
 | `name` | no | `GridLock` | Names the run. The scenario is `<name>_<YYYYMMDD_HHMMSS>` and the results schema is `"<name>Analysis"`. |
-| `start_time` | no | `0` | Seconds, converted to a wall clock offset from `2023-01-01T00:00:00`. |
-| `end_time` | **yes** | — | Seconds after `start_time`. |
+| `start_time` | no | `0` | When the run starts: seconds after `2023-01-01T00:00:00`, or an ISO 8601 time. |
+| `end_time` | one of these two | — | When the run ends, **absolute** like `start_time` — not a length. |
+| `duration` | one of these two | — | Run length in seconds. |
 | `time_step` | no | `1` | Simulation period in **whole** seconds, shared by every federate. |
 | `use_meta_db` | no | `json` | `mongo`, or `json` to write metadata into `generated/` instead. |
 | `use_data_db` | no | `postgres` | Where the timeseries go. |
 | `meta_store_path` | no | `generated` | Directory the `json` metadata backend writes into. |
 
-Give both times as numbers.
-A string is passed through composegen unchanged and has to be exactly `YYYY-MM-DDTHH:MM:SS`; any other ISO 8601 form — a bare date, or an offset like `+01:00` — is accepted here and then kills every federate at startup.
-It also switches off the coverage check below.
+Give at most two of `start_time`, `end_time` and `duration`; any two fix the third (`run_window.resolve_run_window`):
+
+| Given | Run |
+|---|---|
+| `duration` | 0 to `duration` |
+| `end_time` | 0 to `end_time` |
+| `start_time` + `end_time` | as given; the duration is their difference |
+| `start_time` + `duration` | `start_time` to `start_time + duration` |
+| `end_time` + `duration` | `end_time - duration` to `end_time` |
+
+All three together are refused, even when they agree: a third value can only repeat the other two or contradict them.
+`start_time: 1800, end_time: 7200` is a 5400 s run from 00:30 to 02:00.
+
+Times may be numbers or ISO 8601 times, quoted or not, mixed freely.
+They are normalised to `YYYY-MM-DDTHH:MM:SS`, so a bare date works; one with a UTC offset (`+01:00`) or a fraction of a second is refused.
+The run has to end after it starts.
+
+Simulation time starts at 0 whatever `start_time` is, and the CSVs are read from their first row, so `start_time` shifts only the wall clock the run is stamped with.
 
 `time_step` has to be a whole number of seconds.
 CST type-checks the HELICS `period` against an integer default, so a fractional step is refused up front rather than failing deep inside composegen.
-
-`duration:` appears in both shipped experiment files and is read by nothing — the run length comes from `end_time` alone.
 
 ## `federation:`
 
@@ -54,7 +68,7 @@ federation:
 
 | `class` | Image | Required `config` | Optional |
 |---|---|---|---|
-| `grid` | `federates/grid` | exactly one of `layout` or `location` | — |
+| `grid` | `federates/grid` | exactly one of `layout` or `location`; nested under another grid: a `layout` and a `placement` | — |
 | `load` | `federates/house_player` | `electrical_load` (a `.csv`), `placement` | — |
 | `house` | `federates/house` | `exogenous_data` (a `.csv`), `model`†, `placement` | — |
 | `pv` | `federates/house` | `capacity`†, `max_production`† | — |
@@ -78,8 +92,16 @@ Naming both, or neither, is an error.
 
 ```yaml
 config:
-  layout: "kerber_landnetz_freileitung_1.xlsx"   # a pandapower workbook in data/input/
+  layout: "kerber_landnetz_freileitung_1.xlsx"   # a pandapower net in data/input/
 ```
+
+A `layout` is a pandapower net as a `.xlsx` workbook (what `pandapower.from_excel` reads, and what `tools/pandapower2xlsx.py` writes) or a `.json` file (pandapower's own JSON, `pandapower.to_json`).
+The path is relative to `data/input/` and may include a subdirectory.
+composegen checks the suffix and that the file exists before anything runs.
+
+The repository is public, so real DSO grids do not belong in it.
+Keep them in `data/input/private/` and the experiments that use them in `config/private/` (both git-ignored), and name them as `layout: "private/<file>.json"`.
+The committed stand-ins are `mv_synthetic_20kv.json` (a synthetic 20 kV MV net) and the `*_20kv.xlsx` Kerber variants (see [What is in `data/input/` today](#what-is-in-datainput-today)).
 
 ```yaml
 config:
@@ -93,9 +115,100 @@ Every net a location query resolves to becomes its own grid federate, named `<id
 A `plz`-only query therefore expands into one federate per grid InfDB holds for that postcode.
 A layout grid keeps the node's `id` as its federate name.
 
+The infdb stage resolves every `class: grid` node in the tree, not only the root, and stores each net under the node's dotted tree id (`mv-grid_0`, `mv-grid_0.lv-grid_0`).
+A root grid's net is read under its federate name, which is the same string for a layout grid.
+
+#### Grid import
+
+When a grid federate loads its net, it clears everything that is not driven by a federate:
+
+- every static load is zeroed (`p_mw`, `q_mvar`), and every load's `scaling` is reset to 1.0 — DSO exports use values such as 0, 0.3 and 0.7, and a federate publishes the actual power of its load;
+- every static `sgen` is zeroed (`p_mw`, `q_mvar`), with a warning that names how many and how many MW of nominal feed-in were removed.
+
+So only federates drive the grid, and the layout's own demand and generation never count.
+This is also why an unclaimed load index is harmless.
+
+Pandapower controllers stored with the net (`net.controller`, e.g. a `ContinuousTapControl` that holds an MV busbar at its setpoint) are kept, and run inside every power flow (`runpp(run_control=True)`).
+A `.json` layout keeps them; build the net in pandapower and save it with `pp.to_json`.
+
+### Nested grids
+
+A grid may sit under another grid (an LV feeder on an MV net). It attaches to the parent's loads, so it takes `placement` like the other load-placed classes: an int, a non-empty list of ints (each an int >= 0, no duplicates) or `"fill"`. The values are pandapower load indices of the **parent** grid.
+These are rejected before anything is written:
+
+- a nested grid without `placement`;
+- `placement` on the root grid, which has nothing to attach to;
+- a nested grid with `location` — it must use a `layout` for now, because an InfDB query returns an unknown number of LV feeders with no mapping onto the parent's loads (auto-placement is a later phase, issue #65);
+- a grid under any non-grid node, which would never be wired.
+
+A nested grid takes part in the parent's `fill`, overlap checks and unclaimed-load report exactly like a `house` or a `load` does.
+At most one child of the parent may use `"fill"`, whatever its class; two children claiming the same load index is an error.
+
+**Clones.** Like a house, a nested grid stands in for one connection point: an LV net has one slack bus, so it can hang off exactly one parent load.
+A grid placed on several loads (a list, or `"fill"`) is therefore cloned once per index, and every clone is named after the load it sits on: `lv-grid_0` at `placement: [1, 3]` becomes `mv-grid_0.lv-grid_1` and `mv-grid_0.lv-grid_3`.
+The whole subtree under the grid is replicated for every clone, with the clone's name as prefix — `mv-grid_0.lv-grid_3.house_4`, `mv-grid_0.lv-grid_3.house_4.hems_0` — and each clone's houses are split per LV load as in any other grid.
+The clones share one net: it is read from the template node's dotted tree id (`mv-grid_0.lv-grid_0`), and every clone's command points at it with `--net_key`, so the federate name and the net key differ.
+The same goes for the subtree's data: a house's `exogenous_data` is stored once per clone.
+
+A grid that only exists once (a single feeder, with its own layout) is simply its own node in the tree with its own `layout` and an int `placement`.
+It is still named after its load, so `lv-feeder_0` at `placement: 5` runs as `mv-grid_0.lv-feeder_5`, and its net is stored under `mv-grid_0.lv-feeder_0`.
+
+Several nested grids under one parent can have different layouts; each template node is its own net.
+
+**One file per load.** A grid with many different sub-grids, such as an MV net with an LV area on each substation, does not have to list them.
+A nested grid with `placement: "filename"` and no `layout` of its own takes every sub-grid from the folder named after its parent's layout: the sub-grids of `grids/mv.json` are `grids/mv/load_<idx>.json`, and each one hangs on the parent's load `<idx>`.
+
+```yaml
+federation:
+  id: mv
+  class: grid
+  config: {layout: grids/mv.json}
+  sub_federates:
+    - id: lv_0
+      class: grid
+      config: {placement: filename}
+      sub_federates:
+        - id: houses_0
+          class: load
+          config: {placement: fill, electrical_load: profile.csv}
+```
+
+With `grids/mv/load_3.json` and `grids/mv/load_12.json` this is the same federation as writing two grid nodes `lv_3` and `lv_12`, each with its own file as `layout` and its index as `placement`, and each with its own copy of the node's `sub_federates`.
+Composegen and the infdb stage both expand it this way (`composegen/grid_files.py`) before anything else reads the tree, so every check above applies to the expanded grids.
+The same works one level down: a `placement: "filename"` grid under `lv_0` reads `grids/mv/load_3/`, `grids/mv/load_12/` and so on, one folder per expanded grid.
+Folders in the directory are left alone, since they hold the next level.
+Any other file in it, a zero-padded index such as `load_05.json`, a missing or empty folder, and a parent without a local `layout` are errors.
+The ids come from the load indices, not from the files' contents, so a configuration written this way names no substation.
+
+`config/experiment-MV-LV.yml` is the MV/LV reference: a synthetic MV net as the root, an LV template placed on a list of MV loads (so it is cloned, subtree included), a unique LV feeder on another load, and an MV load player with `placement: "fill"` for the loads nobody else claims.
+
+#### Coupling contract
+
+The LV grid's slack bus stands in for the MV load, and the two grids exchange power and voltage through HELICS like a house does.
+composegen reads the LV net before wiring and refuses to continue unless:
+
+- the LV net has **exactly one `ext_grid`** — the parent's voltage drives that one slack, and there is no way to say which of several it means;
+- the `vn_kv` of the MV bus the load sits on **equals** the `vn_kv` of the bus the LV `ext_grid` sits on (relative tolerance 1e-6), checked against each load a clone is placed on.
+
+The voltage base has to match because voltage travels as per unit (`res_bus.vm_pu` out, `ext_grid.vm_pu` in).
+An LV slack rated for 10 kV under a 20 kV MV bus would silently scale every LV voltage by two.
+The stock Kerber layouts have a 10 kV slack, so re-rate them to the MV voltage with `tools/make_lv_variant.py` (see [Tools](#tools)); the committed `*_20kv.xlsx` files are the result for a 20 kV MV net.
+
+The keys a coupling adds, for a clone `mv-grid_0.lv-grid_3` on MV load 3:
+
+| Key | Type | Direction | Meaning |
+|---|---|---|---|
+| `mv-grid_0/lv-grid_3/load_3/active_power` | double, W | LV → MV | the LV slack's `res_ext_grid.p_mw`, positive = drawn from the MV grid; includes the losses inside the LV grid |
+| `mv-grid_0/lv-grid_3/load_3/reactive_power` | double, VAr | LV → MV | the LV slack's `res_ext_grid.q_mvar`, same sign and losses |
+| `mv-grid_0/load_3/voltage` | double, pu | MV → LV | the MV bus voltage at load 3, written to the LV `ext_grid.vm_pu` before each solve |
+
+The MV grid applies the LV power to load 3 as it would a house's, and the LV grid keeps publishing `mv-grid_0/lv-grid_3/load_<n>/voltage` to its own children.
+Until the MV grid has published, the LV net keeps its own slack setpoint.
+
 ### Placement
 
-`placement` is a pandapower **load index**, a list of them, or `"fill"`, and it is required for everything that moves power: `load`, `house`, `pv`, `battery`.
+`placement` is a pandapower **load index**, a list of them, or `"fill"`, and it is required for everything that moves power: `load`, `house`, `pv`, `battery`, and a grid nested under another grid.
+A nested grid can also use `"filename"`, which takes its sub-grids from files named after the parent's loads (see [Nested grids](#nested-grids)).
 
 The grid federate identifies incoming power purely by the `load_<idx>` segment of the HELICS key.
 A federate wired onto a bare `active_power` key is silently dropped from the power flow, which is why composegen refuses to guess here.
@@ -105,6 +218,7 @@ A federate wired onto a bare `active_power` key is silently dropped from the pow
 - Load indices left unclaimed are legal — the grid zeroes every static load at import, so they sit at 0 W — but composegen prints them, because an unclaimed index looks exactly like a typo.
 
 A **house** simulates one building, so `placement: [4, 6]` becomes two independent federates named after the load each drives: `house_4` and `house_6`, not `house_0_*`.
+A **nested grid** is cloned the same way, with its subtree (see [Nested grids](#nested-grids)).
 A **load player** replays one profile across all of its indices and stays a single federate.
 
 ## Input data
@@ -150,13 +264,9 @@ The house resamples the dataset onto the federation's `time_step` at startup —
 Every `electrical_load` and `exogenous_data` CSV has to cover the whole run, and composegen checks this before anything starts.
 Without the check a load player silently repeats its last known value once the data runs out, producing a flat load that still reports success.
 
-A house with a HEMS needs more than the run itself: at the last step the MPC still asks for a full forecast window, so it needs a further 24 steps (`transform.MPC_FORECAST_HORIZON_STEPS`) beyond `end_time`.
+The run length checked is the resolved duration, however the times were given.
+A house with a HEMS needs more than the run itself: at the last step the MPC still asks for a full forecast window, so it needs a further 24 steps (`transform.MPC_FORECAST_HORIZON_STEPS`) beyond the end of the run.
 A CSV longer than needed is fine.
-
-Two gaps in that check are worth knowing about, both tracked as N4 and N5 in issue #56:
-
-- It does not run at all if `start_time` or `end_time` is a string, so an ISO 8601 time means no CSV is validated.
-- It sizes the run as `end_time - start_time`, while a numeric `end_time` is a duration *from* `start_time`. With a non-zero `start_time` it asks for too little, and a CSV that passes can still run out mid-run. Both shipped experiments use `start_time: 0`, where the two agree.
 
 ### What is in `data/input/` today
 
@@ -164,9 +274,32 @@ Two gaps in that check are worth knowing about, both tracked as N4 and N5 in iss
 |---|---|
 | `sample_data.csv` | house `exogenous_data`; the working example |
 | `sample_house.csv` | load player `electrical_load`; the working example |
-| `kerber_landnetz_freileitung_1.xlsx`, `kerber_landnetz_kabel_1.xlsx` | grid `layout`, exported by `tools/pandapower2xlsx.py` |
+| `kerber_landnetz_freileitung_1.xlsx`, `kerber_landnetz_kabel_1.xlsx` | grid `layout`, exported by `tools/pandapower2xlsx.py`; LV nets with a 10 kV slack |
+| `kerber_landnetz_freileitung_1_20kv.xlsx`, `kerber_landnetz_kabel_1_20kv.xlsx` | the same nets re-rated to a 20 kV slack by `tools/make_lv_variant.py`; the LV grids for a 20 kV MV net |
+| `mv_synthetic_20kv.json` | grid `layout`: a synthetic 20 kV MV net (110 kV infeed, HV/MV trafo, two radial feeders, 6 loads) built by `tools/make_synthetic_mv.py`; the committed stand-in for a real MV net |
 | `heeten_building_df14.csv`, `ee_day_ahead_prices_2018_till_2020.csv` | measured inputs to `tools/sample_data_generator.py`, not usable directly |
 | `building_timeseries.csv`, `h25_profile_2025_power.csv` | orphans — the schema of neither matches what a house or a load player reads |
+
+## Tools
+
+| Script | Purpose |
+|---|---|
+| `tools/make_lv_variant.py` | re-rates an LV layout to another slack voltage so it can hang off an MV load: `--input`, `--output` (`.xlsx` or `.json`) and `--slack-kv`. Buses, lines, loads and indices stay as they are; the slack bus `vn_kv` and the trafo's HV winding change. It runs a power-flow smoke test and says whether the result attaches to every load of the synthetic MV net. |
+| `tools/make_synthetic_mv.py` | rebuilds `data/input/mv_synthetic_20kv.json` and checks it against the committed 20 kV Kerber variant |
+| `tools/grid_contract.py` | the coupling check the two scripts use; composegen carries its own copy of the same rules |
+
+The scripts need pandapower; `tools/make_synthetic_mv.py` has the `docker run` line for the pinned image.
+
+## Timing
+
+Every federate shares one period and no offset, so a simulation step has the same `sim_time` everywhere.
+Within a step, HELICS allows exactly one federate to wait until all the others have finished (`wait_for_current_time_update`); composegen gives that slot to the **root grid**, so it solves from the loads published in the same step.
+Nested grids never get it, and with several root grids (a `plz`-only query can resolve to many) nobody does, so every root grid solves on the previous step's loads.
+
+A nested grid therefore applies its own children's loads one step late and takes its parent's voltage from the previous step.
+That adds up to **one step of lag per grid level below the root**: a house on an LV grid reaches the MV power flow one step late, a house on a grid two levels down two steps late.
+Loads placed directly on the root have no lag.
+Closing the loop within a step needs HELICS iteration, which is not implemented (a later phase of issue #65).
 
 ## What a run writes
 
@@ -176,7 +309,7 @@ This is what to expect *inside* them.
 ### Federate names
 
 A federate is named by its dotted path from the root: `local-grid`, `local-grid.loadhouse_0`, `local-grid.house_4`, `local-grid.house_4.hems_0`.
-For a house the last segment is the load index it drives, not the id declared in the YAML.
+For a house or a nested grid the last segment is the load index it drives, not the id declared in the YAML: `mv-grid_0.lv-grid_3`, `mv-grid_0.lv-grid_3.house_4`.
 
 ### HELICS keys
 
@@ -187,9 +320,17 @@ Federates never build these themselves — they discover them from the CST feder
 |---|---|---|---|
 | `load_<idx>/active_power` | double, W | whatever is placed on that load | `local-grid/house_4/load_4/active_power` |
 | `load_<idx>/reactive_power` | double, VAr | same | `local-grid/loadhouse_0/load_7/reactive_power` |
-| `load_<idx>/voltage` | double, V | the grid | `local-grid/load_4/voltage` |
+| `load_<idx>/voltage` | double, pu | the grid | `local-grid/load_4/voltage` |
+| `active_power` | double, W | the root grid | `local-grid/active_power` |
+| `reactive_power` | double, VAr | the root grid | `local-grid/reactive_power` |
 | `state` | string, JSON | a house | `local-grid/house_4/state` |
 | `control` | string, JSON | a HEMS | `local-grid/house_4/hems_0/control` |
+
+Every grid publishes what its slack draws from upstream: the sum of `res_ext_grid.p_mw` / `q_mvar`, positive = drawn, losses inside the grid included.
+A nested grid publishes it on its parent's `load_<idx>` keys (see [Coupling contract](#coupling-contract)); the root grid publishes it on the bare keys above, which nothing in the federation subscribes to and which exist to be recorded.
+
+The voltage is the bus voltage in per unit (`res_bus.vm_pu`), not volts.
+The extra keys of an MV/LV coupling are in the table under [Coupling contract](#coupling-contract).
 
 The `state` payload carries the thermal vector, battery SoC/SoH, storage temperatures, and heat-pump and AC power — it is what the HEMS reads to plan against.
 

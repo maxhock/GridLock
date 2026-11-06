@@ -1,0 +1,29 @@
+# Minimal MV/LV coupling demo: one MV cable to one MV/LV substation, one LV
+# cable to one load, driven by a 0 -> 150 kW ramp over 6 h.
+general:
+  name: "MinimalMvLv"
+  start_time: 0
+  duration: 21600
+  time_step: 900
+  use_meta_db: "json"
+  use_data_db: "postgres"
+federation:
+  id: "mv-grid_0"
+  name: "Minimal MV grid"
+  class: "grid"
+  config:
+    layout: "mv_minimal_20kv.json"
+  sub_federates:
+    - id: "lv-grid_0"
+      name: "Minimal LV grid"
+      class: "grid"
+      config:
+        layout: "lv_minimal_20kv.json"
+        placement: 0
+      sub_federates:
+        - id: "rampload_0"
+          name: "Ramping load"
+          class: "load"
+          config:
+            placement: 0
+            electrical_load: "ramp_load_150kw.csv"

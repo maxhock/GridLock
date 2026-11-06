@@ -60,3 +60,6 @@ CST_USE_META_DB=json python3 main.py \
 ```
 
 `.vscode/launch.json` has a working argument set.
+
+Repeat the `--federate_name`/`--timeseries` pair to run several players in one process, one thread each; composegen does this for the load players under one grid.
+If one player fails, the process exits at once.

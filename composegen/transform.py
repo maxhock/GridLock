@@ -15,6 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 from treelib import Tree
 
 from extract import ExtractedConfig
+from run_window import resolve_run_window
 
 
 ConfigMode = Literal["legacy", "tree"]
@@ -267,6 +268,92 @@ def add_pub_sub(node, topic: str, unit: str, kind: str = "publication") -> None:
     node.data[key][topic] = unit
 
 
+def placement_shape_error(placement: Any) -> str | None:
+    """Describe why `placement` is not an int, list[int] or 'fill', or None if it is.
+
+    Shape only: whether the indices exist in the parent net is resolved in `load.py`,
+    which is the first place that net is readable.
+    """
+
+    def is_index(value: Any) -> bool:
+        # bool is an int subclass, and `placement: true` is a YAML typo, not index 1.
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    if placement == "fill" or is_index(placement):
+        return None
+
+    if isinstance(placement, list):
+        if not placement:
+            return "the list is empty"
+
+        if not all(is_index(item) for item in placement):
+            return "every list entry must be an int >= 0"
+
+        if len(set(placement)) != len(placement):
+            return "the list contains duplicate indices"
+
+        return None
+
+    return "use an int >= 0, a non-empty list of ints >= 0, or 'fill'"
+
+
+def _grid_nesting_errors(tree: Tree, node) -> list[str]:
+    """Net-independent checks on where a grid sits in the tree.
+
+    A grid nested under a grid (an LV feeder on an MV net) attaches to the parent's
+    loads, so it needs `placement` and, until auto-placement exists (issue #65), a
+    `layout` - an InfDB location query returns an unknown number of feeders with no
+    mapping onto the parent's loads.
+    """
+    data = node.data
+    label = f"Node '{node.tag}' ({node.identifier})"
+    placement = data.get("placement")
+    is_root = tree.root == node.identifier
+
+    if is_root:
+        if placement is not None:
+            return [
+                f"[Grid] {label} is the root grid and has 'placement', but there is "
+                f"no parent grid for it to attach to."
+            ]
+        return []
+
+    parent_class = tree.parent(node.identifier).data.get("class")
+
+    if parent_class != "grid":
+        return [
+            f"[Grid] {label} sits under a '{parent_class}' node. Grids can only be "
+            f"nested under another grid; composegen only discovers grids whose "
+            f"ancestors are all grids, so this one would never be wired."
+        ]
+
+    errors: list[str] = []
+
+    if placement is None:
+        errors.append(
+            f"[Grid] {label} is nested under a grid and requires 'placement': the "
+            f"parent grid's load index (an int), list of indices, or 'fill' that it "
+            f"attaches to."
+        )
+    else:
+        shape_error = placement_shape_error(placement)
+
+        if shape_error:
+            errors.append(
+                f"[Grid] {label} has invalid placement {placement!r}: {shape_error}."
+            )
+
+    if data.get("location"):
+        errors.append(
+            f"[Grid] {label} is nested under a grid and uses 'location'. Nested "
+            f"grids must use a 'layout' for now: an InfDB location query returns an "
+            f"unknown number of LV feeders with no mapping onto the parent's loads "
+            f"(auto-placement is a later phase, issue #65)."
+        )
+
+    return errors
+
+
 def validate_tree(tree: Tree) -> None:
     """Report every missing or unsupported field at once, then refuse to run.
 
@@ -307,6 +394,8 @@ def validate_tree(tree: Tree) -> None:
                     f"[Grid] Node '{node.tag}' ({node.identifier}) specifies both "
                     f"'layout' and 'location'."
                 )
+
+            validation_errors.extend(_grid_nesting_errors(tree, node))
 
         elif node_class == "load":
             electrical_load = data.get("electrical_load")
@@ -415,18 +504,14 @@ def validate_timeseries_coverage(
 
     A CSV longer than needed is fine and stays untouched: federates index into
     it by simulation step, so the run simply stops before the surplus.
+
+    Expects ``general_cfg`` as ``process_general_config`` returns it: the run
+    length is its resolved ``duration``, whatever form the times were given in.
     """
-    start_time = general_cfg.get("start_time") or 0
-    end_time = general_cfg.get("end_time")
-
-    if not isinstance(start_time, (int, float)) or not isinstance(
-        end_time, (int, float)
-    ):
-        return
-
-    duration = float(end_time) - float(start_time)
-    # process_general_config has not run yet, so apply the same default it does.
-    time_step = float(general_cfg.get("time_step") or 1)
+    duration = float(general_cfg["duration"])
+    start_time = general_cfg["start_time"]
+    end_time = general_cfg["end_time"]
+    time_step = float(general_cfg["time_step"])
     validation_errors: list[str] = []
 
     fields_by_class = {
@@ -497,17 +582,17 @@ def validate_timeseries_coverage(
 
 
 def process_general_config(general_cfg: dict) -> dict:
-    """Normalise the `general:` block to ISO timestamps and an integer time step."""
-    if "end_time" not in general_cfg or general_cfg["end_time"] is None:
-        raise ValueError("[General] Missing required field 'end_time'.")
+    """Normalise the `general:` block to ISO timestamps and an integer time step.
 
-    if not general_cfg.get("start_time"):
-        general_cfg["start_time"] = "2023-01-01T00:00:00"
-    elif isinstance(general_cfg["start_time"], (int, float)):
-        base_ts = pd.Timestamp("2023-01-01T00:00:00")
-        general_cfg["start_time"] = (
-            base_ts + pd.Timedelta(seconds=float(general_cfg["start_time"]))
-        ).isoformat()
+    ``start_time`` / ``end_time`` / ``duration`` are resolved by
+    ``run_window.resolve_run_window`` (any two fix the third; all three are
+    refused); afterwards all three are set, the times as ISO wall clock and
+    ``duration`` in seconds.
+    """
+    window = resolve_run_window(general_cfg)
+    general_cfg["start_time"] = window.start_iso
+    general_cfg["end_time"] = window.end_iso
+    general_cfg["duration"] = window.duration_s
 
     if "time_step" not in general_cfg or general_cfg["time_step"] is None:
         general_cfg["time_step"] = 1
@@ -529,25 +614,6 @@ def process_general_config(general_cfg: dict) -> dict:
             f"{time_step!r}. HELICS periods are configured as integers here, "
             f"so sub-second time steps are not supported."
         )
-
-    start_time = general_cfg["start_time"]
-    end_time = general_cfg["end_time"]
-
-    try:
-        start_ts = pd.Timestamp(start_time)
-
-        if isinstance(end_time, (int, float)):
-            end_ts = start_ts + pd.Timedelta(seconds=float(end_time))
-            general_cfg["end_time"] = end_ts.isoformat()
-
-        elif isinstance(end_time, str):
-            pd.Timestamp(end_time)
-
-        else:
-            raise ValueError(f"End time format not recognized: {end_time}")
-
-    except Exception as exc:
-        raise ValueError(f"Timestamp logic failed: {exc}") from exc
 
     return general_cfg
 
@@ -572,8 +638,8 @@ def wire_pub_sub(tree: Tree) -> None:
             if parent_class == "grid":
                 voltage_topic = f"{child_node.identifier}/voltage"
 
-                add_pub_sub(parent_node, voltage_topic, "V", "publication")
-                add_pub_sub(child_node, voltage_topic, "V", "subscription")
+                add_pub_sub(parent_node, voltage_topic, "pu", "publication")
+                add_pub_sub(child_node, voltage_topic, "pu", "subscription")
 
                 if child_class in ["house", "load", "battery", "pv", "grid"]:
                     p_topic = f"{child_node.identifier}/active_power"
@@ -599,11 +665,11 @@ def wire_pub_sub(tree: Tree) -> None:
 
                     add_pub_sub(parent_node, p_topic, "W", "subscription")
                     add_pub_sub(parent_node, q_topic, "VAr", "subscription")
-                    add_pub_sub(parent_node, v_topic, "V", "subscription")
+                    add_pub_sub(parent_node, v_topic, "pu", "subscription")
 
                     add_pub_sub(child_node, p_topic, "W", "publication")
                     add_pub_sub(child_node, q_topic, "VAr", "publication")
-                    add_pub_sub(child_node, v_topic, "V", "publication")
+                    add_pub_sub(child_node, v_topic, "pu", "publication")
 
                     control_topic = f"{child_node.identifier}/control"
 
@@ -621,9 +687,8 @@ def _transform_tree_config(extracted: ExtractedConfig) -> TransformedConfig:
     validate_tree(tree)
     expand_grid_nodes(tree, extracted.grid_nodes)
 
-    general_cfg = extracted.raw_config.get("general", {})
+    general_cfg = process_general_config(extracted.raw_config.get("general", {}))
     validate_timeseries_coverage(tree, general_cfg, extracted.data_input_path)
-    general_cfg = process_general_config(general_cfg)
 
     wire_pub_sub(tree)
 

@@ -12,7 +12,8 @@ function Show-Help {
   Write-Host "Run the GridLock co-simulation experiment."
   Write-Host ""
   Write-Host "Arguments:"
-  Write-Host "  EXPERIMENT_FILE    Path to experiment YAML (default: experiment-LV.yml)"
+  Write-Host "  EXPERIMENT_FILE    Path to experiment YAML inside config/, subfolders included,"
+  Write-Host "                     e.g. config/private/x.yml (default: config/experiment-LV.yml)"
   Write-Host ""
   Write-Host "Options:"
   Write-Host "  --cleanup-dbs      Stop CST databases on exit (default: leave running)"
@@ -56,6 +57,27 @@ $PreflightComposeFile = Join-Path $PSScriptRoot "docker-compose.preflight.yaml"
 $GeneratedDir = Join-Path $PSScriptRoot "generated"
 $ComposeFile = Join-Path $GeneratedDir "docker-compose.yaml"
 
+# The containers see only the repo's config/ directory, mounted at /config, so an
+# experiment is addressed by its path below config/ (config/private/x.yml becomes
+# /config/private/x.yml). Taking just the file name instead sent subdirectory
+# experiments to /config/x.yml, which does not exist. Same lookup as run.sh's
+# container_config_path: keep the two in step.
+function Get-ContainerConfigPath {
+  param([string]$Arg)
+  $configRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "config"))
+  $candidates = if ([System.IO.Path]::IsPathRooted($Arg)) { @($Arg) }
+  else { @((Join-Path (Get-Location).Path $Arg), (Join-Path $PSScriptRoot $Arg), (Join-Path $configRoot $Arg)) }
+  $found = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+  if (-not $found) { throw "Experiment file not found: $Arg" }
+  $full = [System.IO.Path]::GetFullPath($found)
+  $prefix = $configRoot.TrimEnd("\", "/") + [System.IO.Path]::DirectorySeparatorChar
+  $comparison = if ($OnWindows) { [System.StringComparison]::OrdinalIgnoreCase } else { [System.StringComparison]::Ordinal }
+  if (-not $full.StartsWith($prefix, $comparison)) {
+    throw "Experiment $full is outside $configRoot, which is all the containers can see. Move it into config/ (config/private/ is gitignored) and pass that path."
+  }
+  return "/config/" + $full.Substring($prefix.Length).Replace("\", "/")
+}
+
 # --- environment -----------------------------------------------------------
 if (-not (Test-Path $PreflightEnvFile)) {
   Write-Error "Missing env file: $PreflightEnvFile"
@@ -75,7 +97,7 @@ foreach ($line in Get-Content $PreflightEnvFile) {
 $env:PREFLIGHT_ENV_FILE = $PreflightEnvFile
 $env:INFDB_ENV_FILE = if ($env:INFDB_ENV_FILE) { $env:INFDB_ENV_FILE } else { $PreflightEnvFile }
 if ($Experiment) {
-  $env:CONFIG_PATH = "/config/" + [System.IO.Path]::GetFileName($Experiment)
+  $env:CONFIG_PATH = Get-ContainerConfigPath $Experiment
 }
 else {
   $env:CONFIG_PATH = "/config/experiment-LV.yml"

@@ -40,13 +40,24 @@ Nothing else needs InfDB access.
 **`Experiment config not found: ...`**
 `CONFIG_PATH` is a *container* path. `run.sh` derives it from your argument; if you are running the stage by hand it has to look like `/config/experiment-LV.yml`.
 
-**`Grid configuration must define either 'location' or 'layout', not both.`**
-**`No grid source defined in experiment config.`**
+**`Grid '<id>' must define either 'location' or 'layout', not both.`**
+**`No grid source defined for grid '<id>'.`**
 A grid names exactly one source.
+This stage checks every grid in the tree, nested ones included.
 See [`experiment-reference.md`](experiment-reference.md#grid-source).
 
 **`Local grid layout not found: ...`**
-The workbook goes in `data/input/`, and `layout:` is just its file name.
+**`Grid layout file not found: ...`**
+The layout goes in `data/input/`, and `layout:` is its path relative to that directory (`private/<file>.json` for a git-ignored real grid).
+
+**`Unsupported grid layout '<file>': expected one of .xlsx, .json.`**
+A layout is a pandapower workbook or pandapower JSON.
+
+**`Nested grid '<id>' uses 'location', which is not supported`** (`NotImplementedError`)
+Only the root grid may use `location`; give a grid nested under another grid a `layout`.
+
+**`Duplicate grid id(s) in the federation tree`** / **`Grid '<id>' sits under a federate that is not a grid`**
+Grid ids are dotted tree paths and have to be unique, and a grid can only be nested under another grid.
 
 **`InfDB returned no grids for location queries: PLZ ...`**
 The postcode has no entry in `pylovo.grid_result`.
@@ -71,11 +82,11 @@ A CSV is shorter than the run.
 The message gives what it covers, what is needed, and why.
 A house with a HEMS needs 24 steps *beyond* `end_time`, because the MPC still asks for a full forecast window at the last step.
 Provide a longer profile or shorten the experiment.
-See the two known holes in this check under [Silent failures](#silent-failures).
 
 **`Placement error: pandapower load index N does not exist. Valid indices: [...]`**
 The index is a pandapower load index, not a bus.
-If the valid list is `[]`, the grid has no loads — with a nested MV/LV config that means the nested grid was never resolved (H8 in #56; `experiment-MV-LV.yml` is not expected to run).
+If the valid list is `[]`, the grid has no loads.
+For a nested grid, `placement` indexes the **parent** grid's loads, and the children inside it index the nested grid's own.
 
 **`Unsupported placement value: None`**
 A `load`, `house`, `pv` or `battery` node with no `placement`.
@@ -91,6 +102,25 @@ At most one child per grid may fill.
 **`'<node>' is a pv/battery placed directly in grid '...'`** (`NotImplementedError`)
 No standalone PV or battery federate exists — that physics lives inside the house simulator.
 Declare it as a sub-federate of a house.
+
+**`[Grid] ... requires 'placement'`** / **`... is the root grid and has 'placement'`** / **`... uses 'location'`** (in the `Configuration invalid:` list)
+A grid under another grid needs a `placement` on the parent's loads and a `layout`; the root grid takes no `placement`.
+See [Nested grids](experiment-reference.md#nested-grids).
+
+**`LV net '<key>' attached to '<parent>' ... must have exactly one ext_grid, found N`**
+**`Load N of '<parent>' ... sits on a X kV bus but the ext_grid bus of LV net '<key>' is Y kV; the bases must match.`**
+The MV/LV coupling contract.
+The LV net needs exactly one slack, and its `vn_kv` has to equal the MV bus the load sits on, because voltage travels in per unit.
+Re-rate the layout with `tools/make_lv_variant.py`.
+See [Coupling contract](experiment-reference.md#coupling-contract).
+
+**`Load index/indices [...] in grid '<grid>' are claimed by multiple federates.`**
+Two children of one grid claim the same load, an LV grid and a load player on the MV grid for instance.
+Overlap checks span every placed class.
+
+**`Federate '<name>' is already registered`**
+Two nodes resolved to the same federate name, which would drop the keys wired to the first.
+Houses and nested grids are renamed after the load they sit on (`lv-grid_0` at load 1 runs as `lv-grid_1`), so a sibling declared with that id collides; rename the sibling.
 
 **`No custom_metadata entry '<grid>' in backend '<backend>'`**
 Stage 2 did not run, or did not run for this experiment.
@@ -123,8 +153,12 @@ Known case: a `hems` nested deeper than directly under a house, or a node declar
 You started the federate outside the generated compose file.
 Set both, e.g. `CST_USE_META_DB=json`.
 
-**`No grid data found in metadata store for '<name>'. Ensure infdb data setup has run.`**
-The grid federate's name has to match the `custom_metadata` key stage 2 wrote — for a location grid that is `<id>_<plz>_<kcid>_<bcid>`, not `<id>`.
+**`No grid data found in metadata store for net key '<key>'. Ensure infdb data setup has run.`**
+The grid federate reads the net named by its `--net_key`, which has to match the `custom_metadata` key stage 2 wrote — for a location grid that is `<id>_<plz>_<kcid>_<bcid>`, not `<id>`, and for a nested grid the template's dotted tree id (`mv-grid_0.lv-grid_0`), not the clone's name.
+
+**`Grid '<name>' has a partial upstream coupling`** / **`... is coupled to a parent grid and must have exactly one ext_grid`**
+A nested grid's coupling keys are incomplete, or its net has more than one slack.
+composegen normally refuses the second case earlier; a hand-run federate against a different net can still hit it.
 
 **`No exogenous dataset found in metadata store for '<house>'`**
 composegen did not store it.
@@ -142,10 +176,12 @@ It is deliberately fatal: continuing would publish the previous step's voltages 
 **`Forecast window [a, b) runs past the end of the exogenous dataset`**
 The federation was generated against a different MPC horizon than the controller is running with. `--horizon` is passed by composegen and has to match `transform.MPC_FORECAST_HORIZON_STEPS`.
 
-**Every federate dies inside `set_metadata` on `strptime`**
-`start_time` or `end_time` was given as a string that is not exactly `YYYY-MM-DDTHH:MM:SS`.
-composegen passes strings through unvalidated (N13 in #56).
-Use numbers.
+**`[General] 'start_time', 'end_time' and 'duration' are all set`**
+Give at most two: any two fix the third, and `end_time` is an absolute time, not a length.
+Drop `duration` to keep `start_time`/`end_time`, or see the table in [`experiment-reference.md`](experiment-reference.md#general).
+
+**`[General] '<key>' carries a UTC offset`** / **`must fall on a whole second`**
+composegen normalises time strings to the `YYYY-MM-DDTHH:MM:SS` CST parses, and refuses what that form cannot hold.
 
 **`CSV ... missing required 'timestamp' column`** / **`'base_load'`**
 A load player's profile.
@@ -161,7 +197,8 @@ A federate that crashed before entering executing mode leaves its siblings block
 
 - **`N of M load(s) in '<grid>' are not driven by any federate and stay at 0 W: [...]`** — legal, since the grid zeroes every static load at import. Printed because an unclaimed index looks exactly like a placement typo.
 - **`Skipping '<node>' (pv|battery): not yet implemented as a standalone federate`** — expected under a house.
-- **`Note: N grid federates in this federation.`** — HELICS allows only one federate to wait for the current time update, so with several grids each solves on the previous step's loads.
+- **`Note: N root grid federates in this federation.`** — HELICS allows only one federate to wait for the current time update, so with several root grids each solves on the previous step's loads.
+- **`WARNING: zeroed N static sgen(s) with X MW of nominal feed-in`** / **`Reset net.load scaling to 1.0 on N load(s)`** — a grid federate clearing what the layout carried that no federate drives; see [Grid import](experiment-reference.md#grid-import).
 - **`Normalized epoch timestamps to simulation-relative seconds`** — a load player shifting its CSV so the first row sits at `t=0`.
 
 ---
@@ -176,11 +213,6 @@ All are tracked in issue #56; they are listed here because no error message will
 Every house is the same hardcoded two-room network with a 13 kWh battery and a 4 kW heat pump.
 Changing them changes nothing (S1).
 
-**The coverage check can be switched off by accident.**
-It returns early and silently if `start_time` or `end_time` is a string, so an ISO 8601 time means no CSV is validated at all (N5).
-It also sizes the run as `end_time - start_time` while a numeric `end_time` is a duration *from* `start_time`, so a non-zero `start_time` under-checks (N4).
-Both reinstate the sample-and-hold this check exists to prevent.
-
 **A house past the end of its dataset re-publishes its last values.**
 CST does not reset `data_to_federation` between steps, so the stale load and state are logged as fresh rows every step (N7).
 
@@ -188,6 +220,11 @@ CST does not reset `data_to_federation` between steps, so the stale load and sta
 The grid matches the *first* `/load_<n>/` in a key.
 A child with `id: load_1` placed on load 58 publishes `.../load_1/load_58/active_power`, and the power is applied to load 1 (N3).
 Avoid `load_<n>` as a node id.
+
+**Coupled grids lag one step per level.**
+Only the root grid may wait for the current time update, so a nested grid applies its children's loads, and its parent's voltage, one step late.
+A house on an LV grid reaches the MV power flow one step late, a house two levels down two steps late.
+See [Timing](experiment-reference.md#timing).
 
 **The `sim_time = 0` row comes from a zero-load solve.**
 The grid's initial power flow runs before its siblings are guaranteed to have published, so t=0 voltages are solved from a partially or fully empty load table while the children's own t=0 rows show real power (N6).
@@ -212,6 +249,7 @@ A single federate can be run on the host against a JSON metadata store from a pr
 CST_USE_META_DB=json python3 main.py --scenario <name>_<timestamp> --federate_name <dotted name>
 ```
 
+A grid federate also needs `--net_key <custom_metadata key of its net>`.
 `.vscode/launch.json` has working argument sets, and each `federates/*/README.md` documents its own.
 
 `databases/db-access.txt` covers querying a run's timeseries, including how to tell one run's scenario from another's.

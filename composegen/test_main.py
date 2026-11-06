@@ -2,20 +2,31 @@
 
 from types import SimpleNamespace
 
+from pathlib import Path
+
 import pytest
+import yaml
 from treelib import Tree
 
-from extract import add_to_tree, validate_location_queries
-from transform import process_general_config, validate_tree, wire_pub_sub
+from extract import add_to_tree, extract, validate_location_queries
+from grid_files import expand_filename_placements
+from transform import (
+    process_general_config,
+    validate_timeseries_coverage,
+    validate_tree,
+    wire_pub_sub,
+)
 from load import (
     _expand_child_instances,
+    _grid_command,
     _grid_waits_for_current_time,
     _resolve_load_placement,
     _resolve_placement,
+    create_timeseries_tables,
     map_params_to_class,
 )
-from monkeypatch import _federate_docker, _service
-
+import monkeypatch as compose_patch
+from monkeypatch import _federate_docker, _service, define_yaml
 
 # ---------------------------------------------------------------------------
 # extract.add_to_tree
@@ -192,6 +203,105 @@ def test_validate_tree_hems_requires_control_strategy() -> None:
         validate_tree(_tree_with_root({"class": "hems"}))
 
 
+def _mv_lv_tree(lv_data: dict, mv_data: dict | None = None) -> Tree:
+    """An MV grid with one LV grid nested under it."""
+    tree = Tree()
+    tree.create_node(
+        tag="mv",
+        identifier="mv-grid_0",
+        data=mv_data or {"class": "grid", "layout": "mv.xlsx"},
+    )
+    tree.create_node(
+        tag="lv", identifier="mv-grid_0.lv-grid_0", parent="mv-grid_0", data=lv_data
+    )
+    return tree
+
+
+def test_validate_tree_nested_grid_requires_placement(capsys) -> None:
+    tree = _mv_lv_tree({"class": "grid", "layout": "lv.xlsx"})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "mv-grid_0.lv-grid_0" in printed
+    assert "requires 'placement'" in printed
+
+
+def test_validate_tree_root_grid_rejects_placement(capsys) -> None:
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(
+            _tree_with_root({"class": "grid", "layout": "a.xlsx", "placement": 3})
+        )
+
+    assert "root grid" in capsys.readouterr().out
+
+
+def test_validate_tree_nested_grid_rejects_location(capsys) -> None:
+    tree = _mv_lv_tree({"class": "grid", "location": [{"plz": 91359}], "placement": 3})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "must use a 'layout'" in capsys.readouterr().out
+
+
+def test_validate_tree_grid_under_non_grid_is_rejected(capsys) -> None:
+    tree = Tree()
+    tree.create_node(
+        tag="house",
+        identifier="house_0",
+        data={"class": "house", "model": {"class": "1R1C"}, "exogenous_data": "x.csv"},
+    )
+    tree.create_node(
+        tag="lv",
+        identifier="house_0.lv-grid_0",
+        parent="house_0",
+        data={"class": "grid", "layout": "lv.xlsx", "placement": 3},
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "house_0.lv-grid_0" in printed
+    assert "never be wired" in printed
+
+
+@pytest.mark.parametrize("placement", ["all", [-1], [], [1, 1], [1, "a"], -1, True])
+def test_validate_tree_nested_grid_rejects_invalid_placement_shape(
+    placement, capsys
+) -> None:
+    tree = _mv_lv_tree({"class": "grid", "layout": "lv.xlsx", "placement": placement})
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "invalid placement" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("placement", [3, 0, [3, 7], "fill"])
+def test_validate_tree_nested_grid_with_valid_placement_is_valid(placement) -> None:
+    validate_tree(
+        _mv_lv_tree({"class": "grid", "layout": "lv.xlsx", "placement": placement})
+    )
+
+
+def test_validate_tree_reports_every_grid_nesting_problem_together(capsys) -> None:
+    tree = _mv_lv_tree(
+        {"class": "grid", "location": [{"plz": 1}]},
+        mv_data={"class": "grid", "layout": "mv.xlsx", "placement": 2},
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    printed = capsys.readouterr().out
+    assert "root grid" in printed
+    assert "requires 'placement'" in printed
+    assert "must use a 'layout'" in printed
+
+
 def test_validate_tree_collects_every_error_before_raising(capsys) -> None:
     tree = Tree()
     tree.create_node(tag="grid1", identifier="grid1", data={"class": "grid"})
@@ -211,13 +321,50 @@ def test_validate_tree_collects_every_error_before_raising(capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
+# transform.validate_timeseries_coverage
+# ---------------------------------------------------------------------------
+
+
+def _player_covering(tmp_path: Path, seconds: int) -> Tree:
+    """A load player whose CSV runs from 0 to ``seconds`` in 900 s rows."""
+    rows = "\n".join(f"{t},1000.0,0.0" for t in range(0, seconds + 1, 900))
+    (tmp_path / "profile.csv").write_text(f"timestamp,power,reactive\n{rows}\n")
+    return _tree_with_root({"class": "load", "electrical_load": "profile.csv"})
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        # 5400 s from 00:30: a CSV covering 3600 s is short however the times
+        # are spelled. Both forms used to slip through: the numeric one was
+        # sized as end - start of a relative end, the ISO one never checked.
+        {"start_time": 1800, "end_time": 7200},
+        {"start_time": "2023-01-01T00:30:00", "end_time": "2023-01-01T02:00:00"},
+        {"start_time": 1800, "duration": 5400},
+    ],
+)
+def test_coverage_check_uses_the_resolved_duration(
+    tmp_path: Path, general: dict
+) -> None:
+    tree = _player_covering(tmp_path, 3600)
+    cfg = process_general_config({**general, "time_step": 900})
+
+    with pytest.raises(ValueError, match="coverage"):
+        validate_timeseries_coverage(tree, cfg, tmp_path)
+
+    validate_timeseries_coverage(_player_covering(tmp_path, 5400), cfg, tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # transform.process_general_config
 # ---------------------------------------------------------------------------
 
 
-def test_process_general_config_requires_end_time() -> None:
-    with pytest.raises(ValueError, match="end_time"):
+def test_process_general_config_requires_end_time_or_duration() -> None:
+    with pytest.raises(ValueError, match="'end_time' or 'duration'"):
         process_general_config({})
+    with pytest.raises(ValueError, match="'end_time' or 'duration'"):
+        process_general_config({"start_time": 0})
 
 
 def test_process_general_config_defaults_start_time() -> None:
@@ -250,10 +397,88 @@ def test_process_general_config_rejects_fractional_time_step() -> None:
         process_general_config({"end_time": 3600, "time_step": 1.5})
 
 
-def test_process_general_config_converts_numeric_end_time_relative_to_start() -> None:
-    cfg = process_general_config({"start_time": 0, "end_time": 3600})
+def test_process_general_config_numeric_end_time_is_absolute() -> None:
+    cfg = process_general_config({"start_time": 1800, "end_time": 7200})
 
+    assert cfg["start_time"] == "2023-01-01T00:30:00"
+    assert cfg["end_time"] == "2023-01-01T02:00:00"
+    assert cfg["duration"] == 5400
+
+
+def test_process_general_config_duration_alone_starts_at_zero() -> None:
+    cfg = process_general_config({"duration": 3600})
+
+    assert cfg["start_time"] == "2023-01-01T00:00:00"
     assert cfg["end_time"] == "2023-01-01T01:00:00"
+    assert cfg["duration"] == 3600
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        {"start_time": 1800, "duration": 5400},
+        {"end_time": 7200, "duration": 5400},
+        {"start_time": "2023-01-01T00:30:00", "end_time": "2023-01-01T02:00:00"},
+    ],
+)
+def test_process_general_config_any_two_fix_the_third(general: dict) -> None:
+    cfg = process_general_config(general)
+
+    assert (cfg["start_time"], cfg["end_time"], cfg["duration"]) == (
+        "2023-01-01T00:30:00",
+        "2023-01-01T02:00:00",
+        5400,
+    )
+
+
+def test_process_general_config_refuses_all_three() -> None:
+    # Even a consistent triple: two always fix the third, so a third can only
+    # agree or silently contradict.
+    with pytest.raises(ValueError, match="at most two"):
+        process_general_config({"start_time": 0, "end_time": 3600, "duration": 3600})
+
+
+@pytest.mark.parametrize(
+    "general",
+    [
+        {"start_time": 3600, "end_time": 3600},
+        {"start_time": 7200, "end_time": 3600},
+        {"duration": 0},
+    ],
+)
+def test_process_general_config_refuses_an_empty_or_reversed_run(
+    general: dict,
+) -> None:
+    with pytest.raises(ValueError, match="end after it starts"):
+        process_general_config(general)
+
+
+def test_process_general_config_refuses_a_utc_offset() -> None:
+    with pytest.raises(ValueError, match="UTC offset"):
+        process_general_config({"end_time": "2023-01-01T02:00:00+01:00"})
+
+
+def test_process_general_config_accepts_unquoted_yaml_times() -> None:
+    # yaml.safe_load turns unquoted ISO times into date / datetime objects.
+    general = yaml.safe_load("start_time: 2023-01-01T00:30:00\nend_time: 2023-01-02")
+    cfg = process_general_config(general)
+
+    assert cfg["start_time"] == "2023-01-01T00:30:00"
+    assert cfg["end_time"] == "2023-01-02T00:00:00"
+    assert cfg["duration"] == 84600
+
+
+@pytest.mark.parametrize("value", ["", "now", "tomorrow"])
+def test_process_general_config_refuses_non_iso_strings(value: str) -> None:
+    with pytest.raises(ValueError, match="not an ISO 8601 time"):
+        process_general_config({"start_time": value, "end_time": 3600})
+
+
+def test_process_general_config_normalises_a_bare_date() -> None:
+    cfg = process_general_config({"end_time": "2023-01-02"})
+
+    assert cfg["end_time"] == "2023-01-02T00:00:00"
+    assert cfg["duration"] == 86400
 
 
 def test_process_general_config_accepts_iso_end_time() -> None:
@@ -285,11 +510,11 @@ def test_wire_pub_sub_wires_grid_and_load_power_and_voltage() -> None:
 
     assert grid_data["subscriptions"]["grid1.load1/active_power"] == "W"
     assert grid_data["subscriptions"]["grid1.load1/reactive_power"] == "VAr"
-    assert grid_data["publications"]["grid1.load1/voltage"] == "V"
+    assert grid_data["publications"]["grid1.load1/voltage"] == "pu"
 
     assert load_data["publications"]["grid1.load1/active_power"] == "W"
     assert load_data["publications"]["grid1.load1/reactive_power"] == "VAr"
-    assert load_data["subscriptions"]["grid1.load1/voltage"] == "V"
+    assert load_data["subscriptions"]["grid1.load1/voltage"] == "pu"
 
 
 def test_wire_pub_sub_wires_house_control_topic() -> None:
@@ -375,10 +600,21 @@ def test_resolve_load_placement_returns_resolved_indices() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_expand_child_instances_leaves_non_house_classes_untouched() -> None:
+def test_expand_child_instances_keeps_load_player_as_one_instance() -> None:
     assert _expand_child_instances("loadhouse_0", "load", [0, 1, 2]) == [
         ("loadhouse_0", [0, 1, 2])
     ]
+
+
+def test_expand_child_instances_splits_grid_per_load_index() -> None:
+    result = _expand_child_instances("lv-grid_0", "grid", [3, 7])
+
+    assert result == [("lv-grid_3", [3]), ("lv-grid_7", [7])]
+
+
+def test_expand_child_instances_grid_requires_load_indices() -> None:
+    with pytest.raises(ValueError, match="Grid 'lv-grid_0'.*no pandapower load"):
+        _expand_child_instances("lv-grid_0", "grid", None)
 
 
 def test_expand_child_instances_splits_house_per_load_index() -> None:
@@ -431,10 +667,89 @@ def test_map_params_to_class_unknown_class_falls_back_to_default_image() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_grid_waits_for_current_time_only_with_exactly_one_grid() -> None:
+def test_grid_waits_for_current_time_only_with_exactly_one_root_grid() -> None:
     assert _grid_waits_for_current_time(1) is True
     assert _grid_waits_for_current_time(0) is False
     assert _grid_waits_for_current_time(2) is False
+
+
+# ---------------------------------------------------------------------------
+# load._grid_command
+# ---------------------------------------------------------------------------
+
+
+def test_grid_command_passes_net_key_separately_from_federate_name() -> None:
+    cmd = _grid_command("python3 main.py", "Scn_20260101_000000", "lv-grid_3", "lv")
+
+    assert cmd == (
+        "python3 main.py --scenario Scn_20260101_000000 "
+        "--federate_name lv-grid_3 --net_key lv"
+    )
+
+
+# ---------------------------------------------------------------------------
+# load.create_timeseries_tables
+# ---------------------------------------------------------------------------
+
+
+class _FakeTimeseriesManager:
+    def __init__(self, connects: bool) -> None:
+        self.connects = connects
+        self.created: list[str] = []
+        self.disconnected = False
+        self.factory_args: tuple[str, ...] = ()
+        self.writer = SimpleNamespace(_ensure_table_exists=self.created.append)
+
+    def connect(self) -> bool:
+        return self.connects
+
+    def disconnect(self) -> None:
+        self.disconnected = True
+
+
+def _patch_timeseries_manager(monkeypatch, manager: _FakeTimeseriesManager) -> None:
+    import cosim_toolbox.dbms
+
+    def factory(*args: str) -> _FakeTimeseriesManager:
+        manager.factory_args = args
+        return manager
+
+    monkeypatch.setattr(cosim_toolbox.dbms, "create_timeseries_manager", factory)
+
+
+def test_create_timeseries_tables_creates_every_cst_type(monkeypatch) -> None:
+    from cosim_toolbox.dbms.postgresql_timeseries import type_mapping
+
+    manager = _FakeTimeseriesManager(connects=True)
+    _patch_timeseries_manager(monkeypatch, manager)
+
+    create_timeseries_tables("FreshAnalysis")
+
+    assert manager.factory_args == ("postgres", "FreshAnalysis")
+    assert manager.created == list(type_mapping)
+    assert manager.disconnected
+
+
+def test_create_timeseries_tables_propagates_a_failed_table(monkeypatch) -> None:
+    manager = _FakeTimeseriesManager(connects=True)
+
+    def fail(table_name: str) -> None:
+        raise RuntimeError(f"cannot create {table_name}")
+
+    manager.writer = SimpleNamespace(_ensure_table_exists=fail)
+    _patch_timeseries_manager(monkeypatch, manager)
+
+    with pytest.raises(RuntimeError, match="cannot create"):
+        create_timeseries_tables("FreshAnalysis")
+
+    assert manager.disconnected
+
+
+def test_create_timeseries_tables_raises_when_connect_fails(monkeypatch) -> None:
+    _patch_timeseries_manager(monkeypatch, _FakeTimeseriesManager(connects=False))
+
+    with pytest.raises(RuntimeError, match="FreshAnalysis"):
+        create_timeseries_tables("FreshAnalysis")
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +793,172 @@ def test_service_omits_depends_on_when_none() -> None:
     assert "depends_on" not in svc
 
 
+def test_service_without_build_only_runs_the_image() -> None:
+    svc = _service("lv-grid_3", "grid", ["", "python3 main.py"], 4, build=False)
+
+    assert '    image: "grid"\n' in svc
+    assert "build:" not in svc
+    assert "context:" not in svc
+    assert "    pull_policy: never\n" in svc
+
+
+class _FakeMetadataManager:
+    """Serves one scenario and its federation, as CST's metadata manager would."""
+
+    def __init__(self, federates: dict[str, dict[str, str]]) -> None:
+        self.federates = federates
+
+    def __enter__(self) -> "_FakeMetadataManager":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read_scenario(self, name: str) -> dict[str, str]:
+        return {"analysis": "Analysis", "federation": "Federation"}
+
+    def read_federation(self, name: str) -> dict[str, dict]:
+        return {"federation": self.federates}
+
+
+def _generated_services(monkeypatch, tmp_path, federates: dict) -> dict:
+    """Run define_yaml over ``federates`` and return the services it wrote."""
+    monkeypatch.setattr(
+        compose_patch,
+        "create_metadata_manager",
+        lambda backend: _FakeMetadataManager(federates),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    define_yaml("Scenario", use_meta_db="json")
+
+    return yaml.safe_load((tmp_path / "generated" / "docker-compose.yaml").read_text())[
+        "services"
+    ]
+
+
+def _grid(name: str) -> dict[str, str]:
+    return {
+        "image": "grid",
+        "command": f"python3 main.py --scenario S --federate_name {name} "
+        f"--net_key {name}",
+    }
+
+
+def _player(name: str) -> dict[str, str]:
+    return {
+        "image": "house_player",
+        "command": f"python3 main.py --scenario S --federate_name {name} "
+        f"--timeseries /data/{name}.csv",
+    }
+
+
+def test_define_yaml_runs_siblings_of_one_image_in_one_service(
+    monkeypatch, tmp_path
+) -> None:
+    # The full ÜZW federation at one container per federate needed ~66 GB:
+    # every grid loaded pandapower, numba and CST on its own.
+    federates = {
+        "hv": _grid("hv"),
+        "hv.mv_0": _grid("hv.mv_0"),
+        "hv.mv_1": _grid("hv.mv_1"),
+        "hv.mv_0.lv_3": _grid("hv.mv_0.lv_3"),
+        "hv.mv_0.lv_5": _grid("hv.mv_0.lv_5"),
+        "hv.mv_0.lv_3.houses": _player("hv.mv_0.lv_3.houses"),
+        "hv.mv_0.lv_5.houses": _player("hv.mv_0.lv_5.houses"),
+    }
+
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
+    assert list(services) == [
+        "helics",
+        "hv",
+        "hv.grid-group",
+        "hv.mv_0.grid-group",
+        "hv.mv_0.lv_3.houses",
+        "hv.mv_0.lv_5.houses",
+    ]
+    assert services["hv.grid-group"]["command"] == (
+        '/bin/bash -c "python3 main.py --scenario S '
+        "--federate_name hv.mv_0 --net_key hv.mv_0 "
+        '--federate_name hv.mv_1 --net_key hv.mv_1"'
+    )
+    assert services["hv.mv_0.lv_3.houses"]["command"] == (
+        f'/bin/bash -c "{federates["hv.mv_0.lv_3.houses"]["command"]}"'
+    )
+    # The broker waits for every federate, not for every container.
+    assert f"-f {len(federates)} " in services["helics"]["command"]
+
+
+def test_define_yaml_keeps_one_service_per_federate_for_other_images(
+    monkeypatch, tmp_path
+) -> None:
+    # The house entry point runs one federate per process.
+    federates = {
+        "lv": _grid("lv"),
+        "lv.house_4": {"image": "house", "command": "python3 house/main.py"},
+        "lv.house_6": {"image": "house", "command": "python3 house/main.py"},
+    }
+
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
+    assert list(services) == ["helics", *federates]
+
+
+def test_define_yaml_refuses_a_group_named_like_a_federate(
+    monkeypatch, tmp_path
+) -> None:
+    federates = {
+        "mv": _grid("mv"),
+        "mv.lv_1": _grid("mv.lv_1"),
+        "mv.lv_2": _grid("mv.lv_2"),
+        "mv.grid-group": _player("mv.grid-group"),
+    }
+
+    with pytest.raises(ValueError, match="mv.grid-group"):
+        _generated_services(monkeypatch, tmp_path, federates)
+
+
+def test_define_yaml_refuses_siblings_with_different_entry_points(
+    monkeypatch, tmp_path
+) -> None:
+    other = _grid("mv.lv_2")
+    other["command"] = other["command"].replace("--scenario S", "--scenario T")
+    federates = {"mv": _grid("mv"), "mv.lv_1": _grid("mv.lv_1"), "mv.lv_2": other}
+
+    with pytest.raises(ValueError, match="not an entry point"):
+        _generated_services(monkeypatch, tmp_path, federates)
+
+
+def test_define_yaml_builds_each_image_once(monkeypatch, tmp_path) -> None:
+    # Compose builds once per service that has a build section: with one on
+    # every service, a large federation started one build per federate of the
+    # same few images and BuildKit lost jobs.
+    federates = {
+        "mv": _grid("mv"),
+        "mv.lv_1": _grid("mv.lv_1"),
+        "mv.lv_1.loads": _player("mv.lv_1.loads"),
+        "mv.lv_2": _grid("mv.lv_2"),
+        "mv.lv_2.loads": _player("mv.lv_2.loads"),
+    }
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
+    assert list(services) == [
+        "helics",
+        "mv",
+        "mv.grid-group",
+        "mv.lv_1.loads",
+        "mv.lv_2.loads",
+    ]
+    builders = {name for name, svc in services.items() if "build" in svc}
+    assert builders == {"helics", "mv", "mv.lv_1.loads"}
+    for name, svc in services.items():
+        if name not in builders:
+            assert svc["pull_policy"] == "never"
+    built = [services[name]["image"] for name in builders]
+    assert sorted(built) == sorted(set(built))
+
+
 def test_federate_docker_points_broker_address_at_compose_service_name() -> None:
     calls: dict[str, str] = {}
     stub = SimpleNamespace(
@@ -487,3 +968,140 @@ def test_federate_docker_points_broker_address_at_compose_service_name() -> None
     _federate_docker(stub)
 
     assert calls == {"broker_address": "helics"}
+
+
+# ---------------------------------------------------------------------------
+# grid_files.expand_filename_placements
+# ---------------------------------------------------------------------------
+
+
+def _touch(root: Path, *names: str) -> None:
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+
+
+def _filename_child(**config) -> dict:
+    return {
+        "id": "lv_0",
+        "class": "grid",
+        "config": {"placement": "filename", **config},
+        "sub_federates": [
+            {"id": "houses_0", "class": "load", "config": {"placement": "fill"}}
+        ],
+    }
+
+
+def _mv_root(*children: dict) -> dict:
+    return {
+        "id": "mv",
+        "class": "grid",
+        "config": {"layout": "grids/mv.json"},
+        "sub_federates": list(children),
+    }
+
+
+def test_filename_placement_makes_one_grid_per_file(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_12.json", "grids/mv/load_3.json")
+
+    root = expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+    lv_3, lv_12 = root["sub_federates"]
+    assert (lv_3["id"], lv_3["config"]) == (
+        "lv_3",
+        {"placement": 3, "layout": "grids/mv/load_3.json"},
+    )
+    assert (lv_12["id"], lv_12["config"]["placement"]) == ("lv_12", 12)
+    assert lv_3["sub_federates"] == lv_12["sub_federates"]
+    assert lv_3["sub_federates"] is not lv_12["sub_federates"]
+
+
+def test_filename_placement_nests_through_subfolders(tmp_path) -> None:
+    _touch(
+        tmp_path,
+        "grids/mv.json",
+        "grids/mv/load_1.json",
+        "grids/mv/load_1/load_7.json",
+        "grids/mv/load_2.json",
+        "grids/mv/load_2/load_7.json",
+    )
+    mid = _filename_child()
+    mid["id"] = "mid"
+    mid["sub_federates"] = [_filename_child()]
+
+    root = expand_filename_placements(_mv_root(mid), tmp_path)
+
+    layouts = {
+        (m["id"], lv["id"]): lv["config"]["layout"]
+        for m in root["sub_federates"]
+        for lv in m["sub_federates"]
+    }
+    assert layouts == {
+        ("mid_1", "lv_7"): "grids/mv/load_1/load_7.json",
+        ("mid_2", "lv_7"): "grids/mv/load_2/load_7.json",
+    }
+
+
+def test_filename_placement_leaves_the_input_untouched(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_0.json")
+    federation = _mv_root(_filename_child())
+
+    expand_filename_placements(federation, tmp_path)
+
+    assert federation == _mv_root(_filename_child())
+
+
+@pytest.mark.parametrize(
+    "files, error, match",
+    [
+        ([], FileNotFoundError, r"grids/mv does not exist"),
+        (["grids/mv/notes.txt"], ValueError, r"not load_<idx>\.json.*notes\.txt"),
+        (["grids/mv/load_05.json"], ValueError, r"load_05\.json"),
+    ],
+)
+def test_filename_placement_refuses_a_bad_folder(tmp_path, files, error, match) -> None:
+    _touch(tmp_path, "grids/mv.json", *files)
+
+    with pytest.raises(error, match=match):
+        expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+
+def test_filename_placement_refuses_an_empty_folder(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json")
+    (tmp_path / "grids/mv/load_4").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match=r"no load_<idx>\.json"):
+        expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "child, parent_config, match",
+    [
+        ({**_filename_child(), "class": "load"}, None, r"only a grid"),
+        (_filename_child(layout="x.json"), None, r"sets its own source"),
+        (_filename_child(), {"location": [{"plz": 1}]}, r"parent grid with a local"),
+        ({**_filename_child(), "id": None}, None, r"requires an 'id'"),
+    ],
+)
+def test_filename_placement_refuses_a_bad_node(
+    tmp_path, child, parent_config, match
+) -> None:
+    root = _mv_root(child)
+    if parent_config is not None:
+        root["config"] = parent_config
+
+    with pytest.raises(ValueError, match=match):
+        expand_filename_placements(root, tmp_path)
+
+
+def test_extract_builds_the_tree_from_filename_placed_grids(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_4.json", "grids/mv/load_9.json")
+    config = tmp_path / "experiment.yml"
+    config.write_text(yaml.safe_dump({"federation": _mv_root(_filename_child())}))
+
+    extracted = extract(config, tmp_path, tmp_path)
+
+    assert set(extracted.grid_nodes) == {"mv", "mv.lv_4", "mv.lv_9"}
+    assert extracted.tree.contains("mv.lv_9.houses_0")
+    assert extracted.raw_config["federation"] == _mv_root(_filename_child())
