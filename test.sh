@@ -14,8 +14,9 @@ RESULTS=()
 
 run_component() {
   local name="$1" context="$2" dockerfile="$3"
+  shift 3 # anything left is passed to docker build, e.g. --build-context
   echo "=== ${name} ==="
-  if docker build --target test -f "$dockerfile" -t "${name}-test" "$context"; then
+  if docker build "$@" --target test -f "$dockerfile" -t "${name}-test" "$context"; then
     RESULTS+=("PASS")
   else
     RESULTS+=("FAIL")
@@ -28,7 +29,7 @@ run_component grid federates/grid federates/grid/Dockerfile
 run_component house_player federates/house_player federates/house_player/Dockerfile
 run_component house . federates/house/Dockerfile
 run_component composegen composegen composegen/Dockerfile
-run_component infdb databases/infdb databases/infdb/Dockerfile
+run_component infdb databases/infdb databases/infdb/Dockerfile --build-context composegen=composegen
 # No experiment routes to the template, so nothing else would notice it rotting
 # against a CST release. Building it here is what keeps `cp -r federates/template`
 # a working starting point rather than one that fails on its first import.

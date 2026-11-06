@@ -12,6 +12,8 @@ from typing import Any, Literal
 from omegaconf import DictConfig, OmegaConf
 from treelib import Tree
 
+from grid_files import expand_filename_placements
+
 
 ConfigMode = Literal["legacy", "tree"]
 
@@ -197,7 +199,7 @@ def _extract_tree_config(
         raise ValueError("Tree config must contain top-level key 'federation'.")
 
     tree = Tree()
-    add_to_tree(tree, cfg["federation"])
+    add_to_tree(tree, expand_filename_placements(cfg["federation"], data_input_path))
 
     grid_ids = [
         node_id

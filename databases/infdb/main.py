@@ -17,6 +17,7 @@ import pandapower as pp
 from infdb import InfDB
 from cosim_toolbox.dbms import create_metadata_manager
 
+from grid_files import expand_filename_placements
 from src.infdb_data import resolve_grid_queries
 
 
@@ -198,7 +199,8 @@ def extract_grid_config(experiment_path: str) -> list[dict]:
         cfg = yaml.safe_load(f)
 
     use_meta_db = cfg.get("general", {}).get("use_meta_db", "json")
-    grid_nodes = _collect_grid_nodes(cfg.get("federation", {}))
+    federation = expand_filename_placements(cfg.get("federation", {}), LAYOUT_DIR)
+    grid_nodes = _collect_grid_nodes(federation)
 
     ids = [grid_id for grid_id, _ in grid_nodes]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})

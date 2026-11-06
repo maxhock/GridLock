@@ -9,7 +9,6 @@ import main as infdb_main
 from main import extract_grid_config, load_local_layout, write_grid_to_metadata
 from src.infdb_data import _net_table_count, get_pylovo_grid, resolve_grid_queries
 
-
 # ---------------------------------------------------------------------------
 # main.extract_grid_config
 # ---------------------------------------------------------------------------
@@ -469,3 +468,34 @@ def test_load_local_layout_rejects_unsupported_suffix(tmp_path, monkeypatch) -> 
 
     with pytest.raises(ValueError, match=r"net\.xls.*\.xlsx.*\.json"):
         load_local_layout("grid", "net.xls")
+
+
+def test_extract_grid_config_expands_filename_placed_grids(
+    tmp_path, monkeypatch
+) -> None:
+    layouts = _layout_dir(tmp_path, monkeypatch)
+    for name in ("mv.json", "mv/load_2.json", "mv/load_10.json"):
+        (layouts / name).parent.mkdir(parents=True, exist_ok=True)
+        (layouts / name).write_text("{}")
+    lv = {"id": "lv_0", "class": "grid", "config": {"placement": "filename"}}
+    path = tmp_path / "experiment.yml"
+    path.write_text(
+        json.dumps(
+            {
+                "federation": {
+                    "id": "mv",
+                    "class": "grid",
+                    "config": {"layout": "mv.json"},
+                    "sub_federates": [lv],
+                }
+            }
+        )
+    )
+
+    configs = extract_grid_config(str(path))
+
+    assert [(c["grid_id"], c["layout"]) for c in configs] == [
+        ("mv", "mv.json"),
+        ("mv.lv_2", "mv/load_2.json"),
+        ("mv.lv_10", "mv/load_10.json"),
+    ]

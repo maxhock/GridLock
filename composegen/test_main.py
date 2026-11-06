@@ -8,7 +8,8 @@ import pytest
 import yaml
 from treelib import Tree
 
-from extract import add_to_tree, validate_location_queries
+from extract import add_to_tree, extract, validate_location_queries
+from grid_files import expand_filename_placements
 from transform import (
     process_general_config,
     validate_timeseries_coverage,
@@ -967,3 +968,140 @@ def test_federate_docker_points_broker_address_at_compose_service_name() -> None
     _federate_docker(stub)
 
     assert calls == {"broker_address": "helics"}
+
+
+# ---------------------------------------------------------------------------
+# grid_files.expand_filename_placements
+# ---------------------------------------------------------------------------
+
+
+def _touch(root: Path, *names: str) -> None:
+    for name in names:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}")
+
+
+def _filename_child(**config) -> dict:
+    return {
+        "id": "lv_0",
+        "class": "grid",
+        "config": {"placement": "filename", **config},
+        "sub_federates": [
+            {"id": "houses_0", "class": "load", "config": {"placement": "fill"}}
+        ],
+    }
+
+
+def _mv_root(*children: dict) -> dict:
+    return {
+        "id": "mv",
+        "class": "grid",
+        "config": {"layout": "grids/mv.json"},
+        "sub_federates": list(children),
+    }
+
+
+def test_filename_placement_makes_one_grid_per_file(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_12.json", "grids/mv/load_3.json")
+
+    root = expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+    lv_3, lv_12 = root["sub_federates"]
+    assert (lv_3["id"], lv_3["config"]) == (
+        "lv_3",
+        {"placement": 3, "layout": "grids/mv/load_3.json"},
+    )
+    assert (lv_12["id"], lv_12["config"]["placement"]) == ("lv_12", 12)
+    assert lv_3["sub_federates"] == lv_12["sub_federates"]
+    assert lv_3["sub_federates"] is not lv_12["sub_federates"]
+
+
+def test_filename_placement_nests_through_subfolders(tmp_path) -> None:
+    _touch(
+        tmp_path,
+        "grids/mv.json",
+        "grids/mv/load_1.json",
+        "grids/mv/load_1/load_7.json",
+        "grids/mv/load_2.json",
+        "grids/mv/load_2/load_7.json",
+    )
+    mid = _filename_child()
+    mid["id"] = "mid"
+    mid["sub_federates"] = [_filename_child()]
+
+    root = expand_filename_placements(_mv_root(mid), tmp_path)
+
+    layouts = {
+        (m["id"], lv["id"]): lv["config"]["layout"]
+        for m in root["sub_federates"]
+        for lv in m["sub_federates"]
+    }
+    assert layouts == {
+        ("mid_1", "lv_7"): "grids/mv/load_1/load_7.json",
+        ("mid_2", "lv_7"): "grids/mv/load_2/load_7.json",
+    }
+
+
+def test_filename_placement_leaves_the_input_untouched(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_0.json")
+    federation = _mv_root(_filename_child())
+
+    expand_filename_placements(federation, tmp_path)
+
+    assert federation == _mv_root(_filename_child())
+
+
+@pytest.mark.parametrize(
+    "files, error, match",
+    [
+        ([], FileNotFoundError, r"grids/mv does not exist"),
+        (["grids/mv/notes.txt"], ValueError, r"not load_<idx>\.json.*notes\.txt"),
+        (["grids/mv/load_05.json"], ValueError, r"load_05\.json"),
+    ],
+)
+def test_filename_placement_refuses_a_bad_folder(tmp_path, files, error, match) -> None:
+    _touch(tmp_path, "grids/mv.json", *files)
+
+    with pytest.raises(error, match=match):
+        expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+
+def test_filename_placement_refuses_an_empty_folder(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json")
+    (tmp_path / "grids/mv/load_4").mkdir(parents=True)
+
+    with pytest.raises(ValueError, match=r"no load_<idx>\.json"):
+        expand_filename_placements(_mv_root(_filename_child()), tmp_path)
+
+
+@pytest.mark.parametrize(
+    "child, parent_config, match",
+    [
+        ({**_filename_child(), "class": "load"}, None, r"only a grid"),
+        (_filename_child(layout="x.json"), None, r"sets its own source"),
+        (_filename_child(), {"location": [{"plz": 1}]}, r"parent grid with a local"),
+        ({**_filename_child(), "id": None}, None, r"requires an 'id'"),
+    ],
+)
+def test_filename_placement_refuses_a_bad_node(
+    tmp_path, child, parent_config, match
+) -> None:
+    root = _mv_root(child)
+    if parent_config is not None:
+        root["config"] = parent_config
+
+    with pytest.raises(ValueError, match=match):
+        expand_filename_placements(root, tmp_path)
+
+
+def test_extract_builds_the_tree_from_filename_placed_grids(tmp_path) -> None:
+    _touch(tmp_path, "grids/mv.json", "grids/mv/load_4.json", "grids/mv/load_9.json")
+    config = tmp_path / "experiment.yml"
+    config.write_text(yaml.safe_dump({"federation": _mv_root(_filename_child())}))
+
+    extracted = extract(config, tmp_path, tmp_path)
+
+    assert set(extracted.grid_nodes) == {"mv", "mv.lv_4", "mv.lv_9"}
+    assert extracted.tree.contains("mv.lv_9.houses_0")
+    assert extracted.raw_config["federation"] == _mv_root(_filename_child())

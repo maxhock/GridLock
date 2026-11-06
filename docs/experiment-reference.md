@@ -155,6 +155,31 @@ It is still named after its load, so `lv-feeder_0` at `placement: 5` runs as `mv
 
 Several nested grids under one parent can have different layouts; each template node is its own net.
 
+**One file per load.** A grid with many different sub-grids, such as an MV net with an LV area on each substation, does not have to list them.
+A nested grid with `placement: "filename"` and no `layout` of its own takes every sub-grid from the folder named after its parent's layout: the sub-grids of `grids/mv.json` are `grids/mv/load_<idx>.json`, and each one hangs on the parent's load `<idx>`.
+
+```yaml
+federation:
+  id: mv
+  class: grid
+  config: {layout: grids/mv.json}
+  sub_federates:
+    - id: lv_0
+      class: grid
+      config: {placement: filename}
+      sub_federates:
+        - id: houses_0
+          class: load
+          config: {placement: fill, electrical_load: profile.csv}
+```
+
+With `grids/mv/load_3.json` and `grids/mv/load_12.json` this is the same federation as writing two grid nodes `lv_3` and `lv_12`, each with its own file as `layout` and its index as `placement`, and each with its own copy of the node's `sub_federates`.
+Composegen and the infdb stage both expand it this way (`composegen/grid_files.py`) before anything else reads the tree, so every check above applies to the expanded grids.
+The same works one level down: a `placement: "filename"` grid under `lv_0` reads `grids/mv/load_3/`, `grids/mv/load_12/` and so on, one folder per expanded grid.
+Folders in the directory are left alone, since they hold the next level.
+Any other file in it, a zero-padded index such as `load_05.json`, a missing or empty folder, and a parent without a local `layout` are errors.
+The ids come from the load indices, not from the files' contents, so a configuration written this way names no substation.
+
 `config/experiment-MV-LV.yml` is the MV/LV reference: a synthetic MV net as the root, an LV template placed on a list of MV loads (so it is cloned, subtree included), a unique LV feeder on another load, and an MV load player with `placement: "fill"` for the loads nobody else claims.
 
 #### Coupling contract
@@ -183,6 +208,7 @@ Until the MV grid has published, the LV net keeps its own slack setpoint.
 ### Placement
 
 `placement` is a pandapower **load index**, a list of them, or `"fill"`, and it is required for everything that moves power: `load`, `house`, `pv`, `battery`, and a grid nested under another grid.
+A nested grid can also use `"filename"`, which takes its sub-grids from files named after the parent's loads (see [Nested grids](#nested-grids)).
 
 The grid federate identifies incoming power purely by the `load_<idx>` segment of the HELICS key.
 A federate wired onto a bare `active_power` key is silently dropped from the power flow, which is why composegen refuses to guess here.
