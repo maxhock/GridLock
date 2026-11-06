@@ -52,7 +52,9 @@ def recorded(scenario: str) -> pd.DataFrame:
     return wide.astype(float).sort_index()
 
 
-def solve_mv(mv: pp.pandapowerNet, p_w: float, q_var: float) -> tuple[float, float, float]:
+def solve_mv(
+    mv: pp.pandapowerNet, p_w: float, q_var: float
+) -> tuple[float, float, float]:
     mv.load.at[0, "p_mw"], mv.load.at[0, "q_mvar"] = p_w / 1e6, q_var / 1e6
     pp.runpp(mv)
     return (
@@ -68,16 +70,24 @@ def gridlock_hv_mv(rec: pd.DataFrame) -> pd.DataFrame:
     p = rec["mv-grid_0/lv-grid_0/load_0/active_power"]
     q = rec["mv-grid_0/lv-grid_0/load_0/reactive_power"]
     v_pub = rec["mv-grid_0/load_0/voltage"]
-    best = None
+    best: tuple[pd.DataFrame, float, int] | None = None
     for lag in (0, 1):
-        rows = [solve_mv(mv, pi, qi) for pi, qi in zip(p.shift(lag).fillna(0), q.shift(lag).fillna(0))]
+        rows = [
+            solve_mv(mv, pi, qi)
+            for pi, qi in zip(p.shift(lag).fillna(0), q.shift(lag).fillna(0))
+        ]
         out = pd.DataFrame(rows, index=rec.index, columns=["p_w", "q_var", "v_pu"])
         err = float((out.v_pu - v_pub).abs().max())
-        print(f"  MV recovery with coupling lag {lag}: max |V - published V| = {err:.2e} pu")
+        print(
+            f"  MV recovery with coupling lag {lag}: max |V - published V| = {err:.2e} pu"
+        )
         if best is None or err < best[1]:
             best = (out, err, lag)
+    assert best is not None  # the loop above always runs
     if best[1] > 1e-9:
-        sys.exit("No lag reproduces the MV federate's published voltage; recovery is invalid.")
+        sys.exit(
+            "No lag reproduces the MV federate's published voltage; recovery is invalid."
+        )
     print(f"  -> MV federate applied the LV draw with a lag of {best[2]} step(s).")
     return best[0]
 
@@ -93,10 +103,21 @@ def integrated_net() -> tuple[pp.pandapowerNet, int, int]:
         if b not in bus_map:
             bus_map[b] = pp.create_bus(net, row.vn_kv, name=row["name"])
     for _, t in lv.trafo.iterrows():
-        pp.create_transformer(net, bus_map[t.hv_bus], bus_map[t.lv_bus], t.std_type, name=t["name"])
+        pp.create_transformer(
+            net, bus_map[t.hv_bus], bus_map[t.lv_bus], t.std_type, name=t["name"]
+        )
     for _, ln in lv.line.iterrows():
-        pp.create_line(net, bus_map[ln.from_bus], bus_map[ln.to_bus], ln.length_km, ln.std_type, name=ln["name"])
-    load = pp.create_load(net, bus_map[int(lv.load.bus.iat[0])], p_mw=0.0, name="ramp load")
+        pp.create_line(
+            net,
+            bus_map[ln.from_bus],
+            bus_map[ln.to_bus],
+            ln.length_km,
+            ln.std_type,
+            name=ln["name"],
+        )
+    load = pp.create_load(
+        net, bus_map[int(lv.load.bus.iat[0])], p_mw=0.0, name="ramp load"
+    )
     trafo = int(net.trafo.index[0])
     return net, load, trafo
 
@@ -106,7 +127,10 @@ def reference(ramp: pd.DataFrame, times: pd.Index) -> pd.DataFrame:
     rows = []
     for t in times:
         r = ramp.loc[int(t)]
-        net.load.at[load, "p_mw"], net.load.at[load, "q_mvar"] = r.base_load / 1e6, r.reactive_power / 1e6
+        net.load.at[load, "p_mw"], net.load.at[load, "q_mvar"] = (
+            r.base_load / 1e6,
+            r.reactive_power / 1e6,
+        )
         pp.runpp(net)
         rows.append(
             {
@@ -121,7 +145,16 @@ def reference(ramp: pd.DataFrame, times: pd.Index) -> pd.DataFrame:
 
 def panel(ax, x, gl, ref, title, unit, gl_label="GridLock (co-simulation)"):
     ax.plot(x, gl, color=GRIDLOCK, lw=2, marker="o", ms=4, label=gl_label)
-    ax.plot(x, ref, color=REFERENCE, lw=2, ls="--", marker="s", ms=4, label="Integrated pandapower")
+    ax.plot(
+        x,
+        ref,
+        color=REFERENCE,
+        lw=2,
+        ls="--",
+        marker="s",
+        ms=4,
+        label="Integrated pandapower",
+    )
     ax.set_title(title, loc="left", fontsize=11)
     ax.set_ylabel(unit)
     ax.grid(color="#e4e3df", lw=0.8)
@@ -150,12 +183,30 @@ def main() -> None:
 
     h = rec.index / 3600
     fig, axes = plt.subplots(3, 1, figsize=(9, 10), sharex=True)
-    panel(axes[0], h, gl.hv_mv_p_w / 1e3, ref.hv_mv_p_w / 1e3, "Demand at the HV/MV point (MV ext_grid)", "P [kW]")
-    panel(axes[1], h, gl.load_p_w / 1e3, ref.load_p_w / 1e3, "Demand at the load", "P [kW]",
-          gl_label="GridLock (load player publishes)")
+    panel(
+        axes[0],
+        h,
+        gl.hv_mv_p_w / 1e3,
+        ref.hv_mv_p_w / 1e3,
+        "Demand at the HV/MV point (MV ext_grid)",
+        "P [kW]",
+    )
+    panel(
+        axes[1],
+        h,
+        gl.load_p_w / 1e3,
+        ref.load_p_w / 1e3,
+        "Demand at the load",
+        "P [kW]",
+        gl_label="GridLock (load player publishes)",
+    )
     panel(axes[2], h, gl.load_v_pu, ref.load_v_pu, "Voltage at the load bus", "V [pu]")
     axes[2].set_xlabel("Simulation time [h]")
-    fig.suptitle("Minimal MV/LV: GridLock co-simulation vs one integrated pandapower net", x=0.01, ha="left")
+    fig.suptitle(
+        "Minimal MV/LV: GridLock co-simulation vs one integrated pandapower net",
+        x=0.01,
+        ha="left",
+    )
     fig.tight_layout()
     fig.savefig(OUT / "minimal_mvlv_comparison.png", dpi=150)
 
@@ -168,8 +219,22 @@ def main() -> None:
         }
     )
     print("\nLast steps (kW / pu):")
-    print((table[["gridlock_hv_mv_p_w", "integrated_hv_mv_p_w", "gridlock_mv_lv_p_w",
-                  "integrated_mv_lv_p_w"]] / 1e3).join(table[["gridlock_load_v_pu", "integrated_load_v_pu"]]).tail(5).round(4))
+    print(
+        (
+            table[
+                [
+                    "gridlock_hv_mv_p_w",
+                    "integrated_hv_mv_p_w",
+                    "gridlock_mv_lv_p_w",
+                    "integrated_mv_lv_p_w",
+                ]
+            ]
+            / 1e3
+        )
+        .join(table[["gridlock_load_v_pu", "integrated_load_v_pu"]])
+        .tail(5)
+        .round(4)
+    )
     print("\nLag-aligned max |difference|:")
     print(diff.abs().max())
 
