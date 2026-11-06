@@ -3,7 +3,7 @@
 A containerized, config-driven [HELICS](https://docs.helics.org/) co-simulation platform for power grids and households to research the effects of Home Energy Management Systems (HEMS) on the grid.
 
 One experiment YAML describes a grid and everything placed on it.
-A generator container turns that description into a complete federation — HELICS publications and subscriptions, CoSim Toolbox metadata, and a `docker-compose.yaml` — and the simulation runs as a set of containers, one per federate.
+A generator container turns that description into a complete federation — HELICS publications and subscriptions, CoSim Toolbox metadata, and a `docker-compose.yaml` — and the simulation runs as a set of containers: the grids and load players under one parent share one, every other federate gets its own.
 Nothing about the topology is wired by hand, so an experiment is reproducible from its config file and the commit it ran at.
 
 ## Concept
@@ -90,7 +90,7 @@ docker compose -f generated/docker-compose.yaml down --remove-orphans
 1. **Databases** — start TimescaleDB and MongoDB, the two CST stores.
 2. **infdb** — resolve the experiment's grid, from InfDB or a local workbook, and write the pandapower net into the metadata store.
 3. **composegen** — read the experiment YAML, place every federate on the grid, wire the HELICS keys, and write the CST federation plus `generated/docker-compose.yaml`.
-4. **Simulation** — bring up the generated compose file: a broker and one container per federate. Any federate exiting non-zero fails the whole run.
+4. **Simulation** — bring up the generated compose file: a broker plus the federate containers. Grids under the same parent run as threads of one process in one container, and so do load players; houses and HEMS still get one container each. Any federate exiting non-zero fails the whole run.
 
 ### Inside the generator
 

@@ -27,7 +27,6 @@ from load import (
 import monkeypatch as compose_patch
 from monkeypatch import _federate_docker, _service, define_yaml
 
-
 # ---------------------------------------------------------------------------
 # extract.add_to_tree
 # ---------------------------------------------------------------------------
@@ -821,17 +820,8 @@ class _FakeMetadataManager:
         return {"federation": self.federates}
 
 
-def test_define_yaml_builds_each_image_once(monkeypatch, tmp_path) -> None:
-    # Compose builds once per service that has a build section: with one on
-    # every service, a large federation started one build per federate of the
-    # same few images and BuildKit lost jobs.
-    federates = {
-        "mv": {"image": "grid", "command": "python3 main.py"},
-        "mv.lv_1": {"image": "grid", "command": "python3 main.py"},
-        "mv.lv_1.loads": {"image": "house_player", "command": "python3 player.py"},
-        "mv.lv_2": {"image": "grid", "command": "python3 main.py"},
-        "mv.lv_2.loads": {"image": "house_player", "command": "python3 player.py"},
-    }
+def _generated_services(monkeypatch, tmp_path, federates: dict) -> dict:
+    """Run define_yaml over ``federates`` and return the services it wrote."""
     monkeypatch.setattr(
         compose_patch,
         "create_metadata_manager",
@@ -841,10 +831,124 @@ def test_define_yaml_builds_each_image_once(monkeypatch, tmp_path) -> None:
 
     define_yaml("Scenario", use_meta_db="json")
 
-    services = yaml.safe_load(
-        (tmp_path / "generated" / "docker-compose.yaml").read_text()
-    )["services"]
+    return yaml.safe_load((tmp_path / "generated" / "docker-compose.yaml").read_text())[
+        "services"
+    ]
+
+
+def _grid(name: str) -> dict[str, str]:
+    return {
+        "image": "grid",
+        "command": f"python3 main.py --scenario S --federate_name {name} "
+        f"--net_key {name}",
+    }
+
+
+def _player(name: str) -> dict[str, str]:
+    return {
+        "image": "house_player",
+        "command": f"python3 main.py --scenario S --federate_name {name} "
+        f"--timeseries /data/{name}.csv",
+    }
+
+
+def test_define_yaml_runs_siblings_of_one_image_in_one_service(
+    monkeypatch, tmp_path
+) -> None:
+    # The full ÜZW federation at one container per federate needed ~66 GB:
+    # every grid loaded pandapower, numba and CST on its own.
+    federates = {
+        "hv": _grid("hv"),
+        "hv.mv_0": _grid("hv.mv_0"),
+        "hv.mv_1": _grid("hv.mv_1"),
+        "hv.mv_0.lv_3": _grid("hv.mv_0.lv_3"),
+        "hv.mv_0.lv_5": _grid("hv.mv_0.lv_5"),
+        "hv.mv_0.lv_3.houses": _player("hv.mv_0.lv_3.houses"),
+        "hv.mv_0.lv_5.houses": _player("hv.mv_0.lv_5.houses"),
+    }
+
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
+    assert list(services) == [
+        "helics",
+        "hv",
+        "hv.grid-group",
+        "hv.mv_0.grid-group",
+        "hv.mv_0.lv_3.houses",
+        "hv.mv_0.lv_5.houses",
+    ]
+    assert services["hv.grid-group"]["command"] == (
+        '/bin/bash -c "python3 main.py --scenario S '
+        "--federate_name hv.mv_0 --net_key hv.mv_0 "
+        '--federate_name hv.mv_1 --net_key hv.mv_1"'
+    )
+    assert services["hv.mv_0.lv_3.houses"]["command"] == (
+        f'/bin/bash -c "{federates["hv.mv_0.lv_3.houses"]["command"]}"'
+    )
+    # The broker waits for every federate, not for every container.
+    assert f"-f {len(federates)} " in services["helics"]["command"]
+
+
+def test_define_yaml_keeps_one_service_per_federate_for_other_images(
+    monkeypatch, tmp_path
+) -> None:
+    # The house entry point runs one federate per process.
+    federates = {
+        "lv": _grid("lv"),
+        "lv.house_4": {"image": "house", "command": "python3 house/main.py"},
+        "lv.house_6": {"image": "house", "command": "python3 house/main.py"},
+    }
+
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
     assert list(services) == ["helics", *federates]
+
+
+def test_define_yaml_refuses_a_group_named_like_a_federate(
+    monkeypatch, tmp_path
+) -> None:
+    federates = {
+        "mv": _grid("mv"),
+        "mv.lv_1": _grid("mv.lv_1"),
+        "mv.lv_2": _grid("mv.lv_2"),
+        "mv.grid-group": _player("mv.grid-group"),
+    }
+
+    with pytest.raises(ValueError, match="mv.grid-group"):
+        _generated_services(monkeypatch, tmp_path, federates)
+
+
+def test_define_yaml_refuses_siblings_with_different_entry_points(
+    monkeypatch, tmp_path
+) -> None:
+    other = _grid("mv.lv_2")
+    other["command"] = other["command"].replace("--scenario S", "--scenario T")
+    federates = {"mv": _grid("mv"), "mv.lv_1": _grid("mv.lv_1"), "mv.lv_2": other}
+
+    with pytest.raises(ValueError, match="not an entry point"):
+        _generated_services(monkeypatch, tmp_path, federates)
+
+
+def test_define_yaml_builds_each_image_once(monkeypatch, tmp_path) -> None:
+    # Compose builds once per service that has a build section: with one on
+    # every service, a large federation started one build per federate of the
+    # same few images and BuildKit lost jobs.
+    federates = {
+        "mv": _grid("mv"),
+        "mv.lv_1": _grid("mv.lv_1"),
+        "mv.lv_1.loads": _player("mv.lv_1.loads"),
+        "mv.lv_2": _grid("mv.lv_2"),
+        "mv.lv_2.loads": _player("mv.lv_2.loads"),
+    }
+    services = _generated_services(monkeypatch, tmp_path, federates)
+
+    assert list(services) == [
+        "helics",
+        "mv",
+        "mv.grid-group",
+        "mv.lv_1.loads",
+        "mv.lv_2.loads",
+    ]
     builders = {name for name, svc in services.items() if "build" in svc}
     assert builders == {"helics", "mv", "mv.lv_1.loads"}
     for name, svc in services.items():

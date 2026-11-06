@@ -16,6 +16,14 @@ from cosim_toolbox.dbms import create_metadata_manager
 # static IPs and a reserved subnet entirely (see _service).
 BROKER_SERVICE = "helics"
 
+# Images whose entry point runs several federates as threads of one process
+# when ``--federate_name`` and the arguments paired with it are repeated.
+# Federates of these images that share a parent share a container (see
+# _service_groups); every other image still gets one container per federate.
+GROUPED_IMAGES = ("grid", "house_player")
+# Where a federate's own arguments start in the command composegen gives it.
+_FEDERATE_ARG = " --federate_name "
+
 
 def _service(
     name: str,
@@ -79,6 +87,70 @@ def _service(
     # with houses now needs two federates per load, so that ceiling was close.
     _svc += '    command: /bin/bash -c "' + params[1] + '"\n'
     return _svc
+
+
+def _service_groups(fed_def: dict) -> dict[str, list[str]]:
+    """Map each Compose service to the federates it runs.
+
+    Federates of a grouped image that sit under the same parent run in one
+    container. One container per federate loaded pandapower, numba and CST
+    once per grid: the full ÜZW federation (256 grids, 252 load players)
+    needed ~66 GB and was stopped at 236 of 509 containers.
+
+    Composegen names every federate ``<parent federate>.<local id>``, so the
+    parent is the name without its last segment. A root federate, and a
+    group of one, keeps the federate's own name as its service name.
+    """
+    groups: dict[tuple[str, str], list[str]] = {}
+    for name, fed in fed_def.items():
+        parent = name.rpartition(".")[0]
+        image = fed["image"]
+        key = (parent, image) if parent and image in GROUPED_IMAGES else (name, "")
+        groups.setdefault(key, []).append(name)
+
+    services: dict[str, list[str]] = {}
+    for (parent, image), members in groups.items():
+        service = members[0] if len(members) == 1 else f"{parent}.{image}-group"
+        if service in services or (len(members) > 1 and service in fed_def):
+            raise ValueError(
+                f"Compose service '{service}' would run two sets of federates; "
+                f"rename the federate called '{service}'."
+            )
+        services[service] = members
+    return services
+
+
+def _group_command(members: list[str], fed_def: dict) -> str:
+    """One command line that starts every member of a service.
+
+    Members share the start of their command (entry point and scenario); each
+    then contributes its own ``--federate_name ...`` arguments, which the entry
+    point pairs up in order. A service of one runs its command unchanged.
+    """
+    prefixes = {fed_def[name].get("prefix", "") for name in members}
+    if len(members) == 1:
+        commandline = fed_def[members[0]]["command"]
+    else:
+        heads: set[str] = set()
+        own_args = ""
+        for name in members:
+            head, sep, tail = fed_def[name]["command"].partition(_FEDERATE_ARG)
+            if not sep:
+                raise ValueError(
+                    f"Federate '{name}' has no{_FEDERATE_ARG.rstrip()} in its "
+                    f"command, so it cannot share a container: "
+                    f"{fed_def[name]['command']!r}"
+                )
+            heads.add(head)
+            own_args += sep + tail
+        if len(heads) != 1 or len(prefixes) != 1:
+            raise ValueError(
+                f"Federates {members} share a container but not an entry point: "
+                f"{sorted(heads)}, prefixes {sorted(prefixes)}"
+            )
+        commandline = heads.pop() + own_args
+    prefix = prefixes.pop()
+    return f"{prefix} && {commandline}" if prefix else commandline
 
 
 def define_yaml(
@@ -167,23 +239,21 @@ def define_yaml(
         return True
 
     # Add helics broker federate
+    #
+    # cnt counts federates, not services: the broker's -f is the number of
+    # federates that will connect, however many containers they share.
     cnt = 2
     yaml_str = ""
     add_logger = False
-    for name in fed_def:
-        cnt += 1
-        image = fed_def[name]["image"]
-        commandline = f"{fed_def[name]['command']}"
-        if "prefix" in fed_def[name]:
-            if fed_def[name]["prefix"] != "":
-                commandline = f"{fed_def[name]['prefix']} && " + commandline
-        params = [cosim_env, commandline]
+    for service, members in _service_groups(fed_def).items():
+        cnt += len(members)
+        image = fed_def[members[0]]["image"]
+        params = [cosim_env, _group_command(members, fed_def)]
         yaml_str += _service(
-            name, image, params, cnt, depends="helics", build=claims_build(image)
+            service, image, params, cnt, depends="helics", build=claims_build(image)
         )
-        if "logger" in fed_def[name]:
-            if fed_def[name]["logger"]:
-                add_logger = True
+        if any(fed_def[name].get("logger") for name in members):
+            add_logger = True
 
     add_logger = False
 

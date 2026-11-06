@@ -477,3 +477,40 @@ def test_root_grid_publishes_its_whole_slack_draw() -> None:
     )
     assert publications["root/active_power"] > 1000.0  # load plus losses
     assert (net.ext_grid.vm_pu == 1.0).all()
+
+
+def test_parse_args_pairs_repeated_grids_in_order(monkeypatch) -> None:
+    argv = "main.py --scenario S --federate_name a --net_key ka "
+    argv += "--federate_name b --net_key kb"
+    monkeypatch.setattr("sys.argv", argv.split())
+
+    args = main.parse_args()
+
+    assert list(zip(args.federate_name, args.net_key)) == [("a", "ka"), ("b", "kb")]
+
+
+def test_parse_args_refuses_unpaired_net_keys(monkeypatch) -> None:
+    argv = "main.py --scenario S --federate_name a --federate_name b --net_key ka"
+    monkeypatch.setattr("sys.argv", argv.split())
+
+    with pytest.raises(SystemExit):
+        main.parse_args()
+
+
+def test_run_concurrently_ends_the_process_when_one_federate_fails(
+    monkeypatch,
+) -> None:
+    # A failed grid's siblings would wait forever on its time grant.
+    exits: list[int] = []
+    monkeypatch.setattr(main.os, "_exit", exits.append)
+    # run_concurrently installs its own hook; restore the default afterwards.
+    monkeypatch.setattr(main.threading, "excepthook", main.threading.excepthook)
+    ran: list[str] = []
+
+    def fails() -> None:
+        raise RuntimeError("power flow did not converge")
+
+    main.run_concurrently({"bad": fails, "good": lambda: ran.append("good")})
+
+    assert exits == [1]
+    assert ran == ["good"]
