@@ -78,8 +78,8 @@ Single federates can be debugged on the host against a JSON meta store — see
 3. **composegen** (`composegen/`) — an ETL over the experiment YAML:
    `extract.py` → `transform.py` → `load.py`, orchestrated by `main.py` (see below).
    Produces the CST federation/scenario documents and `generated/docker-compose.yaml`.
-4. **simulation** — the generated compose file, one container per federate plus a
-   `helics` broker service.
+4. **simulation** — the generated compose file, one container per federate (or per
+   group of federates, see "CST monkeypatches") plus a `helics` broker service.
 
 ### Inside composegen: the ETL
 
@@ -252,6 +252,14 @@ and `FederateConfig.docker` from the upstream CoSim Toolbox. The generated compo
 therefore carries **no static IPs and no reserved subnet** — federates reach the broker
 by the Compose service name `helics`, which is what lets two experiments run at once.
 Anything that changes the shape of the generated compose file lives here, not in CST.
+
+Federates of an image in `GROUPED_IMAGES` (`grid`, `house_player`) that share a parent share one container (`_service_groups`): the LV grids under one MV grid are one service, and so are the load players under one LV grid.
+The parent is the federate name without its last dotted segment, which is how composegen names federates.
+`_group_command` joins the members' `--federate_name ...` arguments onto one command, and the entry point runs each federate on its own thread in one process; a failing thread `os._exit(1)`s the whole container.
+This is why the full ÜZW federation fits in memory: one container per federate needed ~66 GB, because every grid process loads pandapower, numba and CST (~166 MB) before it solves anything, against ~50 MB per grid thread.
+Separate processes inside one container, as CST's own `define_sh` runs them, still ran out of memory.
+Every other image is one container per federate; to group one, its entry point must take repeated `--federate_name` arguments and run a thread per federate, as `federates/grid/main.py` does.
+The broker's `-f` counts federates, not services.
 
 ### Federate images
 
