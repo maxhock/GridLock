@@ -140,8 +140,8 @@ same goes for the coupling contract, which needs both nets' bus tables.
   (`id`, `name`, `class`, `config`, `sub_federates`) parsed into a `treelib.Tree`.
 - `federates:` → **legacy mode**, a flat dict resolved with OmegaConf, emitting
   `runner.json` files into `config/tmp/`. Deprecated and known-broken
-  (`config/experiment.yml` still routes here and produces federates that die on
-  startup); do not build on it. It also writes its compose file to
+  (its federates die on startup, and no config in the repo uses it any more);
+  do not build on it. It also writes its compose file to
   `config/tmp/docker-compose.yml`, which `run.sh` never reads — stage 4 only ever brings
   up `generated/docker-compose.yaml`.
 
