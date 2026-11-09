@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Build the minimal MV and LV nets and the ramping load profile for the demo.
+"""Build the minimal MV/LV nets and ramp profile that `experiment-minimal-mvlv.yml` runs.
 
 MV: ext_grid (20 kV busbar, stands for the HV/MV substation) -- 2 km cable -- load 0.
 LV: ext_grid (20 kV) -- 20/0.4 kV trafo -- 0.2 km cable -- load 0.
 
 The LV net needs its trafo because the coupling contract requires the LV slack bus
 to sit at the voltage of the MV load bus it hangs from (20 kV).
+
+`tools/plot_minimal_mvlv.py` compares a run of it with one integrated net.
 """
 
 from pathlib import Path

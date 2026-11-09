@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the minimal MV/LV co-simulation with one integrated pandapower net.
+"""Compare a run of `config/experiment-minimal-mvlv.yml` with one integrated net.
 
 GridLock side: what the federates recorded in Postgres. The HV/MV demand is the
 root MV grid's published slack draw (`mv-grid_0/active_power`). As a cross-check,
@@ -7,17 +7,17 @@ the MV net is re-solved with the coupling power the MV federate applied: the
 re-solved load-bus voltage must match the voltage the federate published, and the
 re-solved slack draw must match the published one.
 
-Reference side: MV cable, MV/LV trafo, LV cable and the load in ONE net, solved
-once per step with the ramp value of that step.
+Reference side: the LV net fused onto the MV load bus (`mvlv_merge.py`), solved
+once per step with the ramp value of that step. The nets and the ramp come from
+`tools/make_minimal_mvlv.py`.
 
-Usage: run `./run.sh config/experiment-minimal-mvlv.yml`, then
-`compare.py <scenario>` with the run's timestamped scenario name
-(`MinimalMvLv_YYYYMMDD_HHMMSS`) and the CST_POSTGRES_* variables of
-config/preflight.env in the environment.
+Writes `comparison.csv` and `minimal_mvlv_comparison.png` to
+`generated/minimal_mvlv/`. Usage, after `./run.sh config/experiment-minimal-mvlv.yml`:
+    python tools/plot_minimal_mvlv.py <MinimalMvLv_YYYYMMDD_HHMMSS> \
+        --pg-port ... --pg-db ... --pg-user ... --pg-password ...
 """
 
-import copy
-import os
+import argparse
 import sys
 from pathlib import Path
 
@@ -25,25 +25,22 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import pandas as pd
 import pandapower as pp
+import pandas as pd
 import psycopg2
+from mvlv_merge import build_merged_net, power_into_part
+from parity_common import add_postgres_arguments, postgres_dsn
 
-HERE = Path(__file__).resolve().parent
-INPUT = HERE.parent / "data" / "input"
-OUT = HERE / "out"
+REPO = Path(__file__).resolve().parent.parent
+INPUT = REPO / "data" / "input"
+OUT = REPO / "generated" / "minimal_mvlv"
 ANALYSIS = "MinimalMvLvAnalysis"
+MV_LOAD = LV_LOAD = 0
 GRIDLOCK, REFERENCE = "#2a78d6", "#eb6834"
 
 
-def recorded(scenario: str) -> pd.DataFrame:
-    conn = psycopg2.connect(
-        host="localhost",
-        port=os.environ["CST_POSTGRES_PORT"],
-        dbname=os.environ["CST_POSTGRES_DB"],
-        user=os.environ["CST_POSTGRES_USER"],
-        password=os.environ["CST_POSTGRES_PASSWORD"],
-    )
+def recorded(scenario: str, dsn: dict) -> pd.DataFrame:
+    conn = psycopg2.connect(**dsn)
     try:
         df = pd.read_sql(
             f'SELECT sim_time, data_name, data_value FROM "{ANALYSIS}".hdt_double '
@@ -67,12 +64,12 @@ def recorded(scenario: str) -> pd.DataFrame:
 def solve_mv(
     mv: pp.pandapowerNet, p_w: float, q_var: float
 ) -> tuple[float, float, float]:
-    mv.load.at[0, "p_mw"], mv.load.at[0, "q_mvar"] = p_w / 1e6, q_var / 1e6
+    mv.load.at[MV_LOAD, "p_mw"], mv.load.at[MV_LOAD, "q_mvar"] = p_w / 1e6, q_var / 1e6
     pp.runpp(mv)
     return (
         float(mv.res_ext_grid.p_mw.iat[0]) * 1e6,
         float(mv.res_ext_grid.q_mvar.iat[0]) * 1e6,
-        float(mv.res_bus.vm_pu.at[int(mv.load.bus.iat[0])]),
+        float(mv.res_bus.vm_pu.at[int(mv.load.bus.at[MV_LOAD])]),
     )
 
 
@@ -104,52 +101,27 @@ def gridlock_hv_mv(rec: pd.DataFrame) -> pd.DataFrame:
     return best[0]
 
 
-def integrated_net() -> tuple[pp.pandapowerNet, int, int]:
-    mv = pp.from_json(str(INPUT / "mv_minimal_20kv.json"))
-    lv = pp.from_json(str(INPUT / "lv_minimal_20kv.json"))
-    net = copy.deepcopy(mv)
-    net.load.drop(net.load.index, inplace=True)
-    mv_load_bus = int(mv.load.bus.iat[0])
-    bus_map = {int(lv.ext_grid.bus.iat[0]): mv_load_bus}
-    for b, row in lv.bus.iterrows():
-        if b not in bus_map:
-            bus_map[b] = pp.create_bus(net, row.vn_kv, name=row["name"])
-    for _, t in lv.trafo.iterrows():
-        pp.create_transformer(
-            net, bus_map[t.hv_bus], bus_map[t.lv_bus], t.std_type, name=t["name"]
-        )
-    for _, ln in lv.line.iterrows():
-        pp.create_line(
-            net,
-            bus_map[ln.from_bus],
-            bus_map[ln.to_bus],
-            ln.length_km,
-            ln.std_type,
-            name=ln["name"],
-        )
-    load = pp.create_load(
-        net, bus_map[int(lv.load.bus.iat[0])], p_mw=0.0, name="ramp load"
-    )
-    trafo = int(net.trafo.index[0])
-    return net, load, trafo
-
-
 def reference(ramp: pd.DataFrame, times: pd.Index) -> pd.DataFrame:
-    net, load, trafo = integrated_net()
+    """The LV net fused onto the MV load bus, solved at each step's ramp value."""
+    merged = build_merged_net(
+        pp.from_json(str(INPUT / "mv_minimal_20kv.json")),
+        {MV_LOAD: pp.from_json(str(INPUT / "lv_minimal_20kv.json"))},
+    )
+    net = merged.net
+    load = merged.parts[MV_LOAD].load_ids[LV_LOAD]
+    load_bus = merged.lv_bus_of_load(MV_LOAD, LV_LOAD)
     rows = []
     for t in times:
         r = ramp.loc[int(t)]
-        net.load.at[load, "p_mw"], net.load.at[load, "q_mvar"] = (
-            r.base_load / 1e6,
-            r.reactive_power / 1e6,
-        )
+        net.load.at[load, "p_mw"] = r.base_load / 1e6
+        net.load.at[load, "q_mvar"] = r.reactive_power / 1e6
         pp.runpp(net)
         rows.append(
             {
                 "hv_mv_p_w": float(net.res_ext_grid.p_mw.iat[0]) * 1e6,
-                "mv_lv_p_w": float(net.res_trafo.p_hv_mw.at[trafo]) * 1e6,
+                "mv_lv_p_w": power_into_part(merged, MV_LOAD)[0],
                 "load_p_w": float(net.res_load.p_mw.at[load]) * 1e6,
-                "load_v_pu": float(net.res_bus.vm_pu.at[int(net.load.bus.at[load])]),
+                "load_v_pu": float(net.res_bus.vm_pu.at[load_bus]),
             }
         )
     return pd.DataFrame(rows, index=times)
@@ -176,9 +148,12 @@ def panel(ax, x, gl, ref, title, unit, gl_label="GridLock (co-simulation)"):
 
 
 def main() -> None:
-    scenario = sys.argv[1]
-    OUT.mkdir(exist_ok=True)
-    rec = recorded(scenario)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("scenario", help="the run's timestamped scenario name")
+    add_postgres_arguments(parser)
+    args = parser.parse_args()
+    OUT.mkdir(parents=True, exist_ok=True)
+    rec = recorded(args.scenario, postgres_dsn(args))
     ramp = pd.read_csv(INPUT / "ramp_load_150kw.csv").set_index("timestamp")
     hv = gridlock_hv_mv(rec)
     published = rec["mv-grid_0/active_power"]
