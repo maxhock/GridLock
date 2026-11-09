@@ -48,7 +48,14 @@ def recorded(scenario: str) -> pd.DataFrame:
         )
     finally:
         conn.close()
+    if df.empty:
+        sys.exit(f"No rows recorded for {scenario}.")
     wide = df.pivot(index="sim_time", columns="data_name", values="data_value")
+    # A step a key has no row for becomes NaN, which every max() below would
+    # skip, passing the checks over the remaining steps only.
+    gaps = wide.isna().sum()
+    if gaps.any():
+        sys.exit(f"{scenario} has steps without a value: {gaps[gaps > 0].to_dict()}")
     return wide.astype(float).sort_index()
 
 

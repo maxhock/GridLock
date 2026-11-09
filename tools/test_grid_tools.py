@@ -63,6 +63,12 @@ def test_variant_with_std_type_keeps_the_std_types_rating() -> None:
     smoke_test(net)
 
 
+def test_variant_rejects_std_type_for_another_voltage() -> None:
+    # A 10 kV winding on a 20 kV bus converges with the LV side at ~2 pu.
+    with pytest.raises(ValueError, match="10 kV HV winding"):
+        make_variant(_load("kerber_landnetz_kabel_1"), 20.0, "0.25 MVA 10/0.4 kV")
+
+
 def test_variant_rejects_unknown_std_type() -> None:
     with pytest.raises(ValueError, match="unknown"):
         make_variant(_load("kerber_landnetz_kabel_1"), 20.0, "no such trafo")
