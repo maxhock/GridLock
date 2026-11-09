@@ -9,6 +9,11 @@ re-solved slack draw must match the published one.
 
 Reference side: MV cable, MV/LV trafo, LV cable and the load in ONE net, solved
 once per step with the ramp value of that step.
+
+Usage: run `./run.sh config/experiment-minimal-mvlv.yml`, then
+`compare.py <scenario>` with the run's timestamped scenario name
+(`MinimalMvLv_YYYYMMDD_HHMMSS`) and the CST_POSTGRES_* variables of
+config/preflight.env in the environment.
 """
 
 import copy
