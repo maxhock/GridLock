@@ -173,7 +173,9 @@ def main() -> None:
     mismatch = float((hv.p_w - published).abs().max())
     print(f"  re-solved vs published MV slack draw: max |dP| = {mismatch:.2e} W")
     if mismatch > 1e-3:
-        sys.exit("The MV federate's published slack draw differs from its re-solved net.")
+        sys.exit(
+            "The MV federate's published slack draw differs from its re-solved net."
+        )
     ref = reference(ramp, rec.index)
     gl = pd.DataFrame(
         {
