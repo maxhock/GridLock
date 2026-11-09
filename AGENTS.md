@@ -174,6 +174,11 @@ the power flow, which is why composegen raises rather than defaulting in these p
 `placement` accepts an int, a list of ints, or `"fill"` (every load not claimed by
 an explicit placement). At most one `"fill"` child per grid.
 
+A nested grid also accepts `"filename"`, with no `layout` of its own.
+It stands for every `load_<idx>.json` in the folder named after the parent's layout (`hv.json` → `hv/`), one grid per file, named `<id without its _N>_<idx>` and placed on load `<idx>`; subfolders hold the next level.
+`composegen/grid_files.py` expands these into plain nodes before anything else reads the tree, in extract and in the infdb stage alike, so both agree on which grids exist and every check below sees only ints.
+The infdb image gets that module through a Compose build context (`additional_contexts`), so keep it stdlib-only.
+
 Expansion differs by class (`_expand_child_instances`):
 - a **house** simulates one building, so `placement: [4, 6]` becomes two independent
   federates named after the load they drive — `house_4`, `house_6`, not `house_0_*`;

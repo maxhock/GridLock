@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Compare the minimal MV/LV co-simulation with one integrated pandapower net.
 
-GridLock side: what the federates recorded in Postgres. The root MV grid does not
-publish its own slack draw (it has no parent), so the HV/MV demand is recovered by
-solving the MV net with the coupling power the MV federate actually applied; the
-recovered MV load-bus voltage must match what the MV federate published, which
-proves the recovery is the federate's own power flow.
+GridLock side: what the federates recorded in Postgres. The HV/MV demand is the
+root MV grid's published slack draw (`mv-grid_0/active_power`). As a cross-check,
+the MV net is re-solved with the coupling power the MV federate applied: the
+re-solved load-bus voltage must match the voltage the federate published, and the
+re-solved slack draw must match the published one.
 
 Reference side: MV cable, MV/LV trafo, LV cable and the load in ONE net, solved
 once per step with the ramp value of that step.
@@ -65,7 +65,7 @@ def solve_mv(
 
 
 def gridlock_hv_mv(rec: pd.DataFrame) -> pd.DataFrame:
-    """Re-solve the MV net with the coupling power, at each candidate lag."""
+    """Re-solve the MV net with the coupling power, at each candidate lag, as a check."""
     mv = pp.from_json(str(INPUT / "mv_minimal_20kv.json"))
     p = rec["mv-grid_0/lv-grid_0/load_0/active_power"]
     q = rec["mv-grid_0/lv-grid_0/load_0/reactive_power"]
@@ -169,10 +169,15 @@ def main() -> None:
     rec = recorded(scenario)
     ramp = pd.read_csv(INPUT / "ramp_load_150kw.csv").set_index("timestamp")
     hv = gridlock_hv_mv(rec)
+    published = rec["mv-grid_0/active_power"]
+    mismatch = float((hv.p_w - published).abs().max())
+    print(f"  re-solved vs published MV slack draw: max |dP| = {mismatch:.2e} W")
+    if mismatch > 1e-3:
+        sys.exit("The MV federate's published slack draw differs from its re-solved net.")
     ref = reference(ramp, rec.index)
     gl = pd.DataFrame(
         {
-            "hv_mv_p_w": hv.p_w,
+            "hv_mv_p_w": published,
             "mv_lv_p_w": rec["mv-grid_0/lv-grid_0/load_0/active_power"],
             "load_p_w": rec["mv-grid_0/lv-grid_0/rampload_0/load_0/active_power"],
             "load_v_pu": rec["mv-grid_0/lv-grid_0/load_0/voltage"],
