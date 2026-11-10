@@ -20,5 +20,9 @@ helics[cli]==3.6.1
 pandapower==3.3.2
 numba==0.66.0
 openpyxl==3.1.5
+# pandapower's to_excel (pandapower2xlsx.py, make_lv_variant.py) writes via xlsxwriter
+xlsxwriter==3.2.9
 psycopg2-binary==2.9.11
 pyyaml==6.0.3
+# plot_minimal_mvlv.py draws its comparison figure
+matplotlib==3.10.8

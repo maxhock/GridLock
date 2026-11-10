@@ -12,45 +12,22 @@ environment the repo's .venv already provides (pandapower, psycopg2).
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pandapower as pp
 import psycopg2
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
-def _load_module(name: str, path: Path) -> ModuleType:
-    """Load a component's script-style module by exact path.
-
-    Every federate directory is self-contained and unpackaged (see AGENTS.md),
-    so `federates/grid/main.py` and `federates/house_player/src/load_player.py`
-    can't both be reached with a plain `import` without their bare module
-    names ("main", "src") colliding with the same-named modules other
-    components already carry. Loading by path sidesteps that entirely.
-    """
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-_grid_main = _load_module(
-    "gridlock_tools_grid_main", REPO_ROOT / "federates" / "grid" / "main.py"
+from parity_common import (
+    REPO_ROOT,
+    add_postgres_arguments,
+    load_timeseries,
+    lookup_power,
+    postgres_dsn,
+    resolve_run_window,
+    sanitize_net_for_power_flow,
 )
-_load_player = _load_module(
-    "gridlock_tools_load_player",
-    REPO_ROOT / "federates" / "house_player" / "src" / "load_player.py",
-)
-sanitize_net_for_power_flow = _grid_main.sanitize_net_for_power_flow
-load_timeseries = _load_player.load_timeseries
-lookup_power = _load_player.lookup_power
-
 
 TOLERANCE_PU = 1e-6
 
@@ -65,8 +42,7 @@ def _independent_pandapower_run(
     csv_path: Path,
     load_indices: list[int],
     time_step: int,
-    start_time: int,
-    end_time: int,
+    duration_s: int,
 ) -> dict[float, dict[int, float]]:
     """Replay the same timeseries directly against pandapower, bypassing HELICS/CST."""
     raw_net = pp.from_excel(layout_path)
@@ -80,7 +56,8 @@ def _independent_pandapower_run(
     timeseries = load_timeseries(str(csv_path))
 
     voltages: dict[float, dict[int, float]] = {}
-    for sim_time in range(start_time, end_time + time_step, time_step):
+    # HELICS time runs from 0 whatever wall clock the run starts at.
+    for sim_time in range(0, duration_s + time_step, time_step):
         p_w, q_var = lookup_power(timeseries, float(sim_time))
 
         # Mirrors grid/main.py:update_internal_model's unit conversion exactly.
@@ -139,11 +116,7 @@ def main() -> int:
             "sort order can silently compare against a stale one."
         ),
     )
-    parser.add_argument("--pg-host", default="localhost")
-    parser.add_argument("--pg-port", type=int, default=5432)
-    parser.add_argument("--pg-db", required=True)
-    parser.add_argument("--pg-user", required=True)
-    parser.add_argument("--pg-password", required=True)
+    add_postgres_arguments(parser)
     args = parser.parse_args()
 
     experiment = _load_experiment(Path(args.experiment))
@@ -152,13 +125,7 @@ def main() -> int:
 
     analysis_name = general["name"]
     time_step = int(general["time_step"])
-    # `duration:` is accepted by the schema but read by nothing in composegen
-    # (see docs/experiment-reference.md) - the run length actually comes from
-    # end_time - start_time. Matching that here, rather than the dead key,
-    # keeps this script correct if the experiment's start/end ever diverge
-    # from its duration.
-    start_time = int(general.get("start_time") or 0)
-    end_time = int(general["end_time"])
+    duration_s = resolve_run_window(general).duration_s
     grid_fed_name = federation["id"]
     layout_path = REPO_ROOT / "data" / "input" / federation["config"]["layout"]
 
@@ -170,19 +137,13 @@ def main() -> int:
 
     print(f"Replaying {csv_path.name} against {layout_path.name} in pure pandapower...")
     expected = _independent_pandapower_run(
-        layout_path, csv_path, load_indices, time_step, start_time, end_time
+        layout_path, csv_path, load_indices, time_step, duration_s
     )
 
     scenario = args.scenario
     print(f"Comparing against scenario '{scenario}' recorded by the real run...")
 
-    dsn = {
-        "host": args.pg_host,
-        "port": args.pg_port,
-        "dbname": args.pg_db,
-        "user": args.pg_user,
-        "password": args.pg_password,
-    }
+    dsn = postgres_dsn(args)
     actual = _recorded_voltages(scenario, analysis_name, grid_fed_name, dsn)
 
     mismatches = []

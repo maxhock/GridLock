@@ -15,6 +15,9 @@ RUN uv sync --frozen --no-install-project
 # Copy the source code into the container
 COPY src src
 COPY main.py main.py
+# The tree expansion composegen also runs, so both stages see the same grids. It
+# comes from the `composegen` build context (docker-compose.preflight.yaml).
+COPY --from=composegen grid_files.py grid_files.py
 
 # The InfDB library writes its log into the working directory. This container
 # runs as the invoking host user (so that anything it leaves in generated/ is
@@ -36,6 +39,6 @@ CMD ["python", "main.py"]
 
 # --- Usage ---
 # To run tests during build:
-# docker build --target test -t infdb-test .
+# docker build --build-context composegen=../../composegen --target test -t infdb-test .
 # To build production image:
-# docker build --target final -t infdb-prod .
+# docker build --build-context composegen=../../composegen --target final -t infdb-prod .

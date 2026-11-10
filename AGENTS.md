@@ -66,16 +66,20 @@ Single federates can be debugged on the host against a JSON meta store — see
    (scenarios, federations, `custom_metadata`). Backends are chosen per experiment
    via `general.use_meta_db` / `use_data_db`; `json` writes into `generated/`
    instead of Mongo.
-2. **infdb** (`databases/infdb/main.py`) — resolves the grid. Either fetches nets
-   from an external InfDB by location query (`plz`/`kcid`/`bcid`) or loads a local
-   pandapower workbook from `data/input/`. Writes each net as JSON into the CST
-   metadata store under `custom_metadata/<grid federate name>`. Federates read it
-   from there at runtime, so nothing but this stage needs InfDB access.
+2. **infdb** (`databases/infdb/main.py`) — resolves every grid in the tree, nested
+   ones included (`_collect_grid_nodes`). The root either fetches nets from an
+   external InfDB by location query (`plz`/`kcid`/`bcid`) or loads a local pandapower
+   layout (`.xlsx` or `.json`) from `data/input/`; a nested grid must use a layout.
+   Writes each net as JSON into the CST metadata store under
+   `custom_metadata/<net key>` — the grid's dotted tree id (`mv-grid_0.lv-grid_0`) for
+   layouts, `<id>_<plz>_<kcid>_<bcid>` for InfDB nets. `_node_id` must build ids
+   exactly as `extract.add_to_tree` does. Federates read the net from there at runtime,
+   so nothing but this stage needs InfDB access.
 3. **composegen** (`composegen/`) — an ETL over the experiment YAML:
    `extract.py` → `transform.py` → `load.py`, orchestrated by `main.py` (see below).
    Produces the CST federation/scenario documents and `generated/docker-compose.yaml`.
-4. **simulation** — the generated compose file, one container per federate plus a
-   `helics` broker service.
+4. **simulation** — the generated compose file, one container per federate (or per
+   group of federates, see "CST monkeypatches") plus a `helics` broker service.
 
 ### Inside composegen: the ETL
 
@@ -87,7 +91,8 @@ run in order by `main.py`:
   `treelib.Tree` for tree mode, and checks that each grid names exactly one source
   (`layout` or `location`). Produces an `ExtractedConfig`.
 - `transform.py` — **validate and normalise**. `validate_tree` collects every missing
-  or unsupported field before raising, `validate_timeseries_coverage` rejects input
+  or unsupported field before raising (including the nested-grid rules in
+  `_grid_nesting_errors`), `validate_timeseries_coverage` rejects input
   CSVs that are too short, `process_general_config` normalises the times, and
   `wire_pub_sub` derives each node's publications/subscriptions from its parent/child
   pairs. Produces a `TransformedConfig`.
@@ -110,15 +115,21 @@ anything exists to clean up, and it is the rule to preserve: new validation belo
 
 Topic wiring is split across both phases, and the transform half is the *fallback*.
 `wire_pub_sub` records topics on every tree node, but `load.py` registers the real CST
-groups itself in `_wire_grid_child` — per `load_<idx>` keys for anything placed on a
-load, plus the house `state` and HEMS `control` groups — and marks those nodes handled.
+groups itself and marks those nodes handled. Phase 1 starts at each root grid
+(`_root_grid_nodes`) and recurses: `_wire_grid` registers the grid federate once, reads
+its net, and hands each child to `_wire_child`, which resolves placement and expands it
+into instances. A non-grid instance gets its keys from `_wire_grid_child` — per
+`load_<idx>` keys for anything placed on a load, plus the house `state` and HEMS
+`control` groups. A nested grid instance goes through `_wire_nested_grid_instance`,
+which runs `_check_coupling` and then calls `_wire_grid` again for the child.
 `_add_generic_tree_pubsub_groups` then registers `wire_pub_sub`'s topics for whatever is
-left over. In both working experiments that is nothing, so changing `wire_pub_sub` alone
+left over. In every working experiment that is nothing, so changing `wire_pub_sub` alone
 changes no key a federate actually sees.
 
 Placement breaks the phase split, and looks misplaced until you need to change it:
-resolving it needs the grid's load table, which exists only once `_read_load_list` has
-read what the infdb stage wrote, so it cannot happen any earlier than `load.py`.
+resolving it needs the grid's load table, which exists only once `_read_net_tables` has
+read what the infdb stage wrote, so it cannot happen any earlier than `load.py`. The
+same goes for the coupling contract, which needs both nets' bus tables.
 `transform.expand_grid_nodes` is the abandoned attempt to do it in the transform phase.
 
 ### Experiment config: two formats
@@ -129,8 +140,8 @@ read what the infdb stage wrote, so it cannot happen any earlier than `load.py`.
   (`id`, `name`, `class`, `config`, `sub_federates`) parsed into a `treelib.Tree`.
 - `federates:` → **legacy mode**, a flat dict resolved with OmegaConf, emitting
   `runner.json` files into `config/tmp/`. Deprecated and known-broken
-  (`config/experiment.yml` still routes here and produces federates that die on
-  startup); do not build on it. It also writes its compose file to
+  (its federates die on startup, and no config in the repo uses it any more);
+  do not build on it. It also writes its compose file to
   `config/tmp/docker-compose.yml`, which `run.sh` never reads — stage 4 only ever brings
   up `generated/docker-compose.yaml`.
 
@@ -138,12 +149,16 @@ Tree configs are read with `yaml.safe_load`, **not** OmegaConf — so `${...}`
 interpolation does not resolve there and would be passed through as a literal
 string. Interpolation only works in legacy configs.
 
-`config/experiment-LV.yml` (InfDB location) and `config/experiment-local-grid.yml`
-(local layout, houses + HEMS) are the two working tree-mode references.
+The working tree-mode references are `config/experiment-LV.yml` (InfDB location),
+`config/experiment-local-grid.yml` (local layout, houses + HEMS) and
+`config/experiment-MV-LV.yml` (a synthetic 20 kV MV net with cloned and unique LV
+grids under it). `config/experiment-e2e-mvlv-parity.yml` is the MV/LV parity check's
+experiment, not a reference to copy.
 
 `docs/experiment-reference.md` documents the tree-mode schema for users: every key, the
-required CSV columns per class, and the HELICS keys a run emits. Keep it in step when
-you change `validate_tree`, `_wire_grid_child`, or what a federate reads from a CSV.
+required CSV columns per class, nested grids and their coupling contract, and the HELICS
+keys a run emits. Keep it in step when you change `validate_tree`, `_wire_grid_child`,
+`_check_coupling`, or what a federate reads from a CSV.
 
 ### How placement and HELICS keys fit together
 
@@ -151,22 +166,55 @@ This is the core invariant of the project.
 
 The grid federate identifies incoming power purely by the `load_<idx>` segment of
 the HELICS key (`federates/grid/main.py:_LOAD_RE`). So anything that injects or
-draws power — `load`, `house`, `pv`, `battery` (`LOAD_PLACED_CLASSES` in
-`composegen/load.py`) — must be wired onto a **pandapower load index**, not a bare
-bus. A federate that publishes a plain `active_power` key is silently dropped from
+draws power — `load`, `house`, `pv`, `battery`, and a nested `grid`
+(`LOAD_PLACED_CLASSES` in `composegen/load.py`) — must be wired onto a **pandapower
+load index**, not a bare bus. A federate that publishes a plain `active_power` key is silently dropped from
 the power flow, which is why composegen raises rather than defaulting in these paths.
 
 `placement` accepts an int, a list of ints, or `"fill"` (every load not claimed by
 an explicit placement). At most one `"fill"` child per grid.
 
+A nested grid also accepts `"filename"`, with no `layout` of its own.
+It stands for every `load_<idx>.json` in the folder named after the parent's layout (`hv.json` → `hv/`), one grid per file, named `<id without its _N>_<idx>` and placed on load `<idx>`; subfolders hold the next level.
+`composegen/grid_files.py` expands these into plain nodes before anything else reads the tree, in extract and in the infdb stage alike, so both agree on which grids exist and every check below sees only ints.
+The infdb image gets that module through a Compose build context (`additional_contexts`), so keep it stdlib-only.
+
 Expansion differs by class (`_expand_child_instances`):
 - a **house** simulates one building, so `placement: [4, 6]` becomes two independent
   federates named after the load they drive — `house_4`, `house_6`, not `house_0_*`;
+- a **nested grid** is split the same way (`PER_LOAD_INSTANCE_CLASSES`): every
+  instance clones the grid together with its whole subtree, so `lv-grid_0` at `[1, 3]`
+  runs as `mv-grid_0.lv-grid_1` and `mv-grid_0.lv-grid_3`, each with its own houses and
+  load players. A single int is renamed too (`lv-feeder_0` at `5` → `lv-feeder_5`).
+  All clones run the template's net, passed to the grid federate as `--net_key` (the
+  template's dotted tree id), which is why the net key and the federate name are
+  separate arguments;
 - a **load player** replays one profile across all its indices and stays a single
   federate holding all of them.
 
-Unclaimed load indices are legal (the grid zeroes all static loads at import, so they
-sit at 0 W) but are reported, since they look identical to a placement typo.
+Unclaimed load indices are legal (the grid zeroes all static loads and sgens at import,
+and sets every load's `scaling` to 1, so they sit at 0 W) but are reported, since they
+look identical to a placement typo.
+
+Every federate publishes the power its load *actually draws*, not a nominal value at
+1 pu, so the grid makes every load constant-power at import: `scaling` is set to 1 and
+all ZIP shares (`const_z_*_percent`, `const_i_*_percent`) to 0
+(`federates/grid/main.py:_zero_static_loads`). A ZIP share would make pandapower apply
+voltage dependency a second time — for a nested grid on top of its own power flow, so a
+100 % constant-Z coupling load at 0.98 pu drew only 0.9604 of what the LV grid
+reported. Do not reintroduce voltage-dependent loads on driven indices; model that
+dependency inside the federate that publishes the power.
+
+A nested grid is coupled to its parent like a house on that load: it publishes
+`load_<idx>/active_power` and `/reactive_power` (its `res_ext_grid` draw, losses
+included) and subscribes to the parent's `load_<idx>/voltage`, which it writes into its
+single `ext_grid.vm_pu`. The grid federate tells these upstream keys from its own loads'
+keys by direction and suffix (`_GridKeys.classify`), since both carry `/load_<idx>/`.
+composegen's `_check_coupling` refuses an LV net without exactly one `ext_grid`, or whose
+slack bus `vn_kv` differs from the parent load bus; `tools/grid_contract.py` is a
+deliberate copy of that check for the grid tools — keep the two in step.
+`tools/make_lv_variant.py` re-rates an LV layout to a parent's voltage, and
+`./e2e-test-mvlv-parity.sh` compares a coupled run against one merged pandapower net.
 
 All of this resolution happens in `load.py` phase 1 (`_resolve_placement` /
 `_resolve_load_placement`). `transform.expand_grid_nodes` looks like it does the same
@@ -181,14 +229,26 @@ the change will have no effect.
 Every federate shares one period and no offset, so a simulation step has the same
 `sim_time` everywhere. Step ordering uses HELICS `wait_for_current_time_update`,
 which HELICS permits on exactly one federate in the federation; composegen gives that
-slot to the grid, and only when there is exactly one grid federate
-(`_grid_waits_for_current_time`). With several grids nobody gets it and every grid
-uniformly lags one step. The long comment above that function records what was
-measured and why depth-staggered offsets were removed — read it before touching
-timing.
+slot to the root grid, and only when there is exactly one root grid federate
+(`_grid_waits_for_current_time`). Nested grids never get it. With several root grids
+nobody gets it and every root grid uniformly lags one step. Below the root the lag
+compounds: each grid level adds one step, so a house under an LV grid reaches the MV
+power flow one step late. HELICS iteration would remove that and is a later phase of
+issue #65. The long comment above that function records what was measured and why
+depth-staggered offsets were removed — read it before touching timing.
 
 `time_step` must be a whole number of seconds: CST's `HelicsMsg.verify` type-checks
 `period` against an int default.
+
+`start_time` and `end_time` are always **absolute** times (a number is seconds after
+`2023-01-01T00:00:00`), never a length; `duration` is the length. Any two of the three
+fix the third, `duration` alone runs from 0, and all three together are refused. In
+tree mode the rule lives only in `composegen/run_window.py:resolve_run_window`
+(the deprecated legacy path still computes its own `end_time - start_time`), which
+`process_general_config` calls and the parity tools load by path — size a run through
+it, never with `end_time - start_time` of raw config values, which is how the coverage
+check and the verifiers once disagreed with composegen. HELICS time starts at 0 whatever
+`start_time` is, and CSVs are read from their first row.
 
 ### CST monkeypatches
 
@@ -197,6 +257,14 @@ and `FederateConfig.docker` from the upstream CoSim Toolbox. The generated compo
 therefore carries **no static IPs and no reserved subnet** — federates reach the broker
 by the Compose service name `helics`, which is what lets two experiments run at once.
 Anything that changes the shape of the generated compose file lives here, not in CST.
+
+Federates of an image in `GROUPED_IMAGES` (`grid`, `house_player`) that share a parent share one container (`_service_groups`): the LV grids under one MV grid are one service, and so are the load players under one LV grid.
+The parent is the federate name without its last dotted segment, which is how composegen names federates.
+`_group_command` joins the members' `--federate_name ...` arguments onto one command, and the entry point runs each federate on its own thread in one process; a failing thread `os._exit(1)`s the whole container.
+This is why the full ÜZW federation fits in memory: one container per federate needed ~66 GB, because every grid process loads pandapower, numba and CST (~166 MB) before it solves anything, against ~50 MB per grid thread.
+Separate processes inside one container, as CST's own `define_sh` runs them, still ran out of memory.
+Every other image is one container per federate; to group one, its entry point must take repeated `--federate_name` arguments and run a thread per federate, as `federates/grid/main.py` does.
+The broker's `-f` counts federates, not services.
 
 ### Federate images
 
@@ -217,7 +285,9 @@ not from a federate's own name.
 
 ### Data flow at runtime
 
-- Grid nets: infdb → `custom_metadata` → `federates/grid/main.py:load_net_from_metadata`.
+- Grid nets: infdb → `custom_metadata/<net key>` →
+  `federates/grid/main.py:load_net_from_metadata`, keyed by the `--net_key` composegen
+  puts on the command line, not by the federate name.
 - House exogenous datasets: composegen reads the CSV and stores its text in
   `custom_metadata/<house federate>`; the house materializes it at startup. Load-player
   CSVs are the exception — they are passed as a `--timeseries` path.
@@ -260,6 +330,12 @@ Anything that changes per experiment belongs in the experiment YAML, stated once
 anything static belongs in the federate's own folder or in code. In legacy configs,
 reference a value with OmegaConf interpolation (`${..path.to.value}`) rather than
 repeating it — but see the note above: this does not work in tree configs.
+
+The repository is public. Real (DSO) grids and the experiments that use them live only
+in the git-ignored `data/input/private/` and `config/private/`; never commit them, and
+keep their names and data out of commits, tests and docs. Tests and CI use the synthetic
+nets in `data/input/` instead. `run.sh` accepts experiments in any subdirectory of
+`config/`.
 
 ### Git
 

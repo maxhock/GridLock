@@ -3,6 +3,7 @@
 import pandas as pd
 import pytest
 
+import main
 from src.load_player import load_timeseries, lookup_power
 
 
@@ -117,3 +118,25 @@ def test_lookup_power_after_last_sample_holds_last_row() -> None:
     p, q = lookup_power(_series(), 100_000.0)
 
     assert (p, q) == (300.0, 30.0)
+
+
+def test_parse_args_pairs_repeated_players_in_order(monkeypatch) -> None:
+    argv = "main.py --scenario S --federate_name a --timeseries a.csv "
+    argv += "--federate_name b --timeseries b.csv"
+    monkeypatch.setattr("sys.argv", argv.split())
+
+    args = main.parse_args()
+
+    assert list(zip(args.federate_name, args.timeseries)) == [
+        ("a", "a.csv"),
+        ("b", "b.csv"),
+    ]
+
+
+def test_parse_args_refuses_unpaired_timeseries(monkeypatch) -> None:
+    argv = "main.py --scenario S --federate_name a --federate_name b "
+    argv += "--timeseries a.csv"
+    monkeypatch.setattr("sys.argv", argv.split())
+
+    with pytest.raises(SystemExit):
+        main.parse_args()

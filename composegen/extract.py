@@ -12,8 +12,14 @@ from typing import Any, Literal
 from omegaconf import DictConfig, OmegaConf
 from treelib import Tree
 
+from grid_files import expand_filename_placements
+
 
 ConfigMode = Literal["legacy", "tree"]
+
+# A layout is read by the infdb image, not here; this list only lets a typo fail
+# at extract. Kept in step with _LAYOUT_READERS in databases/infdb/main.py.
+LAYOUT_SUFFIXES = (".xlsx", ".json")
 
 
 @dataclass
@@ -163,6 +169,17 @@ def _read_layout_buses(layout_path: Path) -> list[int]:
     return list(range(len(df)))
 
 
+def _check_layout_file(layout_path: Path) -> None:
+    """Reject a missing or unsupported layout here, before any stage has run."""
+    if layout_path.suffix.lower() not in LAYOUT_SUFFIXES:
+        raise ValueError(
+            f"Unsupported grid layout '{layout_path.name}': expected one of "
+            f"{', '.join(LAYOUT_SUFFIXES)}."
+        )
+    if not layout_path.exists():
+        raise FileNotFoundError(f"Grid layout file not found: {layout_path}")
+
+
 def _extract_tree_config(
     config_path: Path,
     data_input_path: Path,
@@ -182,7 +199,7 @@ def _extract_tree_config(
         raise ValueError("Tree config must contain top-level key 'federation'.")
 
     tree = Tree()
-    add_to_tree(tree, cfg["federation"])
+    add_to_tree(tree, expand_filename_placements(cfg["federation"], data_input_path))
 
     grid_ids = [
         node_id
@@ -206,8 +223,7 @@ def _extract_tree_config(
 
         if layout:
             layout_path = data_input_path / layout
-            if not layout_path.exists():
-                raise FileNotFoundError(f"Grid layout file not found: {layout_path}")
+            _check_layout_file(layout_path)
             grid_nodes[grid_id] = None
             print(f"Grid '{grid_id}' uses local layout: {layout_path}")
 

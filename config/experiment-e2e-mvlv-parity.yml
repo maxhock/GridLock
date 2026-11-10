@@ -1,0 +1,63 @@
+# MV/LV coupling parity check (issue #65), run by e2e-test-mvlv-parity.sh.
+#
+# Every load is a load player replaying a CONSTANT profile, and there are no
+# houses: with constant demand the one-step-per-level lag of the coupling
+# washes out, so after a few steps the co-simulation sits on the fixed point of
+# ONE merged pandapower net. tools/verify_mvlv_parity.py builds that net and
+# compares. The MV loads (600 kW) and the LV loads (6 kW) are deliberately
+# different, so a swapped or misapplied coupling shows up.
+#
+# Same topology as experiment-MV-LV.yml, with load players only. The json meta
+# store is deliberate: it leaves the run's scenario file in generated/scenarios/,
+# which is how the wrapper learns the scenario name. Six steps is ample: the
+# coupling lags one step per grid level (two levels here).
+general:
+  name: "MvLvParity"
+  start_time: 0
+  end_time: 18000
+  time_step: 3600
+  use_meta_db: "json"
+  use_data_db: "postgres"
+federation:
+  id: "mv-grid_0"
+  name: "Synthetic MV grid (parity check)"
+  class: "grid"
+  config:
+    layout: "mv_synthetic_20kv.json"
+  sub_federates:
+    # MV loads 0, 2, 4: the ones no LV grid claims.
+    - id: "loadmv_0"
+      name: "MV constant load"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "e2e_mvlv_mv_loads.csv"
+    # Cloned onto MV loads 1 and 3: mv-grid_0.lv-grid_1 and mv-grid_0.lv-grid_3.
+    - id: "lv-grid_0"
+      name: "LV grid template"
+      class: "grid"
+      config:
+        layout: "kerber_landnetz_freileitung_1_20kv.xlsx"
+        placement: [1, 3]
+      sub_federates:
+        - id: "loadhouse_0"
+          name: "LV constant load"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "e2e_mvlv_lv_loads.csv"
+    # A single int placement is not cloned: mv-grid_0.lv-feeder_5 on MV load 5,
+    # with the cable variant as its own net.
+    - id: "lv-feeder_0"
+      name: "LV feeder"
+      class: "grid"
+      config:
+        layout: "kerber_landnetz_kabel_1_20kv.xlsx"
+        placement: 5
+      sub_federates:
+        - id: "loadfeeder_0"
+          name: "LV feeder constant load"
+          class: "load"
+          config:
+            placement: "fill"
+            electrical_load: "e2e_mvlv_lv_loads.csv"

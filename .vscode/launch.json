@@ -11,6 +11,8 @@
                 "--scenario",
                 "TestGridScenario",
                 "--federate_name",
+                "lv-grid_91301_1_4",
+                "--net_key",
                 "lv-grid_91301_1_4"
             ],
             "env": {
