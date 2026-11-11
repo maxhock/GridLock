@@ -287,6 +287,69 @@ def test_federate_commands(generated: Generated) -> None:
     }
 
 
+def _failing_writes(monkeypatch: pytest.MonkeyPatch, collections: set[str]) -> None:
+    """Make CST's JSON writer report failure for ``collections``, as it does on OSError."""
+    from cosim_toolbox.dbms import json_metadata
+
+    write = json_metadata.JSONMetadataWriter.write
+
+    def failing(self, collection_type, name, data, overwrite=False):
+        if collection_type in collections:
+            return False
+        return write(self, collection_type, name, data, overwrite)
+
+    monkeypatch.setattr(json_metadata.JSONMetadataWriter, "write", failing)
+
+
+def test_a_failed_dataset_write_names_the_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _failing_writes(monkeypatch, {"custom_metadata"})
+
+    with pytest.raises(RuntimeError, match="exogenous dataset of 'local-grid.house_"):
+        _generate(
+            tmp_path,
+            monkeypatch,
+            EXPERIMENT_YAML,
+            nets={GRID_ID: _net_json(NUM_LOADS)},
+            layouts=["layout.xlsx"],
+        )
+
+
+def test_a_failed_scenario_write_is_not_reported_as_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # CST's write_config ignores its own write results, so this is caught when
+    # composegen reads the scenario back to add the run provenance.
+    _failing_writes(monkeypatch, {"scenarios"})
+
+    with pytest.raises(RuntimeError, match="Scenario 'TestGrid_.*' is not in"):
+        _generate(
+            tmp_path,
+            monkeypatch,
+            EXPERIMENT_YAML,
+            nets={GRID_ID: _net_json(NUM_LOADS)},
+            layouts=["layout.xlsx"],
+        )
+
+    assert "Run recorded as scenario" not in capsys.readouterr().out
+
+
+def test_a_failed_federation_write_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _failing_writes(monkeypatch, {"federations"})
+
+    with pytest.raises(RuntimeError, match="Federation '.*' is not in"):
+        _generate(
+            tmp_path,
+            monkeypatch,
+            EXPERIMENT_YAML,
+            nets={GRID_ID: _net_json(NUM_LOADS)},
+            layouts=["layout.xlsx"],
+        )
+
+
 def test_grid_keys(generated: Generated) -> None:
     # The grid publishes a voltage for every load, driven or not (load_4 and
     # load_6 belong to the houses, the rest to the load player), and

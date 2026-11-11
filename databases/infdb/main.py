@@ -247,7 +247,15 @@ def write_grid_to_metadata(
                     "load_count": _net_table_count(net_json_str, "load"),
                     "ext_grid_count": _net_table_count(net_json_str, "ext_grid"),
                 }
-                md_mgr.write("custom_metadata", federate_name, data, overwrite=True)
+                # CST logs a failed write and returns False; composegen would
+                # then report the net as missing, far from the cause.
+                if not md_mgr.write(
+                    "custom_metadata", federate_name, data, overwrite=True
+                ):
+                    raise RuntimeError(
+                        f"Could not store net '{federate_name}' in the "
+                        f"'{use_meta_db}' metadata store; CST logged the reason above."
+                    )
                 federate_names.append(federate_name)
                 print(f"  Stored {federate_name} ({bus_count} buses)")
     finally:
