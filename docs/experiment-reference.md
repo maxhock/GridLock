@@ -83,6 +83,7 @@ Anything not in this list is rejected by name.
 
 `pv` and `battery` produce no federate at all today: their physics runs inside the house simulator.
 Under a house they are accepted and skipped with a note; directly under a grid they raise `NotImplementedError`, because they would otherwise be mapped to the house image and start a house simulation with no dataset.
+`hems` and `controller` are two names for the same federate, which drives one house; declare it directly under that house, since it is refused anywhere else.
 `recorder` is a leftover of the legacy config format and is not usable from a tree experiment — results come from the CST timeseries store.
 
 ### Grid source

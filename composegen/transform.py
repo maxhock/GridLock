@@ -53,6 +53,9 @@ SUPPORTED_TREE_CLASSES = {
     "empty",
 }
 
+# Both names run the same controller federate, which drives exactly one house.
+HOUSE_CONTROLLER_CLASSES = {"hems", "controller"}
+
 
 # ---------------------------------------------------------------------------
 # Legacy transform
@@ -354,6 +357,27 @@ def _grid_nesting_errors(tree: Tree, node) -> list[str]:
     return errors
 
 
+def _house_controller_errors(tree: Tree, node) -> list[str]:
+    """A hems or controller must sit directly under the house it drives.
+
+    Only there does `load.py` wire it: it is renamed with its house's placed
+    instance (`house_4.hems_0`) and given the scenario and house on its command
+    line. Anywhere else it fell through to the generic wiring, which started
+    the controller with a bare `--name` and it exited on its first line.
+    """
+    parent = tree.parent(node.identifier)
+    parent_class = parent.data.get("class") if parent else None
+    if parent_class == "house":
+        return []
+
+    where = f"sits under a '{parent_class}' node" if parent else "is the root"
+    return [
+        f"[HEMS] Node '{node.tag}' ({node.identifier}) {where}. A "
+        f"{node.data.get('class')} drives one house and must be declared directly "
+        f"under it."
+    ]
+
+
 def validate_tree(tree: Tree) -> None:
     """Report every missing or unsupported field at once, then refuse to run.
 
@@ -457,12 +481,14 @@ def validate_tree(tree: Tree) -> None:
                     f"[Battery] Node '{node.tag}' ({node.identifier}) requires 'power'."
                 )
 
-        elif node_class == "hems":
+        elif node_class in HOUSE_CONTROLLER_CLASSES:
             if not data.get("control_strategy"):
                 validation_errors.append(
                     f"[HEMS] Node '{node.tag}' ({node.identifier}) requires "
                     f"'control_strategy'."
                 )
+
+            validation_errors.extend(_house_controller_errors(tree, node))
 
     if validation_errors:
         print("Configuration invalid:")
@@ -486,7 +512,7 @@ def _forecast_margin_seconds(tree: Tree, node, time_step: float) -> float:
         return 0.0
 
     has_controller = any(
-        child.data.get("class") in ("hems", "controller")
+        child.data.get("class") in HOUSE_CONTROLLER_CLASSES
         for child in tree.children(node.identifier)
     )
 
