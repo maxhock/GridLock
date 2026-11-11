@@ -29,7 +29,12 @@ from cosim_toolbox.dbms import create_metadata_manager
 # GridFederate
 # ---------------------------------------------------------------------------
 
-_LOAD_RE = re.compile(r"/load_(\d+)/")
+# The load index is the segment before the quantity, never just the first
+# ``/load_<n>/``: keys are ``<grid>/<child>/load_<idx>/<quantity>`` and child ids
+# are free-form, so a load player with ``id: load_1`` on load 5 publishes
+# ``.../load_1/load_5/active_power``. Matching the first segment put that
+# player's power on load 1 while load 5 stayed at 0 W, and the run exited 0.
+_LOAD_RE = re.compile(r"/load_(\d+)/[^/]+$")
 
 # pandapower's ZIP split: the share of each load that scales with |V|^2 (Z) or
 # |V| (I) instead of staying constant (P).
@@ -51,7 +56,7 @@ _LOAD_COLUMN_DEFAULTS: dict[str, Any] = {
 
 
 def _parse_load_index(key: str) -> int | None:
-    """Extract pandapower load index from a HELICS key like ``…/load_3/active_power``."""
+    """The pandapower load index of a key ending in ``/load_<idx>/<quantity>``."""
     m = _LOAD_RE.search(key)
     return int(m.group(1)) if m else None
 

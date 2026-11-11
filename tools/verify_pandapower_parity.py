@@ -12,6 +12,7 @@ environment the repo's .venv already provides (pandapower, psycopg2).
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from parity_common import (
 )
 
 TOLERANCE_PU = 1e-6
+_VOLTAGE_KEY = re.compile(r"/load_(\d+)/voltage$")
 
 
 def _load_experiment(config_path: Path) -> dict:
@@ -95,7 +97,12 @@ def _recorded_voltages(
 
     voltages: dict[float, dict[int, float]] = {}
     for sim_time, data_name, data_value in rows:
-        idx = int(data_name.split("/load_")[1].split("/")[0])
+        # The index is the segment before /voltage, as the grid federate reads
+        # it; a grid named like a load (``mv/load_1``) would match first.
+        match = _VOLTAGE_KEY.search(data_name)
+        if match is None:
+            sys.exit(f"Unexpected voltage key: {data_name}")
+        idx = int(match.group(1))
         voltages.setdefault(float(sim_time), {})[idx] = float(data_value)
     return voltages
 
