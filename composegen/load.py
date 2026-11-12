@@ -392,7 +392,10 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
     md_mgr = create_metadata_manager(backend="json", location=str(output_dir))
     md_mgr.connect()
     try:
-        md_mgr.writer.write_scenario(scenario_name, scenario_metadata)
+        _require_written(
+            md_mgr.writer.write_scenario(scenario_name, scenario_metadata),
+            f"scenario '{scenario_name}'",
+        )
         print(f"Stored run metadata for scenario: {scenario_name}")
     except Exception as e:
         md_mgr.disconnect()
@@ -425,6 +428,20 @@ def load_legacy_outputs(transformed: TransformedConfig) -> None:
 # ---------------------------------------------------------------------------
 # Tree/CST output
 # ---------------------------------------------------------------------------
+
+
+def _require_written(ok: bool, what: str) -> None:
+    """Raise if a CST metadata write reported failure.
+
+    CST's writers log the reason and return False rather than raising, so an
+    unchecked write was reported as success and the run failed later with an
+    unrelated "Scenario not found" (#56 N12).
+    """
+    if not ok:
+        raise RuntimeError(
+            f"Could not write {what} to the metadata store; CST logged the reason "
+            f"above."
+        )
 
 
 def _create_metadata_manager(
@@ -562,7 +579,15 @@ def annotate_scenario_with_run_metadata(
     YAML as it was at run time.
     """
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
-        scenario_doc = mgr.read_scenario(scenario_name) or {}
+        scenario_doc = mgr.read_scenario(scenario_name)
+        # write_config does not check its own writes, so a missing document
+        # here is where a failed write first shows.
+        if not scenario_doc:
+            raise RuntimeError(
+                f"Scenario '{scenario_name}' is not in the '{use_meta_db}' metadata "
+                f"store after the federation config was written; CST logged why "
+                f"above."
+            )
         scenario_doc.pop("_id", None)
 
         scenario_doc.update(
@@ -575,7 +600,10 @@ def annotate_scenario_with_run_metadata(
             }
         )
 
-        mgr.write_scenario(scenario_name, scenario_doc, overwrite=True)
+        _require_written(
+            mgr.write_scenario(scenario_name, scenario_doc, overwrite=True),
+            f"run provenance for scenario '{scenario_name}'",
+        )
 
     print(f"Run recorded as scenario '{scenario_name}'.")
 
@@ -590,11 +618,11 @@ def normalize_federation_keys(
         config = mgr.read_federation(federation_name)
 
         if not config:
-            print(
-                f"Warning: Federation '{federation_name}' not found "
-                f"in metadata backend '{use_meta_db}'."
+            raise RuntimeError(
+                f"Federation '{federation_name}' is not in the '{use_meta_db}' "
+                f"metadata store after the federation config was written; CST "
+                f"logged why above."
             )
-            return
 
         if "federation" in config:
             for _fed_name, fed_config in config["federation"].items():
@@ -611,7 +639,10 @@ def normalize_federation_keys(
                     if "key" in sub:
                         sub["key"] = sub["key"].replace(".", "/")
 
-        mgr.write_federation(federation_name, config, overwrite=True)
+        _require_written(
+            mgr.write_federation(federation_name, config, overwrite=True),
+            f"federation '{federation_name}'",
+        )
 
     print(
         f"Normalized HELICS keys in federation '{federation_name}' "
@@ -1335,7 +1366,10 @@ def _store_house_datasets(
 
     with _create_metadata_manager(use_meta_db, meta_store_path) as mgr:
         for fed_name, document in datasets.items():
-            mgr.write("custom_metadata", fed_name, document, overwrite=True)
+            _require_written(
+                mgr.write("custom_metadata", fed_name, document, overwrite=True),
+                f"the exogenous dataset of '{fed_name}'",
+            )
 
 
 def _add_generic_tree_pubsub_groups(

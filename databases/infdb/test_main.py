@@ -239,15 +239,21 @@ def test_extract_grid_config_rejects_duplicate_grid_ids(tmp_path) -> None:
 
 
 class _StubMetaManager:
-    def __init__(self) -> None:
+    """Records writes and reports them as CST does: True, or False on failure."""
+
+    def __init__(self, fails: bool = False) -> None:
         self.writes: dict[str, dict] = {}
+        self.fails = fails
 
     def connect(self) -> None: ...
     def disconnect(self) -> None: ...
 
-    def write(self, collection: str, name: str, data: dict, overwrite: bool) -> None:
+    def write(self, collection: str, name: str, data: dict, overwrite: bool) -> bool:
         assert collection == "custom_metadata"
+        if self.fails:
+            return False
         self.writes[name] = data
+        return True
 
 
 def test_write_grid_to_metadata_writes_every_grids_nets(monkeypatch) -> None:
@@ -269,6 +275,19 @@ def test_write_grid_to_metadata_writes_every_grids_nets(monkeypatch) -> None:
     assert manager.writes["mv-grid_0.lv-grid_0"]["grid_id"] == "mv-grid_0.lv-grid_0"
     assert manager.writes["mv-grid_0.lv-grid_0"]["load_count"] == 1
     assert manager.writes["mv-grid_0"]["bus_count"] == 3
+
+
+def test_write_grid_to_metadata_raises_on_a_failed_write(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "main.create_metadata_manager", lambda **_: _StubMetaManager(fails=True)
+    )
+
+    with pytest.raises(RuntimeError, match="Could not store net 'mv-grid_0'"):
+        write_grid_to_metadata(
+            {"mv-grid_0": [("mv-grid_0", json.dumps(_net_json(bus_rows=3)))]},
+            "generated",
+            "json",
+        )
 
 
 def test_main_resolves_layout_grids_without_connecting_to_infdb(
