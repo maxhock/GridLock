@@ -316,6 +316,51 @@ def test_validate_tree_nested_grid_rejects_location(capsys) -> None:
     assert "must use a 'layout'" in capsys.readouterr().out
 
 
+_HOUSE = {"class": "house", "model": {"class": "1R1C"}, "exogenous_data": "x.csv"}
+_LOAD = {"class": "load", "electrical_load": "x.csv"}
+_PV = {"class": "pv", "capacity": "5 kW", "max_production": "x.csv"}
+
+
+def _grid_with_child(child: dict) -> Tree:
+    tree = _tree_with_root({"class": "grid", "layout": "a.xlsx"})
+    tree.create_node(tag="child", identifier="root.child_0", parent="root", data=child)
+    return tree
+
+
+def test_validate_tree_names_a_pv_under_a_grid_before_its_placement(capsys) -> None:
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(_grid_with_child(_PV))
+
+    printed = capsys.readouterr().out
+    assert "no standalone pv federate exists yet" in printed
+    assert "placement" not in printed
+
+
+def test_validate_tree_accepts_a_pv_under_a_house() -> None:
+    tree = _grid_with_child({**_HOUSE, "placement": 4})
+    tree.create_node(
+        tag="pv", identifier="root.child_0.pv_0", parent="root.child_0", data=_PV
+    )
+
+    validate_tree(tree)
+
+
+@pytest.mark.parametrize("child", [_HOUSE, _LOAD], ids=["house", "load"])
+def test_validate_tree_requires_placement_under_a_grid(capsys, child) -> None:
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(_grid_with_child(child))
+
+    assert "requires 'placement'" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("child", [_HOUSE, _LOAD], ids=["house", "load"])
+def test_validate_tree_rejects_duplicate_placement_indices(capsys, child) -> None:
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(_grid_with_child({**child, "placement": [4, 4]}))
+
+    assert "duplicate indices" in capsys.readouterr().out
+
+
 def test_validate_tree_grid_under_non_grid_is_rejected(capsys) -> None:
     tree = Tree()
     tree.create_node(

@@ -82,7 +82,7 @@ federation:
 Anything not in this list is rejected by name.
 
 `pv` and `battery` produce no federate at all today: their physics runs inside the house simulator.
-Under a house they are accepted and skipped with a note; directly under a grid they raise `NotImplementedError`, because they would otherwise be mapped to the house image and start a house simulation with no dataset.
+Under a house they are accepted and skipped with a note; directly under a grid they are refused by validation, because they would otherwise be mapped to the house image and start a house simulation with no dataset.
 `hems` and `controller` are two names for the same federate, which drives one house; declare it directly under that house, since it is refused anywhere else.
 `recorder` is a leftover of the legacy config format and is not usable from a tree experiment — results come from the CST timeseries store.
 
@@ -208,7 +208,7 @@ Until the MV grid has published, the LV net keeps its own slack setpoint.
 
 ### Placement
 
-`placement` is a pandapower **load index**, a list of them, or `"fill"`, and it is required for everything that moves power: `load`, `house`, `pv`, `battery`, and a grid nested under another grid.
+`placement` is a pandapower **load index**, a non-empty list of them without duplicates, or `"fill"`, and it is required for everything a grid draws power from: `load`, `house`, and a grid nested under another grid.
 A nested grid can also use `"filename"`, which takes its sub-grids from files named after the parent's loads (see [Nested grids](#nested-grids)).
 
 The grid federate identifies incoming power purely by the `load_<idx>` segment of the HELICS key.

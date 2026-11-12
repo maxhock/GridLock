@@ -56,6 +56,22 @@ SUPPORTED_TREE_CLASSES = {
 # Both names run the same controller federate, which drives exactly one house.
 HOUSE_CONTROLLER_CLASSES = {"hems", "controller"}
 
+# Classes that occupy a pandapower load index rather than sitting on a bare
+# bus. The grid identifies incoming power by the `load_<idx>` segment of the
+# HELICS key, so anything that injects or draws power has to be placed here to
+# reach the power flow at all. Generation is no exception - a PV plant is a
+# negative load, and a battery is a load of either sign. So is a nested grid:
+# an LV grid hangs off an MV grid as an aggregate load, with its slack bus
+# standing in for that load.
+LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery", "grid"}
+
+# Classes that can be placed in a grid but have no federate of their own yet.
+# Their physics currently lives inside the house simulator, and
+# `map_params_to_class` maps them to the *house* image, so generating one
+# would start a house simulation with no exogenous dataset and fail at
+# startup with an unrelated message.
+UNIMPLEMENTED_GRID_CHILD_CLASSES = {"pv", "battery"}
+
 
 # ---------------------------------------------------------------------------
 # Legacy transform
@@ -378,6 +394,48 @@ def _house_controller_errors(tree: Tree, node) -> list[str]:
     ]
 
 
+def _grid_child_placement_errors(tree: Tree, node) -> list[str]:
+    """Placement checks for a non-grid node that sits directly under a grid.
+
+    These run here rather than where placement is resolved in `load.py`, so an
+    unimplemented class is named before its missing placement is, and a
+    duplicate index is refused before it can collapse two houses into one name
+    or two load-player keys into one.
+    """
+    node_class = node.data.get("class")
+    parent = tree.parent(node.identifier)
+    if parent is None or parent.data.get("class") != "grid":
+        return []
+
+    label = f"Node '{node.tag}' ({node.identifier})"
+    if node_class in UNIMPLEMENTED_GRID_CHILD_CLASSES:
+        return [
+            f"[Placement] {label} is a {node_class} placed directly in grid "
+            f"'{parent.identifier}', but no standalone {node_class} federate "
+            f"exists yet - its physics lives inside the house simulator. Declare "
+            f"it as a sub-federate of a house instead."
+        ]
+
+    if node_class not in LOAD_PLACED_CLASSES:
+        return []
+
+    placement = node.data.get("placement")
+    if placement is None:
+        return [
+            f"[Placement] {label} sits in grid '{parent.identifier}' and requires "
+            f"'placement': the pandapower load index (an int), list of indices, "
+            f"or 'fill' it is connected to."
+        ]
+
+    shape_error = placement_shape_error(placement)
+    if shape_error:
+        return [
+            f"[Placement] {label} has invalid placement {placement!r}: {shape_error}."
+        ]
+
+    return []
+
+
 def validate_tree(tree: Tree) -> None:
     """Report every missing or unsupported field at once, then refuse to run.
 
@@ -402,6 +460,10 @@ def validate_tree(tree: Tree) -> None:
                 f"class '{node_class}'. Supported classes: {sorted(SUPPORTED_TREE_CLASSES)}"
             )
             continue
+
+        # A nested grid's placement is checked with its nesting rules below.
+        if node_class != "grid":
+            validation_errors.extend(_grid_child_placement_errors(tree, node))
 
         if node_class == "grid":
             layout = data.get("layout")
