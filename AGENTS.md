@@ -167,7 +167,7 @@ This is the core invariant of the project.
 The grid federate identifies incoming power purely by the `load_<idx>` segment of
 the HELICS key (`federates/grid/main.py:_LOAD_RE`). So anything that injects or
 draws power — `load`, `house`, `pv`, `battery`, and a nested `grid`
-(`LOAD_PLACED_CLASSES` in `composegen/load.py`) — must be wired onto a **pandapower
+(`LOAD_PLACED_CLASSES` in `composegen/transform.py`) — must be wired onto a **pandapower
 load index**, not a bare bus. A federate that publishes a plain `active_power` key is silently dropped from
 the power flow, which is why composegen raises rather than defaulting in these paths.
 
@@ -271,8 +271,9 @@ The broker's `-f` counts federates, not services.
 `map_params_to_class` in `composegen/load.py` maps a config `class` to an image and
 command. Note the classes without their own federate yet: `pv` and `battery` map to the
 `house` image because that physics still lives inside the house simulator — declaring
-them directly under a grid raises `NotImplementedError` rather than starting a broken
-container. `hems`/`controller` are real standalone federates.
+them directly under a grid is refused by `validate_tree`
+(`UNIMPLEMENTED_GRID_CHILD_CLASSES` in `composegen/transform.py`) rather than starting a
+broken container. `hems`/`controller` are real standalone federates.
 
 `federates/template/` is the starting point for a new federate.
 `federates/grid-pypsa/` and `federates/forecasting/` are not wired into tree mode —
