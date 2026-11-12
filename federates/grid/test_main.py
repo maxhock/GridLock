@@ -166,6 +166,34 @@ def test_parse_load_index_returns_none_without_a_match() -> None:
     assert _parse_load_index("lv-grid/house_4/active_power") is None
 
 
+def test_parse_load_index_reads_the_segment_before_the_quantity() -> None:
+    """A child whose id looks like a load must not steal another load's power."""
+    assert _parse_load_index("local-grid/load_1/load_5/active_power") == 5
+    assert _parse_load_index("mv/load_2/lv/load_7/voltage") == 7
+    assert _parse_load_index("local-grid/load_1/active_power") == 1
+
+
+def test_grid_keys_place_a_child_named_like_a_load_on_its_placement() -> None:
+    keys = _GridKeys.classify(
+        "local-grid",
+        [
+            "local-grid/load_1/load_5/active_power",
+            "local-grid/load_1/load_5/reactive_power",
+        ],
+        [
+            "local-grid/load_5/voltage",
+            "local-grid/active_power",
+            "local-grid/reactive_power",
+        ],
+    )
+
+    assert keys.load_inputs == {
+        "local-grid/load_1/load_5/active_power": (5, "p_mw"),
+        "local-grid/load_1/load_5/reactive_power": (5, "q_mvar"),
+    }
+    assert keys.voltage_pubs == {"local-grid/load_5/voltage": 5}
+
+
 def test_update_internal_model_filters_helics_sentinel_values() -> None:
     """HELICS reports "no data received yet" as a huge sentinel, not absence."""
     net = _net_with_two_loads()
