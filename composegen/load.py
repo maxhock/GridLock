@@ -16,7 +16,11 @@ import yaml
 from omegaconf import DictConfig
 from treelib import Tree
 
-from transform import MPC_FORECAST_HORIZON_STEPS, TransformedConfig
+from transform import (
+    HOUSE_CONTROLLER_CLASSES,
+    MPC_FORECAST_HORIZON_STEPS,
+    TransformedConfig,
+)
 from cosim_toolbox.dbms import create_metadata_manager
 
 
@@ -1081,9 +1085,9 @@ def _wire_house_subcomponents(
 ) -> str | None:
     """Wire a house's own sub-federates.
 
-    Currently only ``hems`` is a real standalone federate: it's registered
-    here and subscribed to the house's ``state`` publication so it can read
-    battery SOC / forecasts. ``battery``/``pv`` sub-federates aren't
+    Currently only ``hems`` (or ``controller``, the same federate) is a real
+    standalone federate: it's registered here and subscribed to the house's
+    ``state`` publication so it can read battery SOC / forecasts. ``battery``/``pv`` sub-federates aren't
     implemented as standalone federates yet (that physics still lives
     inside the house's own simulator), so they're marked handled without
     generating a container for them instead of falling through to Phase 2's
@@ -1102,8 +1106,8 @@ def _wire_house_subcomponents(
         child_local_id = child.identifier.split(".")[-1]
         child_fed_name = f"{house_fed_name}.{child_local_id}"
 
-        if child_class == "hems":
-            hems_mapped = map_params_to_class("hems")
+        if child_class in HOUSE_CONTROLLER_CLASSES:
+            hems_mapped = map_params_to_class(child_class)
 
             hems_fed = FederateConfig(child_fed_name, period=time_step)
             federation.add_federate_config(hems_fed)
@@ -1137,7 +1141,7 @@ def _wire_house_subcomponents(
 
             handled_nodes.add(child.identifier)
             hems_fed_name = child_fed_name
-            print(f"  Added child federate: {child_fed_name} (hems)")
+            print(f"  Added child federate: {child_fed_name} ({child_class})")
 
         elif child_class in ("battery", "pv"):
             handled_nodes.add(child.identifier)

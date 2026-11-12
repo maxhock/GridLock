@@ -203,6 +203,76 @@ def test_validate_tree_hems_requires_control_strategy() -> None:
         validate_tree(_tree_with_root({"class": "hems"}))
 
 
+_HEMS = {"class": "hems", "control_strategy": "mpc"}
+_CONTROLLER = {"class": "controller", "control_strategy": "mpc"}
+
+
+def _house_tree() -> Tree:
+    """A grid with one placed house, whose battery and controllers tests add."""
+    tree = _tree_with_root({"class": "grid", "layout": "a.xlsx"})
+    tree.create_node(
+        tag="house",
+        identifier="root.house_0",
+        parent="root",
+        data={
+            "class": "house",
+            "model": {"class": "1R1C"},
+            "exogenous_data": "x.csv",
+            "placement": 4,
+        },
+    )
+    return tree
+
+
+@pytest.mark.parametrize("controller", [_HEMS, _CONTROLLER], ids=["hems", "controller"])
+def test_validate_tree_accepts_a_controller_under_a_house(controller) -> None:
+    tree = _house_tree()
+    tree.create_node(
+        tag="c", identifier="root.house_0.c_0", parent="root.house_0", data=controller
+    )
+
+    validate_tree(tree)
+
+
+@pytest.mark.parametrize("controller", [_HEMS, _CONTROLLER], ids=["hems", "controller"])
+def test_validate_tree_rejects_a_controller_below_a_house_child(
+    capsys, controller
+) -> None:
+    tree = _house_tree()
+    tree.create_node(
+        tag="battery",
+        identifier="root.house_0.battery_0",
+        parent="root.house_0",
+        data={"class": "battery", "capacity": "5 kWh", "power": "5 kW"},
+    )
+    tree.create_node(
+        tag="c",
+        identifier="root.house_0.battery_0.c_0",
+        parent="root.house_0.battery_0",
+        data=controller,
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "sits under a 'battery' node" in capsys.readouterr().out
+
+
+def test_validate_tree_controller_requires_control_strategy(capsys) -> None:
+    tree = _house_tree()
+    tree.create_node(
+        tag="c",
+        identifier="root.house_0.c_0",
+        parent="root.house_0",
+        data={"class": "controller"},
+    )
+
+    with pytest.raises(ValueError, match="Configuration validation failed"):
+        validate_tree(tree)
+
+    assert "requires 'control_strategy'" in capsys.readouterr().out
+
+
 def _mv_lv_tree(lv_data: dict, mv_data: dict | None = None) -> Tree:
     """An MV grid with one LV grid nested under it."""
     tree = Tree()

@@ -350,6 +350,32 @@ def test_a_failed_federation_write_is_refused(
         )
 
 
+def test_controller_is_wired_like_a_hems(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `controller` runs the same federate as `hems`. It used to fall through
+    # to the generic wiring, which started it with a bare `--name` under the
+    # unplaced `house_0`, and it exited on argparse before joining the run.
+    assert EXPERIMENT_YAML.count('class: "hems"') == 1
+    generated = _generate(
+        tmp_path,
+        monkeypatch,
+        EXPERIMENT_YAML.replace('class: "hems"', 'class: "controller"'),
+        nets={GRID_ID: _net_json(NUM_LOADS)},
+        layouts=["layout.xlsx"],
+    )
+
+    controller = f"{GRID_ID}.house_4.hems_0"
+    assert generated.command(controller) == (
+        f"python3 controller/main.py --scenario {generated.scenario} "
+        f"--federate_name {controller} "
+        f"--house_federate {GRID_ID}.house_4 --horizon 24"
+    )
+    assert generated.pubs(controller) == {f"{GRID_ID}/house_4/hems_0/control"}
+    assert generated.subs(controller) == {f"{GRID_ID}/house_4/state"}
+    assert not any(".house_0" in name for name in generated.federates)
+
+
 def test_grid_keys(generated: Generated) -> None:
     # The grid publishes a voltage for every load, driven or not (load_4 and
     # load_6 belong to the houses, the rest to the load player), and
