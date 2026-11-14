@@ -6,6 +6,7 @@ unless explicitly asked to.
 
 `README.md` is the human-facing overview — concept, tech stack, quick start. This
 file covers what you need in order to change the code.
+`docs/decision-log.md` records why: each current decision with its reasoning and the alternatives it beat.
 
 ## Concept
 
@@ -298,6 +299,13 @@ not from a federate's own name.
   scenario document *after* `federation.write_config`, which overwrites it.
 
 ## Conventions
+
+### Decisions
+
+Every decision is logged in `docs/decision-log.md`, in the same pull request that makes or changes it.
+Read the entry before changing a rule it covers.
+When a decision changes, rewrite its entry to the new decision and move the old approach to **Rejected** with the reason it lost; never renumber entries.
+State the reasoning in your own words with a citation marker (commit, PR or issue), not as a direct quote.
 
 ### Code
 

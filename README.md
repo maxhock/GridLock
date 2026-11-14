@@ -219,7 +219,7 @@ composegen/    Federation and compose-file generator (extract → transform → 
 config/        Experiment YAMLs and the preflight environment file
 data/input/    Grid workbooks and timeseries CSVs
 databases/     CST database stack (cstdb) and the InfDB grid resolver (infdb)
-docs/          Experiment reference, troubleshooting, archived issue lists
+docs/          Experiment reference, troubleshooting, decision log, archived issue lists
 federates/     One directory per federate class, each with its own Dockerfile
 generated/     Generated compose file and metadata (git-ignored)
 tools/         Standalone helper scripts
@@ -257,3 +257,4 @@ Format with black and ruff (line length 88) before committing; `.pre-commit-conf
 CI runs the same lint plus the test suite above on every PR.
 
 Architecture details, invariants, and conventions for working in this codebase are in [`AGENTS.md`](AGENTS.md).
+The reasons behind the design are recorded in [`docs/decision-log.md`](docs/decision-log.md); a pull request that makes or changes a decision updates its entry there.
