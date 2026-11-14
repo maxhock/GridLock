@@ -38,9 +38,10 @@ change both.
 ```bash
 DC="docker compose --env-file config/preflight.env -f docker-compose.preflight.yaml"
 $DC up -d --wait database mongodb        # 1: timescale + mongo (CST stores)
-$DC up --build --abort-on-container-exit --exit-code-from infdb --no-deps infdb        # 2
-$DC up --build --abort-on-container-exit --exit-code-from composegen --no-deps composegen  # 3
-docker compose -f generated/docker-compose.yaml up --build --abort-on-container-failure  # 4
+$DC build infdb && $DC up --no-build --abort-on-container-exit --exit-code-from infdb --no-deps infdb  # 2
+$DC build composegen && $DC up --no-build --abort-on-container-exit --exit-code-from composegen --no-deps composegen  # 3
+SIM="docker compose -f generated/docker-compose.yaml"
+$SIM build && $SIM up --no-build --remove-orphans --abort-on-container-failure  # 4
 ```
 
 Stages 2 and 3 must both run before stage 4: stage 3 reads what stage 2 wrote.
@@ -234,8 +235,8 @@ slot to the root grid, and only when there is exactly one root grid federate
 (`_grid_waits_for_current_time`). Nested grids never get it. With several root grids
 nobody gets it and every root grid uniformly lags one step. Below the root the lag
 compounds: each grid level adds one step, so a house under an LV grid reaches the MV
-power flow one step late. HELICS iteration would remove that and is a later phase of
-issue #65. The long comment above that function records what was measured and why
+power flow one step late. HELICS iteration would remove that and is tracked in
+issue #73. The long comment above that function records what was measured and why
 depth-staggered offsets were removed — read it before touching timing.
 
 `time_step` must be a whole number of seconds: CST's `HelicsMsg.verify` type-checks
