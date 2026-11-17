@@ -72,6 +72,77 @@ LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery", "grid"}
 # startup with an unrelated message.
 UNIMPLEMENTED_GRID_CHILD_CLASSES = {"pv", "battery"}
 
+# A grid with a `reinforcement` block runs the reinforcing grid federate
+# (federates/grid_reinforce). These are its settings with eDisGo's defaults:
+# normal operation loads lines and transformers to 100 %, and the +/-10 % voltage
+# band is split between MV, the MV/LV station and LV. composegen fills in every
+# key, and `reinforce.Settings.parse` refuses a command line without all of them,
+# so this is the only place the defaults live; keep the keys in step.
+REINFORCEMENT_DEFAULTS: dict[str, Any] = {
+    "max_loading_percent": 100,
+    "voltage_band": "split",
+    "earthwork": "rural",
+    "max_iterations": 20,
+}
+_REINFORCEMENT_CHOICES = {
+    "voltage_band": ("split", "flat"),
+    "earthwork": ("rural", "urban"),
+}
+
+
+def reinforcement_settings(data: dict[str, Any]) -> dict[str, Any] | None:
+    """A grid node's reinforcement settings with the defaults filled in.
+
+    ``None`` when the node does not ask for reinforcement; ``true`` asks for the
+    defaults. Assumes `validate_tree` has accepted the block.
+    """
+    block = data.get("reinforcement")
+    if block is None or block is False:
+        return None
+    if block is True:
+        return dict(REINFORCEMENT_DEFAULTS)
+    return {**REINFORCEMENT_DEFAULTS, **block}
+
+
+def _reinforcement_errors(node) -> list[str]:
+    """Everything wrong with a node's `reinforcement` block."""
+    block = node.data.get("reinforcement")
+    if block is None or block is False:
+        return []
+    where = f"[Reinforcement] Node '{node.tag}' ({node.identifier})"
+    if node.data.get("class") != "grid":
+        return [f"{where} is not a grid; only grids can be reinforced."]
+    if block is True:
+        return []
+    if not isinstance(block, dict):
+        return [f"{where}: 'reinforcement' must be true or a mapping, not {block!r}."]
+
+    errors = [
+        f"{where} has unknown key '{key}'; known: {sorted(REINFORCEMENT_DEFAULTS)}."
+        for key in block
+        if key not in REINFORCEMENT_DEFAULTS
+    ]
+    for key, choices in _REINFORCEMENT_CHOICES.items():
+        if key in block and block[key] not in choices:
+            errors.append(f"{where}: '{key}' must be one of {choices}.")
+    loading = block.get("max_loading_percent", 100)
+    if (
+        isinstance(loading, bool)
+        or not isinstance(loading, (int, float))
+        or loading <= 0
+    ):
+        errors.append(f"{where}: 'max_loading_percent' must be a number above 0.")
+    iterations = block.get("max_iterations", 20)
+    if (
+        isinstance(iterations, bool)
+        or not isinstance(iterations, int)
+        or iterations < 1
+    ):
+        errors.append(
+            f"{where}: 'max_iterations' must be a whole number of at least 1."
+        )
+    return errors
+
 
 # ---------------------------------------------------------------------------
 # Legacy transform
@@ -460,6 +531,8 @@ def validate_tree(tree: Tree) -> None:
                 f"class '{node_class}'. Supported classes: {sorted(SUPPORTED_TREE_CLASSES)}"
             )
             continue
+
+        validation_errors.extend(_reinforcement_errors(node))
 
         # A nested grid's placement is checked with its nesting rules below.
         if node_class != "grid":

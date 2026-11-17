@@ -20,6 +20,7 @@ Results are written to a time-series database and tagged with a timestamped scen
 | Class | Image | Role |
 |---|---|---|
 | `grid` | [`federates/grid`](federates/grid) | pandapower power flow; applies the loads it receives and publishes bus voltages; may itself hang off a load of a parent grid (MV/LV) |
+| `grid` with `reinforcement` | [`federates/grid_reinforce`](federates/grid_reinforce) | the grid federate, reinforcing its net with eDisGo's measures whenever a limit is violated, and reporting what it added and what it cost |
 | `load` | [`federates/house_player`](federates/house_player) | replays an electrical load profile from CSV onto one or more grid loads |
 | `house` | [`federates/house`](federates/house) | simulated building — thermal model, heat pump, AC, battery, PV (via [EnergySim](https://github.com/Hosseini97/EnergySim)) |
 | `hems` / `controller` | [`federates/controller`](federates/controller) | model-predictive home energy management; commands a house's battery |
@@ -66,6 +67,7 @@ cp config/preflight.env.example config/preflight.env   # then fill in your value
 `config/experiment-local-grid.yml` runs entirely from a local grid workbook, so it works without InfDB access.
 `config/experiment-LV.yml` (the default when you pass no argument) resolves its grid from InfDB by postcode.
 `config/experiment-MV-LV.yml` runs a synthetic MV grid with LV grids on its loads, also without InfDB access.
+`config/experiment-local-grid-reinforce.yml` drives a local grid far past its limits and lets it reinforce itself during the run (see [`federates/grid_reinforce`](federates/grid_reinforce)).
 
 Useful flags:
 

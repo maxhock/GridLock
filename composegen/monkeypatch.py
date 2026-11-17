@@ -20,7 +20,10 @@ BROKER_SERVICE = "helics"
 # when ``--federate_name`` and the arguments paired with it are repeated.
 # Federates of these images that share a parent share a container (see
 # _service_groups); every other image still gets one container per federate.
-GROUPED_IMAGES = ("grid", "house_player")
+GROUPED_IMAGES = ("grid", "grid_reinforce", "house_player")
+# Images built from the repository root because they reuse another federate's
+# code: controller runs the house package, grid_reinforce the grid federate.
+_ROOT_CONTEXT_IMAGES = ("house", "controller", "grid_reinforce")
 # Where a federate's own arguments start in the command composegen gives it.
 _FEDERATE_ARG = " --federate_name "
 
@@ -52,7 +55,7 @@ def _service(
     _svc += '    image: "' + image + '"\n'
     if build:
         _svc += "    build:\n"
-        if image in ["house", "controller"]:
+        if image in _ROOT_CONTEXT_IMAGES:
             _svc += "      context: ..\n"
             _svc += "      dockerfile: federates/" + image + "/Dockerfile\n"
         else:

@@ -28,6 +28,8 @@ run_component() {
 run_component grid federates/grid federates/grid/Dockerfile
 run_component house_player federates/house_player federates/house_player/Dockerfile
 run_component house . federates/house/Dockerfile
+# Built from the root: it runs federates/grid/main.py with its own subclass on top.
+run_component grid_reinforce . federates/grid_reinforce/Dockerfile
 run_component composegen composegen composegen/Dockerfile
 run_component infdb databases/infdb databases/infdb/Dockerfile --build-context composegen=composegen
 # No experiment routes to the template, so nothing else would notice it rotting
