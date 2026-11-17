@@ -41,9 +41,14 @@ class TransformedConfig:
 # when run by hand.
 MPC_FORECAST_HORIZON_STEPS = 24
 
+# Classes that simulate one building and are wired the same way: per-load power,
+# plus the `state`/`control` groups.
+BUILDING_CLASSES = {"house", "ochre-house"}
+
 SUPPORTED_TREE_CLASSES = {
     "grid",
     "house",
+    "ochre-house",
     "load",
     "pv",
     "battery",
@@ -63,7 +68,7 @@ HOUSE_CONTROLLER_CLASSES = {"hems", "controller"}
 # negative load, and a battery is a load of either sign. So is a nested grid:
 # an LV grid hangs off an MV grid as an aggregate load, with its slack bus
 # standing in for that load.
-LOAD_PLACED_CLASSES = {"load", "house", "pv", "battery", "grid"}
+LOAD_PLACED_CLASSES = {"load", "pv", "battery", "grid", *BUILDING_CLASSES}
 
 # Classes that can be placed in a grid but have no federate of their own yet.
 # Their physics currently lives inside the house simulator, and
@@ -436,6 +441,70 @@ def _grid_child_placement_errors(tree: Tree, node) -> list[str]:
     return []
 
 
+# The three files an OCHRE Dwelling is built from, and the extensions each accepts.
+# A `.csv` weather file is a Gridlock exogenous dataset (the house's `sample_data.csv`
+# shape), which the federate converts to OCHRE's weather format; it carries no
+# location, so those keys are required next to it. An `.epw` file carries its own.
+OCHRE_HOUSE_FILE_FIELDS = {
+    "hpxml": (".xml",),
+    "schedule": (".csv",),
+    "weather": (".epw", ".csv"),
+}
+OCHRE_HOUSE_CSV_WEATHER_LOCATION_FIELDS = ("latitude", "longitude", "timezone")
+
+
+def _validate_ochre_house_inputs(node: Any, data: dict) -> list[str]:
+    """Check an `ochre-house` node names its three OCHRE input files.
+
+    Every file is required: a missing one would otherwise fall back to some default
+    building or climate and run happily on data nobody chose.
+    """
+    errors: list[str] = []
+    where = f"[OchreHouse] Node '{node.tag}' ({node.identifier})"
+
+    for field, extensions in OCHRE_HOUSE_FILE_FIELDS.items():
+        value = data.get(field)
+        if not value:
+            errors.append(f"{where} requires '{field}'.")
+        elif not str(value).lower().endswith(extensions):
+            errors.append(
+                f"{where} has {field} '{value}'; expected a file ending in "
+                f"{' or '.join(extensions)}."
+            )
+
+    if str(data.get("weather", "")).lower().endswith(".csv"):
+        for field in OCHRE_HOUSE_CSV_WEATHER_LOCATION_FIELDS:
+            value = data.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                errors.append(
+                    f"{where} uses a CSV weather file, which has no location; "
+                    f"'{field}' must be a number."
+                )
+
+    pv_capacity_kw = data.get("pv_capacity_kw")
+    altitude = data.get("altitude")
+    if (
+        pv_capacity_kw is not None
+        and str(data.get("weather", "")).lower().endswith(".csv")
+        and (isinstance(altitude, bool) or not isinstance(altitude, (int, float)))
+    ):
+        errors.append(
+            f"{where} has PV on a CSV weather file, which has no location; OCHRE's "
+            f"PV model needs 'altitude' (metres) as a number."
+        )
+    if pv_capacity_kw is not None and (
+        isinstance(pv_capacity_kw, bool)
+        or not isinstance(pv_capacity_kw, (int, float))
+        or pv_capacity_kw <= 0
+    ):
+        errors.append(
+            f"{where} has pv_capacity_kw '{pv_capacity_kw}'; expected a positive "
+            f"number (kW), or leave it out for a house without PV."
+        )
+
+    return errors
+
+
 def validate_tree(tree: Tree) -> None:
     """Report every missing or unsupported field at once, then refuse to run.
 
@@ -519,6 +588,9 @@ def validate_tree(tree: Tree) -> None:
                     f"[House] Node '{node.tag}' ({node.identifier}) requires "
                     f"'exogenous_data'."
                 )
+
+        elif node_class == "ochre-house":
+            validation_errors.extend(_validate_ochre_house_inputs(node, data))
 
         elif node_class == "pv":
             if not data.get("max_production"):
@@ -605,6 +677,7 @@ def validate_timeseries_coverage(
     fields_by_class = {
         "load": ("electrical_load", "heat_load"),
         "house": ("exogenous_data",),
+        "ochre-house": ("weather",),
     }
 
     for node in tree.all_nodes():
@@ -729,7 +802,7 @@ def wire_pub_sub(tree: Tree) -> None:
                 add_pub_sub(parent_node, voltage_topic, "pu", "publication")
                 add_pub_sub(child_node, voltage_topic, "pu", "subscription")
 
-                if child_class in ["house", "load", "battery", "pv", "grid"]:
+                if child_class in [*BUILDING_CLASSES, "load", "battery", "pv", "grid"]:
                     p_topic = f"{child_node.identifier}/active_power"
                     q_topic = f"{child_node.identifier}/reactive_power"
 
@@ -739,7 +812,7 @@ def wire_pub_sub(tree: Tree) -> None:
                     add_pub_sub(child_node, p_topic, "W", "publication")
                     add_pub_sub(child_node, q_topic, "VAr", "publication")
 
-                if child_class in ["house", "hems", "controller"]:
+                if child_class in [*BUILDING_CLASSES, "hems", "controller"]:
                     control_topic = f"{child_node.identifier}/control"
 
                     add_pub_sub(parent_node, control_topic, "json", "publication")

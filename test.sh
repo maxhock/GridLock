@@ -34,6 +34,7 @@ run_component infdb databases/infdb databases/infdb/Dockerfile --build-context c
 # against a CST release. Building it here is what keeps `cp -r federates/template`
 # a working starting point rather than one that fails on its first import.
 run_component template federates/template federates/template/Dockerfile
+run_component ochre-house federates/ochre-house federates/ochre-house/Dockerfile
 
 echo "=== Summary ==="
 FAILED=0
