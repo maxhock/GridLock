@@ -214,6 +214,16 @@ Mapping every experiment to its basename broke `config/private/` (a883cb9).
 
 **Sources.** a883cb9.
 
+### D43: The OCHRE input files travel through the metadata store
+
+**Decision.** An ochre-house names `hpxml`, `schedule` and `weather` in the YAML. composegen checks the names in the transform phase, reads the files while it wires the grid, and writes them to `custom_metadata/<federate>` once the tree is wired, together with the house datasets. The federate reads them at startup. A CSV weather file in the `exogenous_data` shape needs latitude, longitude and timezone next to it. An EPW file carries its own location.
+
+**Why.** It is the way house datasets already travel (D04, D06), so the image mounts no files and the same clash check against grid net keys applies. Reading during wiring and writing afterwards keeps the rule that a bad experiment fails before anything is written. The location is required for a CSV, because a default would run on a climate nobody chose (D34).
+
+**Rejected.** Mounting the files into the container, which ties it to host paths.
+
+**Sources.** PR #84, f6e6fe8.
+
 ## Placement and HELICS keys
 
 ### D15: Anything that moves power is placed on a pandapower load index
@@ -301,6 +311,16 @@ The check is copied because composegen and the tools run in different images.
 Auto-placing InfDB LV grids under an MV grid, left for later.
 
 **Sources.** b7add08, 6ac73c1, 0fc7ad8, issue #65, PR #66.
+
+### D42: ochre-house is a building class, wired like the house
+
+**Decision.** `ochre-house` runs a real OCHRE Dwelling. It is placed on a pandapower load index like a `house`, runs as one federate per load (`ochre-house_6`) and publishes active power, reactive power and a `state` JSON in the house envelope. Both classes share `BUILDING_CLASSES`.
+
+**Why.** The grid only needs to know what a building draws, not how it is modelled. Wiring both the same way puts a house and an ochre-house side by side on one grid and one weather file, and the results DB compares them (f6e6fe8). It reuses D15 and D16, so the grid federate needs no change. PV stays an optional setting (`pv_capacity_kw`) because OCHRE reads PV from its `Equipment` argument and not from the HPXML. An end use the building lacks is published as 0 W. If none of the expected keys is present the federate raises (D34).
+
+**Rejected.** A separate wiring path for OCHRE houses. Power that does not arrive on a `load_<idx>` key is dropped by the grid (D15).
+
+**Sources.** issue #64, PR #84, f6e6fe8, 561791d.
 
 ## Grid physics
 
@@ -460,6 +480,16 @@ Builds take longer than the run itself (e1c0e50).
 **Rejected.** Running as root.
 
 **Sources.** cd1fd00.
+
+### D44: Federate directories and images use underscores
+
+**Decision.** A federate directory is named like its image, with underscores (`house_player`, `ochre_house`). The class in the YAML may keep its hyphen.
+
+**Why.** mypy cannot read a hyphenated directory as a package, so two `main.py` files were both the module `main` and lint failed (43d00b4). `grid-pypsa` keeps its hyphen because it is not part of a run (D37).
+
+**Rejected.** A second mypy hook for hyphenated directories, an extra config block per new federate.
+
+**Sources.** PR #84, 43d00b4.
 
 ## Policies
 
