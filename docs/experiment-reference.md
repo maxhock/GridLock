@@ -206,6 +206,39 @@ The keys a coupling adds, for a clone `mv-grid_0.lv-grid_3` on MV load 3:
 The MV grid applies the LV power to load 3 as it would a house's, and the LV grid keeps publishing `mv-grid_0/lv-grid_3/load_<n>/voltage` to its own children.
 Until the MV grid has published, the LV net keeps its own slack setpoint.
 
+### Grid reinforcement
+
+A grid with a `reinforcement` block reinforces its own net during the run: after each step's power flow it checks line and transformer loading and bus voltages, applies eDisGo's measures until every limit holds, and publishes the reinforced state.
+The measures stay in the net for the rest of the run.
+It runs the [`grid_reinforce`](../federates/grid_reinforce/README.md) image; the class stays `grid`, so everything else on this page applies unchanged.
+
+```yaml
+config:
+  layout: "kerber_landnetz_kabel_1.xlsx"
+  reinforcement: true            # every default below
+```
+
+```yaml
+config:
+  layout: "kerber_landnetz_kabel_1.xlsx"
+  reinforcement:
+    max_loading_percent: 100     # lines and transformers, default 100
+    voltage_band: split          # split (default) or flat
+    earthwork: rural             # rural (default) or urban
+    max_iterations: 20           # per loop, default 20
+```
+
+| Key | Meaning |
+|---|---|
+| `max_loading_percent` | highest allowed `loading_percent` of every line and two-winding transformer |
+| `voltage_band` | `split` shares the ±10 % band as eDisGo does: an MV bus may sit 1.5 % below and 5 % above its feeding busbar, an MV/LV station busbar 2 % below and 1.5 % above its primary side, an LV bus 6.5 % below and 3.5 % above its station busbar; `flat` holds every bus to 0.9–1.1 pu |
+| `earthwork` | which of eDisGo's earthwork costs a new trench pays |
+| `max_iterations` | rounds per kind of measure before the run fails with the violations still left |
+
+Only a `class: grid` node may carry the block, and unknown keys are refused.
+A nested template's block applies to every clone, and each clone reinforces its own copy of the net.
+The federate's README lists the measures, the standard equipment and costs, and where it differs from eDisGo.
+
 ### Placement
 
 `placement` is a pandapower **load index**, a non-empty list of them without duplicates, or `"fill"`, and it is required for everything a grid draws power from: `load`, `house`, and a grid nested under another grid.
@@ -326,14 +359,24 @@ Federates never build these themselves — they discover them from the CST feder
 | `reactive_power` | double, VAr | the root grid | `local-grid/reactive_power` |
 | `state` | string, JSON | a house | `local-grid/house_4/state` |
 | `control` | string, JSON | a HEMS | `local-grid/house_4/hems_0/control` |
+| `max_line_loading`, `max_trafo_loading` | double, % | a reinforcing grid | `local-grid/max_line_loading` |
+| `min_vm`, `max_vm` | double, pu | a reinforcing grid | `local-grid/min_vm` |
+| `reinforcement_cost` | double, kEUR | a reinforcing grid | `local-grid/reinforcement_cost` |
 
 Every grid publishes what its slack draws from upstream: the sum of `res_ext_grid.p_mw` / `q_mvar`, positive = drawn, losses inside the grid included.
 A nested grid publishes it on its parent's `load_<idx>` keys (see [Coupling contract](#coupling-contract)); the root grid publishes it on the bare keys above, which nothing in the federation subscribes to and which exist to be recorded.
+
+A reinforcing grid's loading and voltage metrics are taken before that step's measures, so they show the violation; `reinforcement_cost` is the running total.
 
 The voltage is the bus voltage in per unit (`res_bus.vm_pu`), not volts.
 The extra keys of an MV/LV coupling are in the table under [Coupling contract](#coupling-contract).
 
 The `state` payload carries the thermal vector, battery SoC/SoH, storage temperatures, and heat-pump and AC power — it is what the HEMS reads to plan against.
+
+### Reinforcement report
+
+A [reinforcing grid](#grid-reinforcement) writes `custom_metadata/<scenario>__<federate name>__reinforced` when the run ends, keyed by the run's scenario so that no run overwrites another's: the scenario, its settings, `total_cost_keur`, a `violations` list (every line, transformer and bus outside its limits before a measure: time, element, index, value, limit), a `measures` list (time, element, index, action, reason, severity, cables or transformers added, standard type, cost in kEUR), and the reinforced net as pandapower JSON in `net_json`.
+Saved into `data/input/` as a `.json` file, that net runs as an ordinary `layout`.
 
 ### Provenance
 

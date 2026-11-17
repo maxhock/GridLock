@@ -1,0 +1,26 @@
+# Runtime grid reinforcement demo: the Kerber cable net with every load on a
+# 0 -> 150 kW ramp over 6 h, far beyond what the net was built for. The grid
+# reinforces itself step by step as the ramp crosses each limit; the measures
+# and their cost are stored under custom_metadata/local-grid__reinforced (see
+# federates/grid_reinforce/README.md).
+general:
+  name: "LocalGridReinforce"
+  start_time: 0
+  duration: 21600
+  time_step: 900
+  use_meta_db: "json"
+  use_data_db: "postgres"
+federation:
+  id: "local-grid"
+  name: "Local Pandapower Grid, reinforced"
+  class: "grid"
+  config:
+    layout: "kerber_landnetz_kabel_1.xlsx"
+    reinforcement: true
+  sub_federates:
+    - id: "rampload_0"
+      name: "Ramping loads"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "ramp_load_150kw.csv"

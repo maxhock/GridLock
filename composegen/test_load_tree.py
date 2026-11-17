@@ -7,6 +7,7 @@ and subscribes to.
 """
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -833,12 +834,66 @@ def test_registering_a_grid_federate_twice_is_refused() -> None:
         handled_nodes=set(),
     )
 
-    _register_grid_federate(ctx, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False)
+    node = SimpleNamespace(data={})
+    _register_grid_federate(
+        ctx, node, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False
+    )
 
     with pytest.raises(ValueError, match="already registered"):
         _register_grid_federate(
-            ctx, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False
+            ctx, node, "mv-grid_0.lv-grid_1", "mv-grid_0.lv-grid_0", False
         )
+
+
+def _reinforcing_lv_yaml() -> str:
+    return _mv_lv_yaml().replace(
+        '        layout: "lv.json"\n',
+        '        layout: "lv.json"\n        reinforcement:\n'
+        "          max_loading_percent: 80\n",
+    )
+
+
+@pytest.fixture
+def reinforcing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generated:
+    return _generate(
+        tmp_path, monkeypatch, _reinforcing_lv_yaml(), MV_LV_NETS, MV_LV_LAYOUTS
+    )
+
+
+def test_reinforcement_block_switches_every_clone_to_the_reinforcing_image(
+    reinforcing: Generated,
+) -> None:
+    images = {name: fed["image"] for name, fed in reinforcing.federates.items()}
+    assert images[MV_ID] == "grid"
+    assert images[f"{MV_ID}.lv-feeder_5"] == "grid"
+    for clone in ("lv-grid_1", "lv-grid_3"):
+        fed = f"{MV_ID}.{clone}"
+        assert images[fed] == "grid_reinforce"
+        # composegen fills in every default; the federate requires all of them.
+        assert reinforcing.command(fed).endswith(
+            f"--federate_name {fed} --net_key {LV_TEMPLATE} --reinforcement "
+            "max_loading_percent=80,voltage_band=split,earthwork=rural,"
+            "max_iterations=20"
+        )
+
+
+def test_reinforcing_grid_publishes_its_metrics(reinforcing: Generated) -> None:
+    from load import REINFORCEMENT_METRICS
+
+    for clone in ("lv-grid_1", "lv-grid_3"):
+        pubs = reinforcing.pubs(f"{MV_ID}.{clone}")
+        for metric in REINFORCEMENT_METRICS:
+            assert len([k for k in pubs if k.endswith(f"/{metric}")]) == 1
+    assert not any(k.endswith("/min_vm") for k in reinforcing.pubs(MV_ID))
+
+
+def test_reinforcing_clones_share_one_container(reinforcing: Generated) -> None:
+    service = f"  {MV_ID}.grid_reinforce-group:"
+    assert service in reinforcing.compose.splitlines()
+    # The service's block ends where the next two-space service name begins.
+    block = re.split(r"\n  (?! )", reinforcing.compose.split(service, 1)[1])[0]
+    assert "dockerfile: federates/grid_reinforce/Dockerfile" in block
+    assert block.count("--reinforcement ") == 2
 
 
 LOCATION_YAML = """

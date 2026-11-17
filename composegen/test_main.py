@@ -1220,3 +1220,52 @@ def test_extract_builds_the_tree_from_filename_placed_grids(tmp_path) -> None:
     assert set(extracted.grid_nodes) == {"mv", "mv.lv_4", "mv.lv_9"}
     assert extracted.tree.contains("mv.lv_9.houses_0")
     assert extracted.raw_config["federation"] == _mv_root(_filename_child())
+
+
+@pytest.mark.parametrize(
+    ("block", "message"),
+    [
+        ({"max_loading": 80}, "unknown key 'max_loading'"),
+        ({"voltage_band": "wide"}, "'voltage_band' must be one of"),
+        ({"earthwork": "moon"}, "'earthwork' must be one of"),
+        ({"max_loading_percent": 0}, "'max_loading_percent' must be a number"),
+        ({"max_iterations": 2.5}, "'max_iterations' must be a whole number"),
+        ("yes", "must be true or a mapping"),
+    ],
+)
+def test_bad_reinforcement_block_is_refused(block: object, message: str) -> None:
+    tree = _tree_with_root(
+        {"class": "grid", "layout": "a.xlsx", "reinforcement": block}
+    )
+    with pytest.raises(ValueError):
+        validate_tree(tree)
+    from transform import _reinforcement_errors
+
+    (error,) = _reinforcement_errors(tree.get_node(tree.root))
+    assert message in error
+
+
+def test_reinforcement_on_a_non_grid_is_refused() -> None:
+    from transform import _reinforcement_errors
+
+    tree = _tree_with_root({"class": "grid", "layout": "a.xlsx"})
+    tree.create_node(
+        tag="h",
+        identifier="h",
+        parent=tree.root,
+        data={"class": "load", "reinforcement": True},
+    )
+    (error,) = _reinforcement_errors(tree.get_node("h"))
+    assert "only grids can be reinforced" in error
+
+
+def test_reinforcement_settings_fill_in_the_defaults() -> None:
+    from transform import REINFORCEMENT_DEFAULTS, reinforcement_settings
+
+    assert reinforcement_settings({}) is None
+    assert reinforcement_settings({"reinforcement": False}) is None
+    assert reinforcement_settings({"reinforcement": True}) == REINFORCEMENT_DEFAULTS
+    assert reinforcement_settings({"reinforcement": {"earthwork": "urban"}}) == {
+        **REINFORCEMENT_DEFAULTS,
+        "earthwork": "urban",
+    }

@@ -360,6 +360,30 @@ Federates publish what they actually draw, so a ZIP share applies voltage depend
 
 **Sources.** 9f9be43, PR #70.
 
+### D42: Grids reinforce themselves during the run, with eDisGo's rules
+
+**Decision.** A grid node with a `reinforcement` block runs `federates/grid_reinforce`, a subclass of the grid federate that, after each step's power flow, applies eDisGo's reinforcement measures until every loading and voltage limit holds, re-solves, and publishes the reinforced state.
+Measures are permanent for the run, each grid federate reinforces only its own net, and the reinforced net with every violation, measure and cost is stored per run in `custom_metadata/<scenario>__<federate>__reinforced`, keyed like the run's timeseries.
+Its published loading and voltage metrics are taken before the step's measures, since afterwards they would always sit within the limits.
+MV voltage limits are relative to the feeding busbar rather than absolute.
+
+**Why.** Nothing checked loading or voltage limits, so a run with an overloaded feeder completed without a word, and studies with more PV, heat pumps or EV charging need to know what has to be expanded and at what cost (issue #83).
+Pandapower's own tooling offers only `runpm_tnep`, a Julia-backed optimisation over candidate lines at a single operating point, and the automated planning of its developers is the separate pandapower Pro; eDisGo implements the measures German DSOs use, with a published catalogue and costs, but on PyPSA and under AGPL-3.0, so its rules are reimplemented on pandapower rather than imported.
+The maintainer chose runtime reinforcement inside a fork of the grid federate.
+A subclass rather than a copy keeps the power flow and its pins in one place.
+The class stays `grid` because about fifteen places in composegen and the infdb stage branch on it.
+Absolute MV limits assume an OLTC holds the busbar at 1.0 pu; on the synthetic MV net without one, the transformer's 3.6 % drop drove 58 parallel cables onto feeders that were not at fault.
+A report keyed by the federate alone was overwritten by the next run of the same experiment and could not be matched to its timeseries, which contradicts D07; a failed write is raised, since CST only returns `False`.
+
+**Rejected.** A planning tool run after the co-simulation, which sizes for the whole run but needs a run per iteration.
+`runpm_tnep`, for the Julia stack, the need to supply candidate lines, and its single operating point.
+Calling eDisGo on a converted net, for the second grid model and the licence.
+A new `grid_reinforce` class, for the branches it would touch.
+eDisGo's absolute MV band.
+One report per federate, overwritten by each run.
+
+**Sources.** issue #83, maintainer.
+
 ## Timing
 
 ### D26: One time axis; only a single root grid waits for the current time
@@ -380,7 +404,7 @@ Shrinking `time_step`, which only mitigates the lag and does not remove it (#55)
 
 ### D27: Same-image federates under one parent share a container
 
-**Decision.** Federates of an image in `GROUPED_IMAGES` (grid, house_player) that share a parent run in one Compose service, one thread each; a failing thread ends the container.
+**Decision.** Federates of an image in `GROUPED_IMAGES` (grid, grid_reinforce, house_player) that share a parent run in one Compose service, one thread each; a failing thread ends the container.
 Every other image is one container per federate.
 
 **Why.** One container per grid loads pandapower, numba and CST once per grid (about 166 MB): the full real federation of 509 federates needed about 66 GB and stopped at 236 containers.

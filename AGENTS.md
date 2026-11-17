@@ -260,7 +260,7 @@ therefore carries **no static IPs and no reserved subnet** — federates reach t
 by the Compose service name `helics`, which is what lets two experiments run at once.
 Anything that changes the shape of the generated compose file lives here, not in CST.
 
-Federates of an image in `GROUPED_IMAGES` (`grid`, `house_player`) that share a parent share one container (`_service_groups`): the LV grids under one MV grid are one service, and so are the load players under one LV grid.
+Federates of an image in `GROUPED_IMAGES` (`grid`, `grid_reinforce`, `house_player`) that share a parent share one container (`_service_groups`): the LV grids under one MV grid are one service, and so are the load players under one LV grid.
 The parent is the federate name without its last dotted segment, which is how composegen names federates.
 `_group_command` joins the members' `--federate_name ...` arguments onto one command, and the entry point runs each federate on its own thread in one process; a failing thread `os._exit(1)`s the whole container.
 This is why the full ÜZW federation fits in memory: one container per federate needed ~66 GB, because every grid process loads pandapower, numba and CST (~166 MB) before it solves anything, against ~50 MB per grid thread.
@@ -276,6 +276,15 @@ command. Note the classes without their own federate yet: `pv` and `battery` map
 them directly under a grid is refused by `validate_tree`
 (`UNIMPLEMENTED_GRID_CHILD_CLASSES` in `composegen/transform.py`) rather than starting a
 broken container. `hems`/`controller` are real standalone federates.
+
+A grid node with a `reinforcement` block keeps the class `grid` but runs the
+`grid_reinforce` image (`_register_grid_federate`): a subclass of `GridFederate` that
+reinforces its net with eDisGo's rules after every power flow (D42). Its rules live in
+`federates/grid_reinforce/reinforce.py`, free of HELICS, and its settings travel as a
+`--reinforcement k=v,...` flag paired with each `--federate_name`, because CST rejects
+custom keys in a federate's config. The image copies `federates/grid/main.py` in as
+`grid_federate.py`, so a change to the grid federate's internals (`_apply_inputs`,
+`_solve`, `_publish`, `run_concurrently`) can break the fork; its tests run in `test.sh`.
 
 `federates/template/` is the starting point for a new federate.
 `federates/grid-pypsa/` and `federates/forecasting/` are not wired into tree mode —
@@ -296,6 +305,10 @@ not from a federate's own name.
   CSVs are the exception — they are passed as a `--timeseries` path.
 - Results: written by CST into the timeseries DB, tagged with the run's own timestamped
   scenario name (`<name>_YYYYMMDD_HHMMSS`). There is no `data/output` export path any more.
+- Reinforcement reports: each reinforcing grid writes
+  `custom_metadata/<scenario>__<federate>__reinforced` as the run ends (violations,
+  measures, costs, the reinforced net), keyed by scenario like the timeseries so no run
+  overwrites another's. The reinforced net is never written back to the net key.
 - Run provenance (git commit, experiment path, full experiment YAML) is merged into the
   scenario document *after* `federation.write_config`, which overwrites it.
 
@@ -314,10 +327,11 @@ State the reasoning in your own words with a citation marker (commit, PR or issu
   `requirements.txt`, its own environment. The entry point is invoked by the generated
   compose command, so no packaging metadata is involved — `federates/grid/pyproject.toml`
   is a leftover no build reads, and it declares a different Python version than the image
-  it supposedly describes. Exception: `controller` builds from the repo root and reuses
-  `federates/house/requirements.txt` and the `house/` package.
-- **Dependencies are pinned on purpose** in everything that runs today — `grid`,
-  `house`, `house_player`, `broker`, composegen — including EnergySim to a commit. An
+  it supposedly describes. Exceptions: `controller` builds from the repo root and reuses
+  `federates/house/requirements.txt` and the `house/` package, and `grid_reinforce`
+  builds from the repo root and reuses `federates/grid/requirements.txt` and `main.py`.
+- **Dependencies are pinned on purpose** in everything that runs today — `grid` (and
+  `grid_reinforce` through it), `house`, `house_player`, `broker`, composegen — including EnergySim to a commit. An
   unpinned rebuild would change the simulation without a commit on this side, which makes
   the `git_commit` stored with each run a lie. Bump deliberately. `template` is pinned
   too, since it is what a new federate is copied from. `recorder`, `forecasting` and

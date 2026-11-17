@@ -21,6 +21,7 @@ from transform import (
     LOAD_PLACED_CLASSES,
     MPC_FORECAST_HORIZON_STEPS,
     TransformedConfig,
+    reinforcement_settings,
 )
 from cosim_toolbox.dbms import create_metadata_manager
 
@@ -1496,19 +1497,44 @@ def _claim_federate_name(federation, fed_name: str) -> None:
         )
 
 
+REINFORCING_GRID_IMAGE = "grid_reinforce"
+
+# Source-only keys of a reinforcing grid, with their units; the federate finds
+# them by these suffixes (federates/grid_reinforce/main.py:METRIC_SUFFIXES).
+REINFORCEMENT_METRICS = {
+    "max_line_loading": "%",
+    "max_trafo_loading": "%",
+    "min_vm": "pu",
+    "max_vm": "pu",
+    "reinforcement_cost": "",
+}
+
+
+def _reinforcement_arg(settings: dict[str, Any]) -> str:
+    """Settings as the single ``key=value,...`` word the federate parses.
+
+    One word per federate keeps it paired with its ``--federate_name`` when
+    grids share a container, and needs no quoting inside ``bash -c "..."``.
+    """
+    return ",".join(f"{key}={value}" for key, value in settings.items())
+
+
 def _register_grid_federate(
-    ctx: _GridWiringContext, fed_name: str, net_key: str, waits: bool
+    ctx: _GridWiringContext, grid_node, fed_name: str, net_key: str, waits: bool
 ) -> None:
     """Add one grid federate, with the command that points it at its net.
 
     ``waits`` sets ``wait_for_current_time_update``, which HELICS allows on one
-    federate federation-wide (see ``_grid_waits_for_current_time``).
+    federate federation-wide (see ``_grid_waits_for_current_time``). A grid
+    node with a ``reinforcement`` block runs the reinforcing grid image instead,
+    which every clone of a nested template inherits.
     """
     from cosim_toolbox.sims import FederateConfig
 
     _claim_federate_name(ctx.federation, fed_name)
 
     grid_mapped = map_params_to_class("grid")
+    reinforcement = reinforcement_settings(grid_node.data)
 
     fed = FederateConfig(
         fed_name,
@@ -1518,12 +1544,18 @@ def _register_grid_federate(
     ctx.federation.add_federate_config(fed)
 
     cmd = _grid_command(grid_mapped["command"], ctx.scenario_name, fed_name, net_key)
+    image = grid_mapped["image"]
+    if reinforcement is not None:
+        image = REINFORCING_GRID_IMAGE
+        cmd += f" --reinforcement {_reinforcement_arg(reinforcement)}"
+        for metric, unit in REINFORCEMENT_METRICS.items():
+            _add_source_only_group(ctx.federation, metric, fed_name, "double", unit)
 
-    fed.config("image", grid_mapped["image"])
+    fed.config("image", image)
     fed.config("command", cmd)
     fed.config("federate_type", "value")
 
-    print(f"Added grid federate: {fed_name}")
+    print(f"Added grid federate: {fed_name} ({image})")
 
 
 def _claim_explicit_placements(
@@ -1823,7 +1855,7 @@ def _wire_grid(
     ``wait_for_current_time_update`` slot: the root passes the decision made
     for the federation, nested grids never do.
     """
-    _register_grid_federate(ctx, fed_name, net_key, waits)
+    _register_grid_federate(ctx, grid_node, fed_name, net_key, waits)
     ctx.net_keys.add(net_key)
 
     # Marked here rather than by the caller so that nested grids, which are
