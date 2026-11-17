@@ -1,14 +1,14 @@
 {
   "title": "OCHRE house",
   "uid": "ochre-house-experiment",
-  "description": "Results of config/experiment-ochre-house.yml. Time axis is simulation time (00:00 = start of the run).",
+  "description": "Results of an ochre-house run. Pick the experiment (the Analysis schema) and the run at the top. Time axis is simulation time (00:00 = start of the run).",
   "tags": [
     "gridlock",
     "ochre"
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "",
   "time": {
@@ -18,14 +18,27 @@
   "templating": {
     "list": [
       {
+        "name": "experiment",
+        "label": "Experiment",
+        "type": "query",
+        "datasource": "copper",
+        "refresh": 1,
+        "sort": 0,
+        "query": "SELECT table_schema FROM information_schema.tables WHERE table_name = 'hdt_string' AND table_schema LIKE '%Analysis' ORDER BY (table_schema ILIKE 'ochre%') DESC, table_schema",
+        "definition": "SELECT table_schema FROM information_schema.tables WHERE table_name = 'hdt_string' AND table_schema LIKE '%Analysis' ORDER BY (table_schema ILIKE 'ochre%') DESC, table_schema",
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      },
+      {
         "name": "scenario",
         "label": "Run",
         "type": "query",
         "datasource": "copper",
-        "refresh": 2,
+        "refresh": 1,
         "sort": 0,
-        "query": "SELECT scenario FROM \"OchreHouseAnalysis\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
-        "definition": "SELECT scenario FROM \"OchreHouseAnalysis\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
+        "query": "SELECT scenario FROM \"$experiment\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
+        "definition": "SELECT scenario FROM \"$experiment\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
         "includeAll": false,
         "multi": false,
         "current": {}
@@ -52,7 +65,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT avg((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0)*(max(sim_time)-min(sim_time))/3600.0 AS kwh FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+          "rawSql": "SELECT avg((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0)*(max(sim_time)-min(sim_time))/3600.0 AS kwh FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
         }
       ],
       "fieldConfig": {
@@ -98,7 +111,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT max((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0) AS kw FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+          "rawSql": "SELECT max((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0) AS kw FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
         }
       ],
       "fieldConfig": {
@@ -144,7 +157,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT min((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+          "rawSql": "SELECT min((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
         }
       ],
       "fieldConfig": {
@@ -190,7 +203,7 @@
           "format": "table",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT max((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+          "rawSql": "SELECT max((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
         }
       ],
       "fieldConfig": {
@@ -236,7 +249,7 @@
           "format": "time_series",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT to_timestamp(sim_time) AS time, (data_value::jsonb#>>'{state,t_indoor_c}')::float AS \"indoor\", (data_value::jsonb#>>'{state,t_outdoor_c}')::float AS \"outdoor\" FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state' ORDER BY sim_time"
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, (data_value::jsonb#>>'{state,t_indoor_c}')::float AS \"indoor\", (data_value::jsonb#>>'{state,t_outdoor_c}')::float AS \"outdoor\" FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state' ORDER BY sim_time"
         }
       ],
       "fieldConfig": {
@@ -299,7 +312,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Power by end use",
-      "description": "OCHRE house: electric power per end use, stacked. PV generation is drawn below zero; the net of both is the power the grid sees.",
+      "description": "OCHRE house: electric power per end use, stacked. An end use that is zero for the whole run is left out. PV generation is drawn below zero; the net of both is the power the grid sees.",
       "datasource": "copper",
       "gridPos": {
         "x": 12,
@@ -314,7 +327,7 @@
           "format": "time_series",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT to_timestamp(sim_time) AS time, (data_value::jsonb#>>'{loads_w,heating}')::float/1000.0 AS \"heating\", (data_value::jsonb#>>'{loads_w,cooling}')::float/1000.0 AS \"cooling\", (data_value::jsonb#>>'{loads_w,water_heating}')::float/1000.0 AS \"water heating\", (data_value::jsonb#>>'{loads_w,lighting}')::float/1000.0 AS \"lighting\", (data_value::jsonb#>>'{loads_w,other}')::float/1000.0 AS \"other\", -(data_value::jsonb#>>'{loads_w,pv_generation}')::float/1000.0 AS \"PV generation\" FROM \"OchreHouseAnalysis\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state' ORDER BY sim_time"
+          "rawSql": "WITH s AS (SELECT sim_time, data_value::jsonb AS j FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'), u AS (SELECT sim_time, 'heating' AS metric, (j#>>'{loads_w,heating}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'cooling' AS metric, (j#>>'{loads_w,cooling}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'water heating' AS metric, (j#>>'{loads_w,water_heating}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'lighting' AS metric, (j#>>'{loads_w,lighting}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'other' AS metric, (j#>>'{loads_w,other}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'PV generation' AS metric, -(j#>>'{loads_w,pv_generation}')::float/1000.0 AS kw FROM s) SELECT to_timestamp(sim_time) AS time, metric, kw FROM u WHERE metric IN (SELECT metric FROM u GROUP BY metric HAVING max(abs(kw)) > 0) ORDER BY sim_time"
         }
       ],
       "fieldConfig": {
@@ -456,7 +469,7 @@
           "format": "time_series",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT to_timestamp(sim_time) AS time, federate AS metric, data_value/1000.0 AS kw FROM \"OchreHouseAnalysis\".hdt_double WHERE scenario='$scenario' AND data_name ~ '/(ochre-)?house_[0-9]+/load_[0-9]+/active_power' ORDER BY sim_time"
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, federate AS metric, data_value/1000.0 AS kw FROM \"$experiment\".hdt_double WHERE scenario='$scenario' AND data_name ~ '/(ochre-)?house_[0-9]+/load_[0-9]+/active_power' ORDER BY sim_time"
         }
       ],
       "fieldConfig": {
@@ -503,7 +516,7 @@
           "format": "time_series",
           "rawQuery": true,
           "editorMode": "code",
-          "rawSql": "SELECT to_timestamp(sim_time) AS time, min(data_value) AS \"lowest\", max(data_value) AS \"highest\" FROM \"OchreHouseAnalysis\".hdt_double WHERE scenario='$scenario' AND data_name LIKE '%/voltage' GROUP BY sim_time ORDER BY sim_time"
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, min(data_value) AS \"lowest\", max(data_value) AS \"highest\" FROM \"$experiment\".hdt_double WHERE scenario='$scenario' AND data_name LIKE '%/voltage' GROUP BY sim_time ORDER BY sim_time"
         }
       ],
       "fieldConfig": {
