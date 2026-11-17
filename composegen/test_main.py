@@ -891,7 +891,7 @@ def test_expand_child_instances_house_requires_load_indices_none() -> None:
     [
         ("grid", "grid"),
         ("house", "house"),
-        ("ochre-house", "ochre-house"),
+        ("ochre-house", "ochre_house"),
         ("load", "house_player"),
         ("house_player", "house_player"),
         ("pv", "house"),

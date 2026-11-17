@@ -1,4 +1,4 @@
-# ochre-house/Dockerfile
+# ochre_house/Dockerfile
 FROM python:3.11-slim AS base
 
 # 1. Python-specific optimizations
@@ -38,6 +38,6 @@ CMD ["python", "main.py"]
 
 # --- Usage ---
 # To run tests during build:
-# docker build --target test -t ochre-house-test .
+# docker build --target test -t ochre_house-test .
 # To build production image:
-# docker build --target final -t ochre-house-prod .
+# docker build --target final -t ochre_house-prod .

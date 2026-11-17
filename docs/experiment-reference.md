@@ -71,7 +71,7 @@ federation:
 | `grid` | `federates/grid` | exactly one of `layout` or `location`; nested under another grid: a `layout` and a `placement` | — |
 | `load` | `federates/house_player` | `electrical_load` (a `.csv`), `placement` | — |
 | `house` | `federates/house` | `exogenous_data` (a `.csv`), `model`†, `placement` | — |
-| `ochre-house` | `federates/ochre-house` | `hpxml` (`.xml`), `schedule` (`.csv`), `weather` (`.epw` or `.csv`), `placement`; `latitude`, `longitude`, `timezone` with a `.csv` weather | `pv_capacity_kw`, `altitude` |
+| `ochre-house` | `federates/ochre_house` | `hpxml` (`.xml`), `schedule` (`.csv`), `weather` (`.epw` or `.csv`), `placement`; `latitude`, `longitude`, `timezone` with a `.csv` weather | `pv_capacity_kw`, `altitude` |
 | `pv` | `federates/house` | `capacity`†, `max_production`† | — |
 | `battery` | `federates/house` | `capacity`†, `power`† | — |
 | `hems` / `controller` | `federates/controller` | `control_strategy`† | `accessible`† |

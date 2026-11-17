@@ -496,7 +496,7 @@ def map_params_to_class(federate_class: str) -> dict:
             "command": "python3 house/main.py",
         },
         "ochre-house": {
-            "image": "ochre-house",
+            "image": "ochre_house",
             "command": "python3 main.py",
         },
         "load": {
