@@ -1,0 +1,42 @@
+# The smallest OCHRE house: a 6 m cube (4 exterior walls, flat roof, slab), one lighting
+# load and an air-to-air heat pump, no windows, hot water or appliances
+# (`data/input/ochre/minimal-cube.xml`). Meant as the test case for building an
+# ochre-house from database data: with so little in it, a wrong result points at the
+# wiring and not at house details.
+#
+# Weather is the shared `exogenous_data` shape (`sample_data.csv`), so latitude,
+# longitude and timezone come with it. The dataset is random test data, not a realistic
+# day. No PV yet: it is meant to come from the `house` federate's PV component.
+# The schedule is OCHRE's bundled one; the minimal house reads only its
+# `lighting_interior` column.
+general:
+  name: "OchreMinimal"
+  start_time: 0
+  end_time: 86400
+  time_step: 3600
+  use_meta_db: "mongo"
+  use_data_db: "postgres"
+federation:
+  id: "local-grid"
+  name: "Local Pandapower Grid"
+  class: "grid"
+  config:
+    layout: "kerber_landnetz_freileitung_1.xlsx"
+  sub_federates:
+    - id: "loadhouse_0"
+      name: "Load profile house"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "sample_house.csv"
+    - id: "ochre-house_0"
+      name: "OCHRE minimal cube"
+      class: "ochre-house"
+      config:
+        placement: [6]
+        hpxml: "ochre/minimal-cube.xml"
+        schedule: "ochre/bldg0112631_schedule.csv"
+        weather: "sample_data.csv"
+        latitude: 48.14
+        longitude: 11.58
+        timezone: 1

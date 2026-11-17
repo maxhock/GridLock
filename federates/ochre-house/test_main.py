@@ -9,19 +9,18 @@ import json
 import os
 from pathlib import Path
 
+import main
 import pandas as pd
 import pytest
 from cosim_toolbox.sims import Federate
-
-import main
 from main import (
     END_USE_KEYS,
     PV_KEY,
     SIM_YEAR,
     OchreHouseFederate,
-    pv_equipment,
     exogenous_to_ochre_weather,
     get_db_backends_from_env,
+    pv_equipment,
     serialize_dwelling_status,
     setup_dwelling,
     write_ochre_inputs,
@@ -96,6 +95,25 @@ def test_serialize_dwelling_status_is_json_serializable() -> None:
     record = serialize_dwelling_status(_status(), "ochre-house_6", 0.0, 3600)
 
     assert json.loads(json.dumps(record)) == record
+
+
+def test_serialize_dwelling_status_publishes_zero_for_end_uses_the_house_lacks() -> (
+    None
+):
+    status = _status()
+    del status["Water Heating Electric Power (kW)"]
+
+    record = serialize_dwelling_status(status, "ochre-house_6", 0.0, 3600)
+
+    assert record["loads_w"]["water_heating"] == 0.0
+    assert record["loads_w"]["heating"] == pytest.approx(100.0)
+
+
+def test_serialize_dwelling_status_raises_when_no_end_use_key_is_present() -> None:
+    status = {key: value for key, value in _status().items() if key not in END_USE_KEYS}
+
+    with pytest.raises(KeyError, match="end-use keys"):
+        serialize_dwelling_status(status, "ochre-house_6", 0.0, 3600)
 
 
 def test_serialize_dwelling_status_names_the_missing_ochre_key() -> None:
@@ -415,15 +433,20 @@ def test_setup_dwelling_steps_on_csv_weather(
     assert any(load > 0.0 for load in loads)
 
 
-# Inside the Docker test stage the file sits in a two-level path with no repo above it.
-EXAMPLE_HPXML = next(
-    (
-        parent / "data" / "input" / "ochre" / "house-example.xml"
-        for parent in Path(__file__).resolve().parents
-        if (parent / "data" / "input" / "ochre" / "house-example.xml").exists()
-    ),
-    None,
-)
+def _bundled_hpxml(name: str) -> Path | None:
+    # Inside the Docker test stage the file sits in a two-level path with no repo above it.
+    return next(
+        (
+            parent / "data" / "input" / "ochre" / name
+            for parent in Path(__file__).resolve().parents
+            if (parent / "data" / "input" / "ochre" / name).exists()
+        ),
+        None,
+    )
+
+
+EXAMPLE_HPXML = _bundled_hpxml("house-example.xml")
+MINIMAL_CUBE_HPXML = _bundled_hpxml("minimal-cube.xml")
 
 
 @pytest.mark.skipif(
@@ -459,3 +482,36 @@ def test_example_hpxml_house_heats_itself_on_csv_weather(
     assert max(r["loads_w"]["heating"] for r in records) > 0.0
     assert all(15.0 < r["state"]["t_indoor_c"] < 25.0 for r in records)
     assert max(r["loads_w"]["pv_generation"] for r in records) > 0.0
+
+
+@pytest.mark.skipif(
+    MINIMAL_CUBE_HPXML is None,
+    reason="data/ is outside the image's build context; runs from a repo checkout",
+)
+def test_minimal_cube_hpxml_runs_with_only_lighting_and_a_heat_pump(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 6 m cube has no windows, hot water or appliances, and still holds 20 C."""
+    pytest.importorskip("ochre")
+    monkeypatch.setattr(main, "SCRATCH_DIR", tmp_path)
+    document = _bundled_document(_exogenous_csv(days=4)) | {
+        "hpxml_xml": MINIMAL_CUBE_HPXML.read_text(),
+        "weather_location": {"latitude": 48.14, "longitude": 11.58, "timezone": 1.0},
+    }
+    inputs = write_ochre_inputs("ochre-house_6", document)
+    dwelling = setup_dwelling(inputs, 3600, 24 * 3600)
+
+    records = [
+        serialize_dwelling_status(
+            dwelling.update(), "ochre-house_6", hour * 3600.0, 3600
+        )
+        for hour in range(24)
+    ]
+
+    assert sorted(dwelling.equipment) == [
+        "ASHP Cooler",
+        "ASHP Heater",
+        "Indoor Lighting",
+    ]
+    assert max(r["loads_w"]["lighting"] for r in records) > 0.0
+    assert all(15.0 < r["state"]["t_indoor_c"] < 25.0 for r in records)

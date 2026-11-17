@@ -82,7 +82,7 @@ federation:
 
 `ochre-house` runs one real OCHRE `Dwelling`, built from three files in the data input directory, and is wired like a `house`:
 
-- `hpxml` — the building (envelope, equipment, setpoints), an HPXML file. `data/input/ochre/bldg0112631-up11.xml` is OCHRE's bundled example, a Colorado heat-pump house.
+- `hpxml` — the building (envelope, equipment, setpoints), an HPXML file. `data/input/ochre/bldg0112631-up11.xml` is OCHRE's bundled example, a Colorado heat-pump house. `data/input/ochre/minimal-cube.xml` is the smallest house that runs: a 6 m cube with one lighting load and a heat pump, no windows, hot water or appliances (`config/experiment-ochre-minimal.yml`).
 - `schedule` — occupancy, lighting, plug-load and hot-water usage over the year, a CSV that belongs to the HPXML. `data/input/ochre/bldg0112631_schedule.csv` is the example's.
 - `weather` — either an EPW file, which carries its own location, or a CSV in the house's `exogenous_data` shape (`sample_data.csv`), so a house and an ochre-house can run on the same weather.
   A CSV has no location, so give `latitude`, `longitude` and `timezone` (UTC offset in hours) next to it.

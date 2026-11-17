@@ -1,0 +1,316 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!--
+  Minimal OCHRE house: a 6 m cube (4 exterior walls, flat roof, slab foundation), one
+  lighting load and one air-to-air heat pump. No windows, doors, hot water, appliances
+  or plug loads. US units throughout, as OCHRE's HPXML parser expects: 6 m = 19.685 ft,
+  floor 387.5 ft2, volume 7628 ft3, R-values in h.ft2.F/Btu (R 16 is U 0.35 W/m2K).
+  The weather station block is a placeholder: the federate hands OCHRE its own weather.
+-->
+<HPXML xmlns='http://hpxmlonline.com/2019/10' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:schemaLocation='http://hpxmlonline.com/2019/10' schemaVersion='4.0'>
+  <XMLTransactionHeaderInformation>
+    <XMLType>HPXML</XMLType>
+    <XMLGeneratedBy>minimal-cube</XMLGeneratedBy>
+    <CreatedDateAndTime>2000-01-01T00:00:00-07:00</CreatedDateAndTime>
+    <Transaction>create</Transaction>
+  </XMLTransactionHeaderInformation>
+  <SoftwareInfo>
+    <extension>
+      <SimulationControl>
+        <Timestep>15</Timestep>
+        <BeginMonth>1</BeginMonth>
+        <BeginDayOfMonth>1</BeginDayOfMonth>
+        <EndMonth>12</EndMonth>
+        <EndDayOfMonth>31</EndDayOfMonth>
+        <CalendarYear>2018</CalendarYear>
+        <TemperatureCapacitanceMultiplier dataSource='software'>1.0</TemperatureCapacitanceMultiplier>
+      </SimulationControl>
+    </extension>
+  </SoftwareInfo>
+  <Building>
+    <BuildingID id='MinimalCube'/>
+    <Site>
+      <SiteID id='SiteID'/>
+      <Address>
+        <StateCode>CO</StateCode>
+      </Address>
+      <TimeZone>
+        <UTCOffset>1.0</UTCOffset>
+        <DSTObserved>false</DSTObserved>
+      </TimeZone>
+    </Site>
+    <ProjectStatus>
+      <EventType>proposed workscope</EventType>
+    </ProjectStatus>
+    <BuildingDetails>
+      <BuildingSummary>
+        <Site>
+          <SiteType>suburban</SiteType>
+          <Surroundings>stand-alone</Surroundings>
+          <VerticalSurroundings>no units above or below</VerticalSurroundings>
+          <AzimuthOfFrontOfHome>180</AzimuthOfFrontOfHome>
+          <FuelTypesAvailable>
+            <Fuel>electricity</Fuel>
+          </FuelTypesAvailable>
+        </Site>
+        <BuildingOccupancy>
+          <NumberofResidents>2.0</NumberofResidents>
+        </BuildingOccupancy>
+        <BuildingConstruction>
+          <ResidentialFacilityType>single-family detached</ResidentialFacilityType>
+          <NumberofConditionedFloors>1.0</NumberofConditionedFloors>
+          <NumberofConditionedFloorsAboveGrade>1.0</NumberofConditionedFloorsAboveGrade>
+          <AverageCeilingHeight>19.685</AverageCeilingHeight>
+          <NumberofBedrooms>2</NumberofBedrooms>
+          <NumberofBathrooms>1</NumberofBathrooms>
+          <ConditionedFloorArea>387.5</ConditionedFloorArea>
+          <ConditionedBuildingVolume>7628.0</ConditionedBuildingVolume>
+        </BuildingConstruction>
+      </BuildingSummary>
+      <ClimateandRiskZones>
+        <ClimateZoneIECC>
+          <Year>2006</Year>
+          <ClimateZone>5B</ClimateZone>
+        </ClimateZoneIECC>
+        <WeatherStation>
+          <SystemIdentifier id='WeatherStation'/>
+          <Name>placeholder</Name>
+          <extension>
+            <EPWFilePath>placeholder.epw</EPWFilePath>
+          </extension>
+        </WeatherStation>
+      </ClimateandRiskZones>
+      <Enclosure>
+        <AirInfiltration>
+          <AirInfiltrationMeasurement>
+            <SystemIdentifier id='AirInfiltrationMeasurement1'/>
+            <HousePressure>50.0</HousePressure>
+            <BuildingAirLeakage>
+              <UnitofMeasure>ACH</UnitofMeasure>
+              <AirLeakage>4.0</AirLeakage>
+            </BuildingAirLeakage>
+            <InfiltrationVolume>7628.0</InfiltrationVolume>
+            <InfiltrationHeight dataSource='software'>19.685</InfiltrationHeight>
+          </AirInfiltrationMeasurement>
+          <extension>
+            <HasFlueOrChimneyInConditionedSpace dataSource='software'>false</HasFlueOrChimneyInConditionedSpace>
+          </extension>
+        </AirInfiltration>
+        <Foundations>
+          <Foundation>
+            <SystemIdentifier id='Foundation1'/>
+            <FoundationType>
+              <SlabOnGrade/>
+            </FoundationType>
+            <AttachedToSlab idref='Slab1'/>
+          </Foundation>
+        </Foundations>
+        <Roofs>
+          <Roof>
+            <SystemIdentifier id='Roof1'/>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <Area>387.5</Area>
+            <Azimuth>0</Azimuth>
+            <RoofType>asphalt or fiberglass shingles</RoofType>
+            <SolarAbsorptance>0.7</SolarAbsorptance>
+            <Emittance>0.92</Emittance>
+            <Pitch>0.0</Pitch>
+            <RadiantBarrier>false</RadiantBarrier>
+            <Insulation>
+              <SystemIdentifier id='Roof1Insulation'/>
+              <AssemblyEffectiveRValue>28.0</AssemblyEffectiveRValue>
+            </Insulation>
+          </Roof>
+        </Roofs>
+        <Walls>
+          <Wall>
+            <SystemIdentifier id='Wall1'/>
+            <ExteriorAdjacentTo>outside</ExteriorAdjacentTo>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <WallType>
+              <WoodStud/>
+            </WallType>
+            <Area>387.5</Area>
+            <Azimuth>0</Azimuth>
+            <Siding>wood siding</Siding>
+            <SolarAbsorptance>0.7</SolarAbsorptance>
+            <Emittance>0.92</Emittance>
+            <InteriorFinish>
+              <Type>gypsum board</Type>
+            </InteriorFinish>
+            <Insulation>
+              <SystemIdentifier id='Wall1Insulation'/>
+              <AssemblyEffectiveRValue>16.0</AssemblyEffectiveRValue>
+            </Insulation>
+          </Wall>
+          <Wall>
+            <SystemIdentifier id='Wall2'/>
+            <ExteriorAdjacentTo>outside</ExteriorAdjacentTo>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <WallType>
+              <WoodStud/>
+            </WallType>
+            <Area>387.5</Area>
+            <Azimuth>90</Azimuth>
+            <Siding>wood siding</Siding>
+            <SolarAbsorptance>0.7</SolarAbsorptance>
+            <Emittance>0.92</Emittance>
+            <InteriorFinish>
+              <Type>gypsum board</Type>
+            </InteriorFinish>
+            <Insulation>
+              <SystemIdentifier id='Wall2Insulation'/>
+              <AssemblyEffectiveRValue>16.0</AssemblyEffectiveRValue>
+            </Insulation>
+          </Wall>
+          <Wall>
+            <SystemIdentifier id='Wall3'/>
+            <ExteriorAdjacentTo>outside</ExteriorAdjacentTo>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <WallType>
+              <WoodStud/>
+            </WallType>
+            <Area>387.5</Area>
+            <Azimuth>180</Azimuth>
+            <Siding>wood siding</Siding>
+            <SolarAbsorptance>0.7</SolarAbsorptance>
+            <Emittance>0.92</Emittance>
+            <InteriorFinish>
+              <Type>gypsum board</Type>
+            </InteriorFinish>
+            <Insulation>
+              <SystemIdentifier id='Wall3Insulation'/>
+              <AssemblyEffectiveRValue>16.0</AssemblyEffectiveRValue>
+            </Insulation>
+          </Wall>
+          <Wall>
+            <SystemIdentifier id='Wall4'/>
+            <ExteriorAdjacentTo>outside</ExteriorAdjacentTo>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <WallType>
+              <WoodStud/>
+            </WallType>
+            <Area>387.5</Area>
+            <Azimuth>270</Azimuth>
+            <Siding>wood siding</Siding>
+            <SolarAbsorptance>0.7</SolarAbsorptance>
+            <Emittance>0.92</Emittance>
+            <InteriorFinish>
+              <Type>gypsum board</Type>
+            </InteriorFinish>
+            <Insulation>
+              <SystemIdentifier id='Wall4Insulation'/>
+              <AssemblyEffectiveRValue>16.0</AssemblyEffectiveRValue>
+            </Insulation>
+          </Wall>
+        </Walls>
+        <Slabs>
+          <Slab>
+            <SystemIdentifier id='Slab1'/>
+            <InteriorAdjacentTo>living space</InteriorAdjacentTo>
+            <Area>387.5</Area>
+            <Thickness>4.0</Thickness>
+            <ExposedPerimeter>78.7</ExposedPerimeter>
+            <PerimeterInsulation>
+              <SystemIdentifier id='Slab1PerimeterInsulation'/>
+              <Layer>
+                <NominalRValue>0.0</NominalRValue>
+                <InsulationDepth>0.0</InsulationDepth>
+              </Layer>
+            </PerimeterInsulation>
+            <UnderSlabInsulation>
+              <SystemIdentifier id='Slab1UnderSlabInsulation'/>
+              <Layer>
+                <NominalRValue>0.0</NominalRValue>
+                <InsulationWidth>0.0</InsulationWidth>
+              </Layer>
+            </UnderSlabInsulation>
+            <extension>
+              <CarpetFraction>0.0</CarpetFraction>
+              <CarpetRValue>0.0</CarpetRValue>
+            </extension>
+          </Slab>
+        </Slabs>
+      </Enclosure>
+      <Systems>
+        <HVAC>
+          <HVACPlant>
+            <PrimarySystems>
+              <PrimaryHeatingSystem idref='HeatPump1'/>
+            </PrimarySystems>
+            <HeatPump>
+              <SystemIdentifier id='HeatPump1'/>
+              <HeatPumpType>air-to-air</HeatPumpType>
+              <HeatPumpFuel>electricity</HeatPumpFuel>
+              <HeatingCapacity>12000.0</HeatingCapacity>
+              <CoolingCapacity>12000.0</CoolingCapacity>
+              <CompressorType>single stage</CompressorType>
+              <CompressorLockoutTemperature>0.0</CompressorLockoutTemperature>
+              <CoolingSensibleHeatFraction>0.73</CoolingSensibleHeatFraction>
+              <BackupType>integrated</BackupType>
+              <BackupSystemFuel>electricity</BackupSystemFuel>
+              <BackupAnnualHeatingEfficiency>
+                <Units>Percent</Units>
+                <Value>1.0</Value>
+              </BackupAnnualHeatingEfficiency>
+              <BackupHeatingCapacity>12000.0</BackupHeatingCapacity>
+              <BackupHeatingLockoutTemperature>40.0</BackupHeatingLockoutTemperature>
+              <FractionHeatLoadServed>1.0</FractionHeatLoadServed>
+              <FractionCoolLoadServed>0.0</FractionCoolLoadServed>
+              <AnnualCoolingEfficiency>
+                <Units>SEER</Units>
+                <Value>16.0</Value>
+              </AnnualCoolingEfficiency>
+              <AnnualHeatingEfficiency>
+                <Units>HSPF</Units>
+                <Value>9.2</Value>
+              </AnnualHeatingEfficiency>
+              <extension>
+                <FanPowerWattsPerCFM>0.375</FanPowerWattsPerCFM>
+                <HeatingCapacityRetention>
+                  <Fraction>0.5</Fraction>
+                  <Temperature>5.0</Temperature>
+                </HeatingCapacityRetention>
+              </extension>
+            </HeatPump>
+          </HVACPlant>
+          <HVACControl>
+            <SystemIdentifier id='HVACControl1'/>
+            <SetpointTempHeatingSeason>68.0</SetpointTempHeatingSeason>
+            <SetpointTempCoolingSeason>82.4</SetpointTempCoolingSeason>
+          </HVACControl>
+        </HVAC>
+      </Systems>
+      <Lighting>
+        <!-- OCHRE 0.9.2 only parses a list of groups: a lone LightingGroup crashes
+             with KeyError 'Location'. Hence the two empty groups next to the LED. -->
+        <LightingGroup>
+          <SystemIdentifier id='LightingGroup1'/>
+          <Location>interior</Location>
+          <FractionofUnitsInLocation>0.0</FractionofUnitsInLocation>
+          <LightingType>
+            <CompactFluorescent/>
+          </LightingType>
+        </LightingGroup>
+        <LightingGroup>
+          <SystemIdentifier id='LightingGroup2'/>
+          <Location>interior</Location>
+          <FractionofUnitsInLocation>0.0</FractionofUnitsInLocation>
+          <LightingType>
+            <FluorescentTube/>
+          </LightingType>
+        </LightingGroup>
+        <LightingGroup>
+          <SystemIdentifier id='LightingGroup3'/>
+          <Location>interior</Location>
+          <FractionofUnitsInLocation>1.0</FractionofUnitsInLocation>
+          <LightingType>
+            <LightEmittingDiode/>
+          </LightingType>
+        </LightingGroup>
+        <extension>
+          <InteriorUsageMultiplier>1.0</InteriorUsageMultiplier>
+        </extension>
+      </Lighting>
+    </BuildingDetails>
+  </Building>
+</HPXML>

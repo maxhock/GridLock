@@ -226,9 +226,15 @@ def serialize_dwelling_status(
     Same envelope as the house federate's record, so the two can be read side by
     side from the results DB. Raises KeyError naming the missing OCHRE key, so a
     renamed OCHRE output fails loudly instead of publishing zeros.
+
+    OCHRE reports an end use only if the house has that equipment (the minimal cube
+    has no water heater and no plug loads), so an absent end use is 0 W. If none of
+    them is present the keys were renamed, and that still raises.
     """
+    if not any(key in status for key in END_USE_KEYS):
+        raise KeyError(f"None of the end-use keys {list(END_USE_KEYS)} in OCHRE status")
     loads_w = {
-        short: float(status[ochre_key]) * 1000.0
+        short: float(status.get(ochre_key, 0.0)) * 1000.0
         for ochre_key, short in END_USE_KEYS.items()
     }
     loads_w["pv_generation"] = -float(status.get(PV_KEY, 0.0)) * 1000.0
