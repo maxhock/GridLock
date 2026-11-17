@@ -71,6 +71,7 @@ federation:
 | `grid` | `federates/grid` | exactly one of `layout` or `location`; nested under another grid: a `layout` and a `placement` | — |
 | `load` | `federates/house_player` | `electrical_load` (a `.csv`), `placement` | — |
 | `house` | `federates/house` | `exogenous_data` (a `.csv`), `model`†, `placement` | — |
+| `ochre-house` | `federates/ochre_house` | `hpxml` (`.xml`), `schedule` (`.csv`), `weather` (`.epw` or `.csv`), `placement`; `latitude`, `longitude`, `timezone` with a `.csv` weather | `pv_capacity_kw`, `altitude` |
 | `pv` | `federates/house` | `capacity`†, `max_production`† | — |
 | `battery` | `federates/house` | `capacity`†, `power`† | — |
 | `hems` / `controller` | `federates/controller` | `control_strategy`† | `accessible`† |
@@ -78,6 +79,20 @@ federation:
 | `empty` | — | — | — |
 
 † Validated, then discarded — see the note at the top.
+
+`ochre-house` runs one real OCHRE `Dwelling`, built from three files in the data input directory, and is wired like a `house`:
+
+- `hpxml` — the building (envelope, equipment, setpoints), an HPXML file. `data/input/ochre/bldg0112631-up11.xml` is OCHRE's bundled example, a Colorado heat-pump house. `data/input/ochre/minimal-cube.xml` is the smallest house that runs: a 6 m cube with one lighting load and a heat pump, no windows, hot water or appliances (`config/experiment-ochre-minimal.yml`).
+- `schedule` — occupancy, lighting, plug-load and hot-water usage over the year, a CSV that belongs to the HPXML. `data/input/ochre/bldg0112631_schedule.csv` is the example's.
+- `weather` — either an EPW file, which carries its own location, or a CSV in the house's `exogenous_data` shape (`sample_data.csv`), so a house and an ochre-house can run on the same weather.
+  A CSV has no location, so give `latitude`, `longitude` and `timezone` (UTC offset in hours) next to it.
+
+`pv_capacity_kw` is optional: a positive number puts a south-facing PV array of that size (kW peak, tilted 30°) on the house, simulated by OCHRE from the same weather. With a `.csv` weather file `altitude` (metres) is required too, since OCHRE's PV model needs the site elevation and a CSV has none. OCHRE does not read PV from the HPXML, so the HPXML stays PV-free. The federate publishes it as `loads_w.pv_generation`, positive like the `house`'s, and it is already netted into the total power.
+
+All three files are required; composegen stores them in the metadata store like a house's dataset and the federate reads them from there.
+A CSV weather file is converted for OCHRE with these assumptions: the `ambient_temp` and `wind_speed_m_s` columns are used as they are; `solar_gains_w` is read as global horizontal irradiance in W/m² and treated as purely diffuse (the dataset has no sun geometry); humidity is 0.7, pressure 95 kPa, sky temperature a clear-sky estimate, and the water-mains and ground temperatures are the dataset's mean ambient temperature.
+The run's dates are moved into 2018, because OCHRE's schedules refuse leap years (2018 starts on a Monday, like 2024); a dataset with a 29 February is rejected.
+A CSV weather file is checked for coverage like a house's dataset, but it must also cover OCHRE's one-day initialisation.
 
 Anything not in this list is rejected by name.
 
@@ -208,7 +223,7 @@ Until the MV grid has published, the LV net keeps its own slack setpoint.
 
 ### Placement
 
-`placement` is a pandapower **load index**, a non-empty list of them without duplicates, or `"fill"`, and it is required for everything a grid draws power from: `load`, `house`, and a grid nested under another grid.
+`placement` is a pandapower **load index**, a non-empty list of them without duplicates, or `"fill"`, and it is required for everything a grid draws power from: `load`, `house`, `ochre-house`, and a grid nested under another grid.
 A nested grid can also use `"filename"`, which takes its sub-grids from files named after the parent's loads (see [Nested grids](#nested-grids)).
 
 The grid federate identifies incoming power purely by the `load_<idx>` segment of the HELICS key.
@@ -218,7 +233,7 @@ A federate wired onto a bare `active_power` key is silently dropped from the pow
 - An index that does not exist in the net is an error, and so is a placement that resolves to nothing.
 - Load indices left unclaimed are legal — the grid zeroes every static load at import, so they sit at 0 W — but composegen prints them, because an unclaimed index looks exactly like a typo.
 
-A **house** simulates one building, so `placement: [4, 6]` becomes two independent federates named after the load each drives: `house_4` and `house_6`, not `house_0_*`.
+A **house** (or `ochre-house`) simulates one building, so `placement: [4, 6]` becomes two independent federates named after the load each drives: `house_4` and `house_6`, not `house_0_*`.
 A **nested grid** is cloned the same way, with its subtree (see [Nested grids](#nested-grids)).
 A **load player** replays one profile across all of its indices and stays a single federate.
 

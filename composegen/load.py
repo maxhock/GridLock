@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 from treelib import Tree
 
 from transform import (
+    BUILDING_CLASSES,
     HOUSE_CONTROLLER_CLASSES,
     LOAD_PLACED_CLASSES,
     MPC_FORECAST_HORIZON_STEPS,
@@ -34,7 +35,7 @@ RUNNER_FEDERATES = {
 
 # Classes that simulate exactly one connection point and are therefore cloned
 # once per load index they are placed on (see `_expand_child_instances`).
-PER_LOAD_INSTANCE_CLASSES = {"house", "grid"}
+PER_LOAD_INSTANCE_CLASSES = {"grid", *BUILDING_CLASSES}
 
 DEFAULT_COMMAND_TEMPLATES = {
     "broker": "helics_broker --federates={total_federates} --name={name} --ipv4",
@@ -493,6 +494,10 @@ def map_params_to_class(federate_class: str) -> dict:
         "house": {
             "image": "house",
             "command": "python3 house/main.py",
+        },
+        "ochre-house": {
+            "image": "ochre_house",
+            "command": "python3 main.py",
         },
         "load": {
             "image": "house_player",
@@ -1214,7 +1219,7 @@ def _wire_grid_child(
             "pu",
         )
 
-        if child_class in ("house", "load", "battery", "pv"):
+        if child_class in (*BUILDING_CLASSES, "load", "battery", "pv"):
             _add_group(
                 federation,
                 "active_power",
@@ -1239,7 +1244,7 @@ def _wire_grid_child(
 
     # Control and state are independent of how the child's power is wired:
     # a house needs them whether it sits on pandapower load indices or not.
-    if child_class in ("house", "hems", "controller"):
+    if child_class in (*BUILDING_CLASSES, "hems", "controller"):
         # A HELICS key is "<publisher federate>/<group name>". When the house's
         # own hems is the publisher, its federate name already carries the
         # house segment, so naming the group "<house>/control" repeated it:
@@ -1259,7 +1264,7 @@ def _wire_grid_child(
             "json",
         )
 
-    if child_class == "house":
+    if child_class in BUILDING_CLASSES:
         _add_source_only_group(
             federation,
             "state",
@@ -1324,8 +1329,47 @@ def _read_house_exogenous_data(
     }
 
 
+def _read_ochre_house_inputs(
+    child_data: dict, child_fed_name: str, data_input_path: Path
+) -> dict[str, Any]:
+    """Read an ochre-house's HPXML, schedule and weather files into its stored document.
+
+    Like a house's exogenous dataset, the files travel through the metadata store
+    instead of being mounted, so the federate reads them back with
+    ``metadata_manager.read("custom_metadata", ...)``. A CSV weather file has no
+    location of its own, so the location from the YAML is stored beside it.
+    """
+    inputs = {}
+    for field_name in ("hpxml", "schedule", "weather"):
+        path = data_input_path / str(child_data[field_name])
+        if not path.exists():
+            raise FileNotFoundError(
+                f"OCHRE {field_name} file for '{child_fed_name}' not found: {path}"
+            )
+        inputs[field_name] = path
+
+    document: dict[str, Any] = {
+        "hpxml_xml": inputs["hpxml"].read_text(),
+        "schedule_csv": inputs["schedule"].read_text(),
+        "weather_text": inputs["weather"].read_text(),
+        "weather_file": str(child_data["weather"]),
+        "source_files": {name: str(child_data[name]) for name in inputs},
+    }
+    if child_data.get("pv_capacity_kw") is not None:
+        document["pv_capacity_kw"] = float(child_data["pv_capacity_kw"])
+    if inputs["weather"].suffix.lower() == ".csv":
+        document["weather_location"] = {
+            name: float(child_data[name])
+            for name in ("latitude", "longitude", "timezone")
+        }
+        if child_data.get("altitude") is not None:
+            document["weather_location"]["altitude"] = float(child_data["altitude"])
+
+    return document
+
+
 def _check_house_dataset_keys(
-    datasets: dict[str, dict[str, str]], net_keys: set[str]
+    datasets: dict[str, dict[str, Any]], net_keys: set[str]
 ) -> None:
     """Refuse a house whose dataset key is a grid's net key.
 
@@ -1347,7 +1391,7 @@ def _check_house_dataset_keys(
 
 
 def _store_house_datasets(
-    datasets: dict[str, dict[str, str]], use_meta_db: str, meta_store_path: str
+    datasets: dict[str, dict[str, Any]], use_meta_db: str, meta_store_path: str
 ) -> None:
     """Write every house's exogenous dataset under its federate name."""
     if not datasets:
@@ -1471,7 +1515,7 @@ class _GridWiringContext:
     # Written only once the whole tree is wired: a coupling contract checked
     # for a later sibling must not fail after an earlier house has already
     # overwritten the dataset stored under its name.
-    house_datasets: dict[str, dict[str, str]] = field(default_factory=dict)
+    house_datasets: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Every custom_metadata key a grid in this federation reads its net from.
     net_keys: set[str] = field(default_factory=set)
 
@@ -1731,7 +1775,7 @@ def _wire_child_instance(
 
     control_publisher = None
 
-    if child_class == "house":
+    if child_class in BUILDING_CLASSES:
         control_publisher = _wire_house_subcomponents(
             ctx.federation,
             ctx.tree,
@@ -1768,6 +1812,11 @@ def _wire_child_instance(
         )
         if dataset is not None:
             ctx.house_datasets[child_fed_name] = dataset
+
+    if child_class == "ochre-house":
+        ctx.house_datasets[child_fed_name] = _read_ochre_house_inputs(
+            child_data, child_fed_name, ctx.data_input_path
+        )
 
     child_fed.config("command", child_cmd)
 

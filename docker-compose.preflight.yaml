@@ -99,15 +99,21 @@ services:
     restart: unless-stopped
     environment:
       GF_LOG_LEVEL: info
-      CST_HOST: ${CST_POSTGRES_HOST}
+      # Compose service name, not CST_POSTGRES_HOST (`localhost` is for tools on the
+      # host). Defaults to `database` so an older preflight.env keeps working.
+      CST_HOST: ${CST_POSTGRES_SERVICE_HOST:-database}
       POSTGRES_PORT: ${CST_POSTGRES_PORT}
     ports:
       - "3000:3000"
     networks:
       - sim_net
+    depends_on:
+      database:
+        condition: service_healthy
     volumes:
       - ./databases/cstdb/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
       - ./databases/cstdb/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./databases/cstdb/grafana/dashboards:/etc/grafana/dashboards:ro
 
   infdb:
     image: infdb

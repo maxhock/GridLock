@@ -1,0 +1,571 @@
+{
+  "title": "OCHRE house",
+  "uid": "ochre-house-experiment",
+  "description": "Results of an ochre-house run. Pick the experiment (the Analysis schema) and the run at the top. Time axis is simulation time (00:00 = start of the run).",
+  "tags": [
+    "gridlock",
+    "ochre"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 2,
+  "editable": true,
+  "refresh": "",
+  "time": {
+    "from": "1970-01-01T00:00:00.000Z",
+    "to": "1970-01-02T00:00:00.000Z"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "experiment",
+        "label": "Experiment",
+        "type": "query",
+        "datasource": "copper",
+        "refresh": 1,
+        "sort": 0,
+        "query": "SELECT table_schema FROM information_schema.tables WHERE table_name = 'hdt_string' AND table_schema LIKE '%Analysis' ORDER BY (table_schema ILIKE 'ochre%') DESC, table_schema",
+        "definition": "SELECT table_schema FROM information_schema.tables WHERE table_name = 'hdt_string' AND table_schema LIKE '%Analysis' ORDER BY (table_schema ILIKE 'ochre%') DESC, table_schema",
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      },
+      {
+        "name": "scenario",
+        "label": "Run",
+        "type": "query",
+        "datasource": "copper",
+        "refresh": 1,
+        "sort": 0,
+        "query": "SELECT scenario FROM \"$experiment\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
+        "definition": "SELECT scenario FROM \"$experiment\".hdt_double GROUP BY scenario ORDER BY max(created_at) DESC",
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Energy over the run",
+      "description": "Mean of the logged total power times the run length (sampled, so approximate).",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT avg((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0)*(max(sim_time)-min(sim_time))/3600.0 AS kwh FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Peak power",
+      "description": "Highest logged total power of the OCHRE house.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT max((data_value::jsonb#>>'{grid_exchange,total_load_w}')::float/1000.0) AS kw FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatt",
+          "decimals": 2,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Indoor temperature, min",
+      "description": "Lowest indoor temperature of the run.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT min((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Indoor temperature, max",
+      "description": "Highest indoor temperature of the run.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT max((data_value::jsonb#>>'{state,t_indoor_c}')::float) AS c FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "green"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Indoor vs outdoor temperature",
+      "description": "OCHRE house: indoor temperature against the weather it is driven by. Thermostat setpoints show up as the indoor line flattening.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, (data_value::jsonb#>>'{state,t_indoor_c}')::float AS \"indoor\", (data_value::jsonb#>>'{state,t_outdoor_c}')::float AS \"outdoor\" FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state' ORDER BY sim_time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "indoor"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outdoor"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Power by end use",
+      "description": "OCHRE house: electric power per end use, stacked. An end use that is zero for the whole run is left out. PV generation is drawn below zero; the net of both is the power the grid sees.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH s AS (SELECT sim_time, data_value::jsonb AS j FROM \"$experiment\".hdt_string WHERE federate LIKE '%ochre-house%' AND scenario='$scenario' AND data_name LIKE '%/state'), u AS (SELECT sim_time, 'heating' AS metric, (j#>>'{loads_w,heating}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'cooling' AS metric, (j#>>'{loads_w,cooling}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'water heating' AS metric, (j#>>'{loads_w,water_heating}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'lighting' AS metric, (j#>>'{loads_w,lighting}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'other' AS metric, (j#>>'{loads_w,other}')::float/1000.0 AS kw FROM s UNION ALL SELECT sim_time, 'PV generation' AS metric, -(j#>>'{loads_w,pv_generation}')::float/1000.0 AS kw FROM s) SELECT to_timestamp(sim_time) AS time, metric, kw FROM u WHERE metric IN (SELECT metric FROM u GROUP BY metric HAVING max(abs(kw)) > 0) ORDER BY sim_time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatt",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "heating"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cooling"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "water heating"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lighting"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "super-light-orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "other"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "PV generation"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Active power at the grid: OCHRE house vs EnergySim house",
+      "description": "What each house federate publishes to the grid (positive = consumption). Same grid and weather file, different building models.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, federate AS metric, data_value/1000.0 AS kw FROM \"$experiment\".hdt_double WHERE scenario='$scenario' AND data_name ~ '/(ochre-)?house_[0-9]+/load_[0-9]+/active_power' ORDER BY sim_time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatt",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Grid voltage, all load buses",
+      "description": "Lowest and highest bus voltage over all load buses, per unit. Dashed limits are +/-10 %.",
+      "datasource": "copper",
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": "copper",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT to_timestamp(sim_time) AS time, min(data_value) AS \"lowest\", max(data_value) AS \"highest\" FROM \"$experiment\".hdt_double WHERE scenario='$scenario' AND data_name LIKE '%/voltage' GROUP BY sim_time ORDER BY sim_time"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "spanNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "min": 0.88,
+          "max": 1.12,
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "transparent",
+                "value": 0.9
+              },
+              {
+                "color": "red",
+                "value": 1.1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

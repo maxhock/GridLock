@@ -21,6 +21,7 @@ from load import (
     _grid_command,
     _grid_waits_for_current_time,
     _resolve_load_placement,
+    _read_ochre_house_inputs,
     _resolve_placement,
     create_timeseries_tables,
     map_params_to_class,
@@ -178,6 +179,132 @@ def test_validate_tree_load_with_csv_is_valid() -> None:
 def test_validate_tree_house_requires_model_and_exogenous_data() -> None:
     with pytest.raises(ValueError):
         validate_tree(_tree_with_root({"class": "house"}))
+
+
+_OCHRE_EPW_CONFIG = {
+    "class": "ochre-house",
+    "hpxml": "ochre/house.xml",
+    "schedule": "ochre/schedule.csv",
+    "weather": "ochre/weather.epw",
+}
+_OCHRE_CSV_CONFIG = {
+    **_OCHRE_EPW_CONFIG,
+    "weather": "sample_data.csv",
+    "latitude": 48.14,
+    "longitude": 11.58,
+    "timezone": 1,
+}
+
+
+def test_validate_tree_ochre_house_with_epw_weather_is_valid() -> None:
+    validate_tree(_tree_with_root(_OCHRE_EPW_CONFIG))
+
+
+def test_validate_tree_ochre_house_with_csv_weather_and_location_is_valid() -> None:
+    validate_tree(_tree_with_root(_OCHRE_CSV_CONFIG))
+
+
+@pytest.mark.parametrize("missing", ["hpxml", "schedule", "weather"])
+def test_validate_tree_ochre_house_requires_each_input_file(missing: str) -> None:
+    config = {k: v for k, v in _OCHRE_EPW_CONFIG.items() if k != missing}
+
+    with pytest.raises(ValueError, match="validation failed"):
+        validate_tree(_tree_with_root(config))
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("hpxml", "house.csv"), ("schedule", "schedule.xml"), ("weather", "weather.txt")],
+)
+def test_validate_tree_ochre_house_rejects_wrong_file_type(
+    field: str, value: str
+) -> None:
+    with pytest.raises(ValueError, match="validation failed"):
+        validate_tree(_tree_with_root({**_OCHRE_EPW_CONFIG, field: value}))
+
+
+@pytest.mark.parametrize("missing", ["latitude", "longitude", "timezone"])
+def test_validate_tree_ochre_house_csv_weather_requires_location(
+    missing: str,
+) -> None:
+    config = {k: v for k, v in _OCHRE_CSV_CONFIG.items() if k != missing}
+
+    with pytest.raises(ValueError, match="validation failed"):
+        validate_tree(_tree_with_root(config))
+
+
+def test_validate_tree_ochre_house_accepts_a_pv_capacity() -> None:
+    validate_tree(_tree_with_root({**_OCHRE_EPW_CONFIG, "pv_capacity_kw": 4}))
+
+
+def test_validate_tree_ochre_house_pv_on_csv_weather_requires_altitude() -> None:
+    config = {**_OCHRE_CSV_CONFIG, "pv_capacity_kw": 4}
+
+    with pytest.raises(ValueError, match="validation failed"):
+        validate_tree(_tree_with_root(config))
+
+    validate_tree(_tree_with_root({**config, "altitude": 520}))
+
+
+@pytest.mark.parametrize("value", [0, -2.5, "4", True])
+def test_validate_tree_ochre_house_rejects_a_bad_pv_capacity(value: object) -> None:
+    with pytest.raises(ValueError, match="validation failed"):
+        validate_tree(_tree_with_root({**_OCHRE_EPW_CONFIG, "pv_capacity_kw": value}))
+
+
+def _write_ochre_inputs(root, weather_name: str, weather_text: str) -> None:
+    (root / "ochre").mkdir()
+    (root / "ochre" / "house.xml").write_text("<HPXML/>")
+    (root / "ochre" / "schedule.csv").write_text("occupants\n1.0\n")
+    (root / weather_name).write_text(weather_text)
+
+
+def test_read_ochre_house_inputs_reads_the_three_files(tmp_path) -> None:
+    _write_ochre_inputs(tmp_path, "ochre/weather.epw", "LOCATION,Denver")
+
+    document = _read_ochre_house_inputs(_OCHRE_EPW_CONFIG, "ochre-house_6", tmp_path)
+
+    assert document["hpxml_xml"] == "<HPXML/>"
+    assert document["schedule_csv"] == "occupants\n1.0\n"
+    assert document["weather_text"] == "LOCATION,Denver"
+    assert document["weather_file"] == "ochre/weather.epw"
+    assert "weather_location" not in document
+
+
+def test_read_ochre_house_inputs_stores_the_pv_capacity_only_when_set(
+    tmp_path,
+) -> None:
+    _write_ochre_inputs(tmp_path, "ochre/weather.epw", "LOCATION,Denver")
+
+    plain = _read_ochre_house_inputs(_OCHRE_EPW_CONFIG, "plain", tmp_path)
+    solar = _read_ochre_house_inputs(
+        {**_OCHRE_EPW_CONFIG, "pv_capacity_kw": 4}, "solar", tmp_path
+    )
+
+    assert "pv_capacity_kw" not in plain
+    assert solar["pv_capacity_kw"] == 4.0
+
+
+def test_read_ochre_house_inputs_stores_the_location_beside_csv_weather(
+    tmp_path,
+) -> None:
+    _write_ochre_inputs(tmp_path, "sample_data.csv", "timestamp\n")
+
+    document = _read_ochre_house_inputs(_OCHRE_CSV_CONFIG, "ochre-house_6", tmp_path)
+
+    assert document["weather_location"] == {
+        "latitude": 48.14,
+        "longitude": 11.58,
+        "timezone": 1.0,
+    }
+
+
+def test_read_ochre_house_inputs_names_the_missing_file(tmp_path) -> None:
+    _write_ochre_inputs(tmp_path, "ochre/weather.epw", "x")
+    (tmp_path / "ochre" / "house.xml").unlink()
+
+    with pytest.raises(FileNotFoundError, match="hpxml"):
+        _read_ochre_house_inputs(_OCHRE_EPW_CONFIG, "ochre-house_6", tmp_path)
 
 
 def test_validate_tree_house_with_required_fields_is_valid() -> None:
@@ -738,6 +865,12 @@ def test_expand_child_instances_splits_house_per_load_index() -> None:
     assert result == [("house_4", [4]), ("house_6", [6])]
 
 
+def test_expand_child_instances_splits_ochre_house_per_load_index() -> None:
+    result = _expand_child_instances("ochre-house_0", "ochre-house", [4, 6])
+
+    assert result == [("ochre-house_4", [4]), ("ochre-house_6", [6])]
+
+
 def test_expand_child_instances_house_requires_load_indices() -> None:
     with pytest.raises(ValueError, match="no pandapower load index"):
         _expand_child_instances("house_0", "house", [])
@@ -758,6 +891,7 @@ def test_expand_child_instances_house_requires_load_indices_none() -> None:
     [
         ("grid", "grid"),
         ("house", "house"),
+        ("ochre-house", "ochre_house"),
         ("load", "house_player"),
         ("house_player", "house_player"),
         ("pv", "house"),

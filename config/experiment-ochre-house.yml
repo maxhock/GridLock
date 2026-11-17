@@ -1,0 +1,58 @@
+# Side-by-side test of the two house federates on one grid: the EnergySim `house`
+# (1R1C model) on load 4 and the OCHRE `ochre-house` (real Dwelling) on load 6, a load
+# player on every other load. One winter day, hourly. Compare the two in the results
+# DB: active_power per load, and the `state` JSON of house_4 and ochre-house_6.
+#
+# The ochre-house is built from three files (data/input/ochre/): `house-example.xml`
+# (`hpxml`, a compact all-electric one-storey house: resistance heating, room AC, hot
+# water tank), OCHRE's bundled usage schedule, and `sample_data.csv` as weather
+# - the same dataset the house runs on. A CSV weather file has no location, so
+# latitude, longitude and timezone (UTC offset, hours) come with it. Swap `weather`
+# for an `.epw` file to use real weather. `pv_capacity_kw: 4` puts a 4 kWp array on
+# the roof, the size of the `house`'s default one (20 m2 at 20 %); leave it out for a
+# house without PV. Same grid, same period, same logging path;
+# the buildings still differ (a two-room RC network against a full HPXML house).
+# `bldg0112631-up11.xml` is OCHRE's bundled two-storey heat-pump house, for a larger load.
+general:
+  name: "OchreHouse"
+  start_time: 0
+  end_time: 86400
+  time_step: 3600
+  use_meta_db: "mongo"
+  use_data_db: "postgres"
+federation:
+  id: "local-grid"
+  name: "Local Pandapower Grid"
+  class: "grid"
+  config:
+    layout: "kerber_landnetz_freileitung_1.xlsx"
+  sub_federates:
+    - id: "loadhouse_0"
+      name: "Load profile house"
+      class: "load"
+      config:
+        placement: "fill"
+        electrical_load: "sample_house.csv"
+    - id: "house_0"
+      name: "EnergySim house (1R1C)"
+      class: "house"
+      config:
+        placement: [4]
+        exogenous_data: "sample_data.csv"
+        model:
+          class: "1R1C"
+          resistance: "5 Ohm"
+          capacitance: "8 F"
+    - id: "ochre-house_0"
+      name: "OCHRE example house"
+      class: "ochre-house"
+      config:
+        placement: [6]
+        hpxml: "ochre/house-example.xml"
+        schedule: "ochre/bldg0112631_schedule.csv"
+        weather: "sample_data.csv"
+        pv_capacity_kw: 4
+        latitude: 48.14
+        longitude: 11.58
+        timezone: 1
+        altitude: 520

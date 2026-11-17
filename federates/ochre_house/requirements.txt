@@ -1,0 +1,12 @@
+# Pinned to the versions this federate is known to run against. Bump
+# deliberately rather than by rebuilding: an unpinned rebuild can change the
+# simulation with no commit on this side, which makes the git_commit stored
+# with each run a misleading description of what actually ran.
+
+cosim-toolbox==1.0.1
+helics[cli]==3.6.1
+
+# OCHRE (the Dwelling model). Needs Python <3.13. pyarrow is capped: OCHRE pins
+# numpy 1.x and newer pyarrow wheels need numpy 2.
+ochre-nrel==0.9.2
+pyarrow<20
